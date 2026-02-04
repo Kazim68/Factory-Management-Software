@@ -47,6 +47,14 @@ export const createChemicalPurchase = async (req, res) => {
   res.status(201).json(result);
 };
 
+export const listChemicalPurchases = async (req, res) => {
+  const purchases = await prisma.chemicalPurchase.findMany({
+    include: { party: true, expenses: true },
+    orderBy: { date: "desc" },
+  });
+  res.json(purchases);
+};
+
 export const createRexinePurchase = async (req, res) => {
   const {
     date,
@@ -98,6 +106,14 @@ export const createRexinePurchase = async (req, res) => {
   });
 
   res.status(201).json(result);
+};
+
+export const listRexinePurchases = async (req, res) => {
+  const purchases = await prisma.rexinePurchase.findMany({
+    include: { party: true, expenses: true },
+    orderBy: { date: "desc" },
+  });
+  res.json(purchases);
 };
 
 export const createMaterialPurchase = async (req, res) => {
@@ -155,4 +171,12 @@ export const createMaterialPurchase = async (req, res) => {
   });
 
   res.status(201).json(result);
+};
+
+export const listMaterialPurchases = async (req, res) => {
+  const purchases = await prisma.materialPurchase.findMany({
+    include: { party: true, article: true, unit: true, expenses: true },
+    orderBy: { date: "desc" },
+  });
+  res.json(purchases);
 };

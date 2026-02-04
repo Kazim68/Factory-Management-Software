@@ -1,45 +1,89 @@
-import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Plus, Minus, Printer } from 'lucide-react';
-import { storage, STORAGE_KEYS } from '../lib/storage';
-import { generateId, formatCurrency, formatDate, getCurrentDate } from '../lib/utils';
-import { Bill, BillItem, Party, Article } from '../types';
-import { toast } from 'sonner';
+
+import { useEffect, useState } from "react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Plus, Minus, Printer } from "lucide-react";
+import { billApi, configApi, partyApi } from "../lib/api";
+import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
+import type { ApiArticle, ApiBill, ApiParty } from "../types/api";
+import { toast } from "sonner";
+
+type PaymentType = "cash" | "credit";
+
+type BillItemForm = {
+  articleId: string;
+  articleName: string;
+  quantity: number;
+  price: number;
+  total: number;
+};
 
 export function BillManagement() {
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [parties, setParties] = useState<Party[]>([]);
-  const [articles, setArticles] = useState<Article[]>([]);
+  const [bills, setBills] = useState<ApiBill[]>([]);
+  const [parties, setParties] = useState<ApiParty[]>([]);
+  const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
-    partyId: '',
-    paymentType: 'cash' as 'cash' | 'credit',
+    partyId: "",
+    paymentType: "cash" as PaymentType,
   });
 
-  const [items, setItems] = useState<BillItem[]>([
-    { articleId: '', articleName: '', quantity: 0, price: 0, total: 0 },
+  const [items, setItems] = useState<BillItemForm[]>([
+    { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 },
   ]);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [billData, partyData, articleData] = await Promise.all([
+        billApi.listBills(),
+        partyApi.listParties(),
+        configApi.listArticles(),
+      ]);
+      setBills(billData);
+      setParties(partyData);
+      setArticles(articleData);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load bills.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setBills(storage.get<Bill>(STORAGE_KEYS.BILLS));
-    setParties(storage.get<Party>(STORAGE_KEYS.PARTIES));
-    setArticles(storage.get<Article>(STORAGE_KEYS.ARTICLES));
-  };
-
   const addItem = () => {
-    setItems([...items, { articleId: '', articleName: '', quantity: 0, price: 0, total: 0 }]);
+    setItems([...items, { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
   };
 
   const removeItem = (index: number) => {
@@ -52,81 +96,93 @@ export function BillManagement() {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
 
-    if (field === 'articleId') {
-      const article = articles.find(a => a.id === value);
+    if (field === "articleId") {
+      const article = articles.find((a) => a.id === value);
       if (article) {
         newItems[index].articleName = article.name;
-        if (article.defaultRate) {
-          newItems[index].price = article.defaultRate;
-        }
       }
     }
 
-    if (field === 'quantity' || field === 'price') {
+    if (field === "quantity" || field === "price") {
       newItems[index].total = newItems[index].quantity * newItems[index].price;
     }
 
     setItems(newItems);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const party = parties.find(p => p.id === formData.partyId);
+    const party = parties.find((p) => p.id === formData.partyId);
     if (!party) {
-      toast.error('Please select a party');
+      toast.error("Please select a party");
       return;
     }
 
-    const validItems = items.filter(item => item.articleId && item.quantity > 0 && item.price > 0);
+    const validItems = items.filter(
+      (item) => item.articleId && item.quantity > 0 && item.price > 0
+    );
     if (validItems.length === 0) {
-      toast.error('Please add at least one valid item');
+      toast.error("Please add at least one valid item");
       return;
     }
 
     const grandTotal = validItems.reduce((sum, item) => sum + item.total, 0);
-    const billNumber = `BILL-${Date.now()}`;
 
-    const bill: Bill = {
-      id: generateId(),
-      billNumber,
-      date: formData.date,
-      partyId: formData.partyId,
-      partyName: party.name,
-      items: validItems,
-      grandTotal,
-      paymentType: formData.paymentType,
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const bill = await billApi.createBill({
+        date: formData.date,
+        partyId: formData.partyId,
+        type: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+        status: "CONFIRMED",
+        lines: validItems.map((item) => ({
+          articleId: item.articleId,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.total,
+        })),
+      });
 
-    storage.add(STORAGE_KEYS.BILLS, bill);
+      if (bill.type === "CREDIT") {
+        await billApi.confirmBill(bill.id);
+      }
 
-    // Update party balance if credit
-    if (formData.paymentType === 'credit') {
-      const updatedParty = { ...party, currentBalance: party.currentBalance - grandTotal };
-      storage.update(STORAGE_KEYS.PARTIES, party.id, updatedParty);
+      toast.success("Bill created successfully");
+      await loadData();
+      resetForm();
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to create bill.");
     }
-
-    toast.success('Bill created successfully');
-    loadData();
-    resetForm();
-    setIsDialogOpen(false);
   };
 
   const resetForm = () => {
     setFormData({
       date: getCurrentDate(),
-      partyId: '',
-      paymentType: 'cash',
+      partyId: "",
+      paymentType: "cash",
     });
-    setItems([{ articleId: '', articleName: '', quantity: 0, price: 0, total: 0 }]);
+    setItems([{ articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
   };
 
-  const printBill = (bill: Bill) => {
-    // Create a simple print window
-    const printWindow = window.open('', '', 'width=800,height=600');
+  const printBill = (bill: ApiBill) => {
+    const printWindow = window.open("", "", "width=800,height=600");
     if (!printWindow) return;
+
+    const rows = bill.lines.map((line) => {
+      const articleName = line.article?.name ||
+        articles.find((article) => article.id === line.articleId)?.name ||
+        "Unknown";
+      return `
+                <tr>
+                  <td>${articleName}</td>
+                  <td>${line.quantity}</td>
+                  <td>${formatCurrency(Number(line.price))}</td>
+                  <td>${formatCurrency(Number(line.total))}</td>
+                </tr>
+              `;
+    }).join("");
 
     const html = `
       <!DOCTYPE html>
@@ -150,8 +206,8 @@ export function BillManagement() {
           </div>
           <div class="info">
             <p><strong>Date:</strong> ${formatDate(bill.date)}</p>
-            <p><strong>Party:</strong> ${bill.partyName}</p>
-            <p><strong>Payment Type:</strong> ${bill.paymentType.toUpperCase()}</p>
+            <p><strong>Party:</strong> ${bill.party?.name || "-"}</p>
+            <p><strong>Payment Type:</strong> ${bill.type}</p>
           </div>
           <table>
             <thead>
@@ -163,18 +219,11 @@ export function BillManagement() {
               </tr>
             </thead>
             <tbody>
-              ${bill.items.map(item => `
-                <tr>
-                  <td>${item.articleName}</td>
-                  <td>${item.quantity}</td>
-                  <td>${formatCurrency(item.price)}</td>
-                  <td>${formatCurrency(item.total)}</td>
-                </tr>
-              `).join('')}
+              ${rows}
             </tbody>
           </table>
           <div class="total">
-            <p>Grand Total: ${formatCurrency(bill.grandTotal)}</p>
+            <p>Grand Total: ${formatCurrency(Number(bill.total))}</p>
           </div>
         </body>
       </html>
@@ -193,10 +242,13 @@ export function BillManagement() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Bill Management</CardTitle>
-            <Dialog open={isDialogOpen} onOpenChange={(open) => {
-              setIsDialogOpen(open);
-              if (!open) resetForm();
-            }}>
+            <Dialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                setIsDialogOpen(open);
+                if (!open) resetForm();
+              }}
+            >
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
@@ -214,13 +266,20 @@ export function BillManagement() {
                       <Input
                         type="date"
                         value={formData.date}
-                        onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                        onChange={(e) =>
+                          setFormData({ ...formData, date: e.target.value })
+                        }
                         required
                       />
                     </div>
                     <div>
                       <Label>Party</Label>
-                      <Select value={formData.partyId} onValueChange={(value) => setFormData({ ...formData, partyId: value })}>
+                      <Select
+                        value={formData.partyId}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, partyId: value })
+                        }
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select party" />
                         </SelectTrigger>
@@ -235,7 +294,12 @@ export function BillManagement() {
                     </div>
                     <div>
                       <Label>Payment Type</Label>
-                      <Select value={formData.paymentType} onValueChange={(value: 'cash' | 'credit') => setFormData({ ...formData, paymentType: value })}>
+                      <Select
+                        value={formData.paymentType}
+                        onValueChange={(value: PaymentType) =>
+                          setFormData({ ...formData, paymentType: value })
+                        }
+                      >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -268,9 +332,11 @@ export function BillManagement() {
                         {items.map((item, index) => (
                           <TableRow key={index}>
                             <TableCell>
-                              <Select 
-                                value={item.articleId} 
-                                onValueChange={(value) => updateItem(index, 'articleId', value)}
+                              <Select
+                                value={item.articleId}
+                                onValueChange={(value) =>
+                                  updateItem(index, "articleId", value)
+                                }
                               >
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select article" />
@@ -288,16 +354,28 @@ export function BillManagement() {
                               <Input
                                 type="number"
                                 min="1"
-                                value={item.quantity || ''}
-                                onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                                value={item.quantity || ""}
+                                onChange={(e) =>
+                                  updateItem(
+                                    index,
+                                    "quantity",
+                                    parseFloat(e.target.value) || 0
+                                  )
+                                }
                               />
                             </TableCell>
                             <TableCell>
                               <Input
                                 type="number"
                                 step="0.01"
-                                value={item.price || ''}
-                                onChange={(e) => updateItem(index, 'price', parseFloat(e.target.value) || 0)}
+                                value={item.price || ""}
+                                onChange={(e) =>
+                                  updateItem(
+                                    index,
+                                    "price",
+                                    parseFloat(e.target.value) || 0
+                                  )
+                                }
                               />
                             </TableCell>
                             <TableCell>{formatCurrency(item.total)}</TableCell>
@@ -325,7 +403,11 @@ export function BillManagement() {
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsDialogOpen(false)}
+                    >
                       Cancel
                     </Button>
                     <Button type="submit">Create Bill</Button>
@@ -349,7 +431,13 @@ export function BillManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {bills.length === 0 ? (
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    Loading bills...
+                  </TableCell>
+                </TableRow>
+              ) : bills.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center text-muted-foreground">
                     No bills yet
@@ -360,20 +448,22 @@ export function BillManagement() {
                   <TableRow key={bill.id}>
                     <TableCell>{bill.billNumber}</TableCell>
                     <TableCell>{formatDate(bill.date)}</TableCell>
-                    <TableCell>{bill.partyName}</TableCell>
-                    <TableCell>{bill.items.length} item(s)</TableCell>
-                    <TableCell>{formatCurrency(bill.grandTotal)}</TableCell>
+                    <TableCell>{bill.party?.name || "-"}</TableCell>
+                    <TableCell>{bill.lines.length} item(s)</TableCell>
+                    <TableCell>{formatCurrency(Number(bill.total))}</TableCell>
                     <TableCell>
-                      <span className={bill.paymentType === 'cash' ? 'text-green-600' : 'text-orange-600'}>
-                        {bill.paymentType.toUpperCase()}
+                      <span
+                        className={
+                          bill.type === "CASH"
+                            ? "text-green-600"
+                            : "text-orange-600"
+                        }
+                      >
+                        {bill.type}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => printBill(bill)}
-                      >
+                      <Button size="sm" variant="outline" onClick={() => printBill(bill)}>
                         <Printer className="h-4 w-4" />
                       </Button>
                     </TableCell>

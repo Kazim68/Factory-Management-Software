@@ -1,107 +1,156 @@
-import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Plus, Trash2 } from 'lucide-react';
-import { storage, STORAGE_KEYS } from '../lib/storage';
-import { generateId, formatCurrency, formatDate, getCurrentDate } from '../lib/utils';
-import { RoznamchaEntry, ExpenseCategory, Party, Labor } from '../types';
-import { toast } from 'sonner';
+import { useEffect, useState } from "react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Plus } from "lucide-react";
+import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
+import { configApi, expenseApi, laborApi, partyApi } from "../lib/api";
+import type {
+  ApiExpenseCategory,
+  ApiExpenseEntry,
+  ApiExpenseModule,
+  ApiLaborProfile,
+  ApiParty,
+} from "../types/api";
+import { toast } from "sonner";
 
 export function Roznamcha() {
-  const [entries, setEntries] = useState<RoznamchaEntry[]>([]);
-  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
-  const [parties, setParties] = useState<Party[]>([]);
-  const [labors, setLabors] = useState<Labor[]>([]);
+  const [entries, setEntries] = useState<ApiExpenseEntry[]>([]);
+  const [categories, setCategories] = useState<ApiExpenseCategory[]>([]);
+  const [parties, setParties] = useState<ApiParty[]>([]);
+  const [labors, setLabors] = useState<ApiLaborProfile[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
-    expenseType: '',
-    partyId: '',
-    laborId: '',
-    amount: '',
-    description: '',
+    module: "MISC" as ApiExpenseModule,
+    categoryId: "",
+    partyId: "",
+    laborId: "",
+    amount: "",
+    description: "",
   });
 
   const [filterDate, setFilterDate] = useState('');
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [expenseEntries, categoryData, partyData, laborData] =
+        await Promise.all([
+          expenseApi.listExpenses(),
+          configApi.listExpenseCategories(),
+          partyApi.listParties(),
+          laborApi.listProfiles(),
+        ]);
+      setEntries(expenseEntries);
+      setCategories(categoryData);
+      setParties(partyData);
+      setLabors(laborData);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load expenses.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setEntries(storage.get<RoznamchaEntry>(STORAGE_KEYS.ROZNAMCHA));
-    setCategories(storage.get<ExpenseCategory>(STORAGE_KEYS.EXPENSE_CATEGORIES));
-    setParties(storage.get<Party>(STORAGE_KEYS.PARTIES));
-    setLabors(storage.get<Labor>(STORAGE_KEYS.LABORS));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let partyName = '';
-    let laborName = '';
-
-    if (formData.partyId) {
-      const party = parties.find(p => p.id === formData.partyId);
-      partyName = party?.name || '';
+    if (!formData.categoryId) {
+      toast.error("Select an expense category.");
+      return;
     }
 
-    if (formData.laborId) {
-      const labor = labors.find(l => l.id === formData.laborId);
-      laborName = labor?.name || '';
+    const amount = parseFloat(formData.amount);
+    if (!Number.isFinite(amount)) {
+      toast.error("Enter a valid amount.");
+      return;
     }
 
-    const entry: RoznamchaEntry = {
-      id: generateId(),
-      date: formData.date,
-      expenseType: formData.expenseType,
-      partyId: formData.partyId || undefined,
-      partyName: partyName || undefined,
-      laborId: formData.laborId || undefined,
-      laborName: laborName || undefined,
-      amount: parseFloat(formData.amount),
-      description: formData.description,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      if (formData.module === "LABOR") {
+        if (!formData.laborId) {
+          toast.error("Select a labor profile.");
+          return;
+        }
+        await laborApi.createAdvance({
+          laborId: formData.laborId,
+          date: formData.date,
+          amount,
+          reason: formData.description,
+          categoryId: formData.categoryId,
+        });
+      } else {
+        await expenseApi.createExpense({
+          date: formData.date,
+          categoryId: formData.categoryId,
+          partyId: formData.partyId || undefined,
+          module: formData.module,
+          amount,
+          description: formData.description,
+        });
+      }
 
-    storage.add(STORAGE_KEYS.ROZNAMCHA, entry);
-    toast.success('Expense recorded');
-
-    loadData();
-    resetForm();
-    setIsDialogOpen(false);
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this entry?')) {
-      storage.delete(STORAGE_KEYS.ROZNAMCHA, id);
-      toast.success('Entry deleted');
-      loadData();
+      toast.success("Expense recorded");
+      await loadData();
+      resetForm();
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to record expense.");
     }
   };
 
   const resetForm = () => {
     setFormData({
       date: getCurrentDate(),
-      expenseType: '',
-      partyId: '',
-      laborId: '',
-      amount: '',
-      description: '',
+      module: "MISC",
+      categoryId: "",
+      partyId: "",
+      laborId: "",
+      amount: "",
+      description: "",
     });
   };
 
-  const filteredEntries = filterDate 
-    ? entries.filter(e => e.date === filterDate)
+  const filteredEntries = filterDate
+    ? entries.filter((entry) => entry.date.slice(0, 10) === filterDate)
     : entries;
 
-  const totalExpenses = filteredEntries.reduce((sum, entry) => sum + entry.amount, 0);
+  const totalExpenses = filteredEntries.reduce(
+    (sum, entry) => sum + Number(entry.amount ?? 0),
+    0
+  );
 
   return (
     <div className="space-y-6">
@@ -135,26 +184,62 @@ export function Roznamcha() {
                       />
                     </div>
                     <div>
-                      <Label>Expense Type</Label>
-                      <Select value={formData.expenseType} onValueChange={(value) => setFormData({ ...formData, expenseType: value })}>
+                      <Label>Module</Label>
+                      <Select
+                        value={formData.module}
+                        onValueChange={(value) =>
+                          setFormData({
+                            ...formData,
+                            module: value as ApiExpenseModule,
+                          })
+                        }
+                      >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select type" />
+                          <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {categories.map((cat) => (
-                            <SelectItem key={cat.id} value={cat.name}>
-                              {cat.name}
-                            </SelectItem>
-                          ))}
+                          <SelectItem value="MISC">Misc</SelectItem>
+                          <SelectItem value="CHEMICAL">Chemical</SelectItem>
+                          <SelectItem value="REXINE">Rexine</SelectItem>
+                          <SelectItem value="MATERIAL">Material</SelectItem>
+                          <SelectItem value="LABOR">Labor</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
 
-                  {formData.expenseType === 'Chemical' || formData.expenseType === 'Material' || formData.expenseType === 'Rexine' ? (
+                  <div>
+                    <Label>Expense Category</Label>
+                    <Select
+                      value={formData.categoryId}
+                      onValueChange={(value) =>
+                        setFormData({ ...formData, categoryId: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {formData.module === "CHEMICAL" ||
+                  formData.module === "MATERIAL" ||
+                  formData.module === "REXINE" ? (
                     <div>
                       <Label>Party (Optional)</Label>
-                      <Select value={formData.partyId} onValueChange={(value) => setFormData({ ...formData, partyId: value })}>
+                      <Select
+                        value={formData.partyId}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, partyId: value })
+                        }
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select party" />
                         </SelectTrigger>
@@ -169,10 +254,15 @@ export function Roznamcha() {
                     </div>
                   ) : null}
 
-                  {formData.expenseType === 'Labor' && (
+                  {formData.module === "LABOR" && (
                     <div>
                       <Label>Labor (Optional)</Label>
-                      <Select value={formData.laborId} onValueChange={(value) => setFormData({ ...formData, laborId: value })}>
+                      <Select
+                        value={formData.laborId}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, laborId: value })
+                        }
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select labor" />
                         </SelectTrigger>
@@ -253,7 +343,13 @@ export function Roznamcha() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredEntries.length === 0 ? (
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    Loading expenses...
+                  </TableCell>
+                </TableRow>
+              ) : filteredEntries.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground">
                     No expenses recorded yet
@@ -263,18 +359,12 @@ export function Roznamcha() {
                 filteredEntries.map((entry) => (
                   <TableRow key={entry.id}>
                     <TableCell>{formatDate(entry.date)}</TableCell>
-                    <TableCell>{entry.expenseType}</TableCell>
-                    <TableCell>{entry.partyName || entry.laborName || '-'}</TableCell>
-                    <TableCell>{formatCurrency(entry.amount)}</TableCell>
-                    <TableCell>{entry.description}</TableCell>
+                    <TableCell>{entry.category?.name || "-"}</TableCell>
+                    <TableCell>{entry.party?.name || "-"}</TableCell>
+                    <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
+                    <TableCell>{entry.description || "-"}</TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleDelete(entry.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <span className="text-xs text-muted-foreground">No actions</span>
                     </TableCell>
                   </TableRow>
                 ))

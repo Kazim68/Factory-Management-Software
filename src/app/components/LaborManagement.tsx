@@ -1,181 +1,298 @@
-import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Plus, Pencil, Trash2, Eye, Wallet } from 'lucide-react';
-import { storage, STORAGE_KEYS } from '../lib/storage';
-import { generateId, formatCurrency, formatDate, getCurrentDate } from '../lib/utils';
-import { Labor, LaborCategory, LaborWork, LaborKharcha, Article } from '../types';
-import { toast } from 'sonner';
+
+import { useEffect, useState } from "react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Plus, Eye, Wallet } from "lucide-react";
+import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
+import { configApi, laborApi } from "../lib/api";
+import type {
+  ApiArticle,
+  ApiExpenseCategory,
+  ApiLaborCategory,
+  ApiLaborLedger,
+  ApiLaborProfile,
+  ApiLaborWorkEntry,
+  ApiLaborAdvance,
+  ApiPaymentType,
+} from "../types/api";
+import { toast } from "sonner";
+
+type UiWorkEntry = ApiLaborWorkEntry & {
+  laborName: string;
+  articleName: string;
+};
+
+type UiAdvance = ApiLaborAdvance & {
+  laborName: string;
+};
 
 export function LaborManagement() {
-  const [labors, setLabors] = useState<Labor[]>([]);
-  const [categories, setCategories] = useState<LaborCategory[]>([]);
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [workEntries, setWorkEntries] = useState<LaborWork[]>([]);
-  const [kharchaEntries, setKharchaEntries] = useState<LaborKharcha[]>([]);
+  const [profiles, setProfiles] = useState<ApiLaborProfile[]>([]);
+  const [categories, setCategories] = useState<ApiLaborCategory[]>([]);
+  const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
+  const [articles, setArticles] = useState<ApiArticle[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ApiExpenseCategory[]>([]);
+  const [workEntries, setWorkEntries] = useState<UiWorkEntry[]>([]);
+  const [advanceEntries, setAdvanceEntries] = useState<UiAdvance[]>([]);
+  const [ledgerMap, setLedgerMap] = useState<Record<string, ApiLaborLedger>>({});
+  const [isLoading, setIsLoading] = useState(false);
 
   const [laborDialog, setLaborDialog] = useState(false);
   const [workDialog, setWorkDialog] = useState(false);
   const [kharchaDialog, setKharchaDialog] = useState(false);
   const [ledgerDialog, setLedgerDialog] = useState(false);
 
-  const [editingLaborId, setEditingLaborId] = useState<string | null>(null);
-  const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
   const [viewingLaborId, setViewingLaborId] = useState<string | null>(null);
 
   const [laborForm, setLaborForm] = useState({
-    name: '',
-    categoryId: '',
-    monthlyRate: '',
+    name: "",
+    categoryId: "",
+    paymentTypeId: "",
+    defaultRate: "",
   });
 
   const [workForm, setWorkForm] = useState({
-    laborId: '',
+    laborId: "",
     date: getCurrentDate(),
-    articleId: '',
-    quantity: '',
-    rate: '',
+    articleId: "",
+    quantity: "",
+    rate: "",
   });
 
   const [kharchaForm, setKharchaForm] = useState({
-    laborId: '',
+    laborId: "",
     date: getCurrentDate(),
-    amount: '',
-    reason: '',
+    categoryId: "",
+    amount: "",
+    reason: "",
   });
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [
+        profileData,
+        categoryData,
+        paymentData,
+        articleData,
+        expenseCategoryData,
+      ] = await Promise.all([
+        laborApi.listProfiles(),
+        configApi.listLaborCategories(),
+        configApi.listPaymentTypes(),
+        configApi.listArticles(),
+        configApi.listExpenseCategories(),
+      ]);
+
+      setProfiles(profileData);
+      setCategories(categoryData);
+      setPaymentTypes(paymentData);
+      setArticles(articleData);
+      setExpenseCategories(expenseCategoryData);
+
+      const ledgerEntries = await Promise.all(
+        profileData.map((profile) =>
+          laborApi.getLedger(profile.id).catch(() => ({
+            workEntries: [],
+            advances: [],
+            totalEarnings: 0,
+            totalAdvances: 0,
+            netPayable: 0,
+          }))
+        )
+      );
+
+      const nextLedgerMap: Record<string, ApiLaborLedger> = {};
+      profileData.forEach((profile, index) => {
+        nextLedgerMap[profile.id] = ledgerEntries[index];
+      });
+      setLedgerMap(nextLedgerMap);
+
+      const articleNameById = Object.fromEntries(
+        articleData.map((article) => [article.id, article.name])
+      );
+      const laborNameById = Object.fromEntries(
+        profileData.map((profile) => [profile.id, profile.name])
+      );
+
+      const flattenedWork = ledgerEntries.flatMap((ledger) =>
+        ledger.workEntries.map((entry) => ({
+          ...entry,
+          laborName: laborNameById[entry.laborId] ?? "Unknown",
+          articleName: articleNameById[entry.articleId] ?? "Unknown",
+        }))
+      );
+      const flattenedAdvances = ledgerEntries.flatMap((ledger) =>
+        ledger.advances.map((advance) => ({
+          ...advance,
+          laborName: laborNameById[advance.laborId] ?? "Unknown",
+        }))
+      );
+
+      setWorkEntries(flattenedWork);
+      setAdvanceEntries(flattenedAdvances);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load labor data.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setLabors(storage.get<Labor>(STORAGE_KEYS.LABORS));
-    setCategories(storage.get<LaborCategory>(STORAGE_KEYS.LABOR_CATEGORIES));
-    setArticles(storage.get<Article>(STORAGE_KEYS.ARTICLES));
-    setWorkEntries(storage.get<LaborWork>(STORAGE_KEYS.LABOR_WORK));
-    setKharchaEntries(storage.get<LaborKharcha>(STORAGE_KEYS.LABOR_KHARCHA));
-  };
-
-  // Labor Management
-  const handleLaborSubmit = (e: React.FormEvent) => {
+  const handleLaborSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const category = categories.find(c => c.id === laborForm.categoryId);
-    if (!category) {
-      toast.error('Please select a category');
+    if (!laborForm.categoryId) {
+      toast.error("Please select a category");
+      return;
+    }
+    if (!laborForm.paymentTypeId) {
+      toast.error("Please select a payment type");
       return;
     }
 
-    const labor: Labor = {
-      id: editingLaborId || generateId(),
-      name: laborForm.name,
-      categoryId: laborForm.categoryId,
-      category: category.name,
-      paymentType: category.paymentType,
-      monthlyRate: laborForm.monthlyRate ? parseFloat(laborForm.monthlyRate) : undefined,
-      articleRates: editingLaborId ? labors.find(l => l.id === editingLaborId)?.articleRates || {} : {},
-      createdAt: editingLaborId ? labors.find(l => l.id === editingLaborId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
-    };
-
-    if (editingLaborId) {
-      storage.update(STORAGE_KEYS.LABORS, editingLaborId, labor);
-      toast.success('Labor updated');
-    } else {
-      storage.add(STORAGE_KEYS.LABORS, labor);
-      toast.success('Labor added');
+    try {
+      await laborApi.createProfile({
+        name: laborForm.name.trim(),
+        categoryId: laborForm.categoryId,
+        paymentTypeId: laborForm.paymentTypeId,
+        defaultRate: laborForm.defaultRate
+          ? parseFloat(laborForm.defaultRate)
+          : undefined,
+      });
+      toast.success("Labor added");
+      await loadData();
+      setLaborForm({
+        name: "",
+        categoryId: "",
+        paymentTypeId: "",
+        defaultRate: "",
+      });
+      setLaborDialog(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to add labor.");
     }
-
-    loadData();
-    setLaborForm({ name: '', categoryId: '', monthlyRate: '' });
-    setEditingLaborId(null);
-    setLaborDialog(false);
   };
 
-  // Work Entry
-  const handleWorkSubmit = (e: React.FormEvent) => {
+  const handleWorkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const labor = labors.find(l => l.id === workForm.laborId);
-    const article = articles.find(a => a.id === workForm.articleId);
-    
-    if (!labor || !article) {
-      toast.error('Please select labor and article');
+    if (!workForm.laborId || !workForm.articleId) {
+      toast.error("Please select labor and article");
       return;
     }
 
     const quantity = parseFloat(workForm.quantity);
     const rate = parseFloat(workForm.rate);
-    const total = quantity * rate;
-
-    const work: LaborWork = {
-      id: editingWorkId || generateId(),
-      laborId: workForm.laborId,
-      laborName: labor.name,
-      date: workForm.date,
-      articleId: workForm.articleId,
-      articleName: article.name,
-      quantity,
-      rate,
-      total,
-      createdAt: editingWorkId ? workEntries.find(w => w.id === editingWorkId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
-    };
-
-    if (editingWorkId) {
-      storage.update(STORAGE_KEYS.LABOR_WORK, editingWorkId, work);
-      toast.success('Work entry updated');
-    } else {
-      storage.add(STORAGE_KEYS.LABOR_WORK, work);
-      toast.success('Work entry added');
-    }
-
-    loadData();
-    setWorkForm({ laborId: '', date: getCurrentDate(), articleId: '', quantity: '', rate: '' });
-    setEditingWorkId(null);
-    setWorkDialog(false);
-  };
-
-  // Kharcha Entry
-  const handleKharchaSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const labor = labors.find(l => l.id === kharchaForm.laborId);
-    
-    if (!labor) {
-      toast.error('Please select labor');
+    if (!Number.isFinite(quantity) || !Number.isFinite(rate)) {
+      toast.error("Enter valid quantity and rate");
       return;
     }
 
-    const kharcha: LaborKharcha = {
-      id: generateId(),
-      laborId: kharchaForm.laborId,
-      laborName: labor.name,
-      date: kharchaForm.date,
-      amount: parseFloat(kharchaForm.amount),
-      reason: kharchaForm.reason,
-      createdAt: new Date().toISOString(),
+    const total = quantity * rate;
+
+    try {
+      await laborApi.createWorkEntry({
+        laborId: workForm.laborId,
+        articleId: workForm.articleId,
+        startDate: workForm.date,
+        endDate: workForm.date,
+        quantity,
+        rate,
+        total,
+      });
+      toast.success("Work entry added");
+      await loadData();
+      setWorkForm({
+        laborId: "",
+        date: getCurrentDate(),
+        articleId: "",
+        quantity: "",
+        rate: "",
+      });
+      setWorkDialog(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to add work entry.");
+    }
+  };
+
+  const handleKharchaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!kharchaForm.laborId) {
+      toast.error("Please select labor");
+      return;
+    }
+    if (!kharchaForm.categoryId) {
+      toast.error("Please select an expense category");
+      return;
+    }
+    const amount = parseFloat(kharchaForm.amount);
+    if (!Number.isFinite(amount)) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+
+    try {
+      await laborApi.createAdvance({
+        laborId: kharchaForm.laborId,
+        date: kharchaForm.date,
+        amount,
+        reason: kharchaForm.reason,
+        categoryId: kharchaForm.categoryId,
+      });
+      toast.success("Kharcha recorded");
+      await loadData();
+      setKharchaForm({
+        laborId: "",
+        date: getCurrentDate(),
+        categoryId: "",
+        amount: "",
+        reason: "",
+      });
+      setKharchaDialog(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to record kharcha.");
+    }
+  };
+
+  const getLaborSummary = (laborId: string) =>
+    ledgerMap[laborId] ?? {
+      workEntries: [],
+      advances: [],
+      totalEarnings: 0,
+      totalAdvances: 0,
+      netPayable: 0,
     };
-
-    storage.add(STORAGE_KEYS.LABOR_KHARCHA, kharcha);
-    toast.success('Kharcha recorded');
-
-    loadData();
-    setKharchaForm({ laborId: '', date: getCurrentDate(), amount: '', reason: '' });
-    setKharchaDialog(false);
-  };
-
-  const getLaborSummary = (laborId: string) => {
-    const works = workEntries.filter(w => w.laborId === laborId);
-    const kharchas = kharchaEntries.filter(k => k.laborId === laborId);
-    
-    const totalEarned = works.reduce((sum, w) => sum + w.total, 0);
-    const totalKharcha = kharchas.reduce((sum, k) => sum + k.amount, 0);
-    const netPayable = totalEarned - totalKharcha;
-
-    return { totalEarned, totalKharcha, netPayable, works, kharchas };
-  };
 
   return (
     <div className="space-y-6">
@@ -191,7 +308,6 @@ export function LaborManagement() {
               <TabsTrigger value="kharcha">Kharcha (Advances)</TabsTrigger>
             </TabsList>
 
-            {/* Labor Profiles */}
             <TabsContent value="labors" className="space-y-4">
               <div className="flex justify-end">
                 <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
@@ -203,20 +319,27 @@ export function LaborManagement() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>{editingLaborId ? 'Edit' : 'Add'} Labor</DialogTitle>
+                      <DialogTitle>Add Labor</DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleLaborSubmit} className="space-y-4">
                       <div>
                         <Label>Labor Name</Label>
                         <Input
                           value={laborForm.name}
-                          onChange={(e) => setLaborForm({ ...laborForm, name: e.target.value })}
+                          onChange={(e) =>
+                            setLaborForm({ ...laborForm, name: e.target.value })
+                          }
                           required
                         />
                       </div>
                       <div>
                         <Label>Category</Label>
-                        <Select value={laborForm.categoryId} onValueChange={(value) => setLaborForm({ ...laborForm, categoryId: value })}>
+                        <Select
+                          value={laborForm.categoryId}
+                          onValueChange={(value) =>
+                            setLaborForm({ ...laborForm, categoryId: value })
+                          }
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Select category" />
                           </SelectTrigger>
@@ -229,19 +352,46 @@ export function LaborManagement() {
                           </SelectContent>
                         </Select>
                       </div>
-                      {laborForm.categoryId && categories.find(c => c.id === laborForm.categoryId)?.paymentType === 'monthly_salary' && (
-                        <div>
-                          <Label>Monthly Salary</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={laborForm.monthlyRate}
-                            onChange={(e) => setLaborForm({ ...laborForm, monthlyRate: e.target.value })}
-                          />
-                        </div>
-                      )}
+                      <div>
+                        <Label>Payment Type</Label>
+                        <Select
+                          value={laborForm.paymentTypeId}
+                          onValueChange={(value) =>
+                            setLaborForm({ ...laborForm, paymentTypeId: value })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select payment type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {paymentTypes.map((type) => (
+                              <SelectItem key={type.id} value={type.id}>
+                                {type.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Default Rate (optional)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={laborForm.defaultRate}
+                          onChange={(e) =>
+                            setLaborForm({
+                              ...laborForm,
+                              defaultRate: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" onClick={() => setLaborDialog(false)}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setLaborDialog(false)}
+                        >
                           Cancel
                         </Button>
                         <Button type="submit">Save</Button>
@@ -263,24 +413,44 @@ export function LaborManagement() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {labors.length === 0 ? (
+                  {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      <TableCell
+                        colSpan={7}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading labor profiles...
+                      </TableCell>
+                    </TableRow>
+                  ) : profiles.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={7}
+                        className="text-center text-muted-foreground"
+                      >
                         No labors yet
                       </TableCell>
                     </TableRow>
                   ) : (
-                    labors.map((labor) => {
+                    profiles.map((labor) => {
                       const summary = getLaborSummary(labor.id);
                       return (
                         <TableRow key={labor.id}>
                           <TableCell>{labor.name}</TableCell>
-                          <TableCell>{labor.category}</TableCell>
-                          <TableCell className="capitalize">{labor.paymentType.replace('_', ' ')}</TableCell>
-                          <TableCell>{formatCurrency(summary.totalEarned)}</TableCell>
-                          <TableCell>{formatCurrency(summary.totalKharcha)}</TableCell>
+                          <TableCell>{labor.category?.name || "-"}</TableCell>
+                          <TableCell>{labor.paymentType?.name || "-"}</TableCell>
                           <TableCell>
-                            <span className={summary.netPayable > 0 ? 'text-green-600' : ''}>
+                            {formatCurrency(summary.totalEarnings)}
+                          </TableCell>
+                          <TableCell>
+                            {formatCurrency(summary.totalAdvances)}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={
+                                summary.netPayable > 0 ? "text-green-600" : ""
+                              }
+                            >
                               {formatCurrency(summary.netPayable)}
                             </span>
                           </TableCell>
@@ -296,20 +466,8 @@ export function LaborManagement() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setEditingLaborId(labor.id);
-                                  setLaborForm({
-                                    name: labor.name,
-                                    categoryId: labor.categoryId,
-                                    monthlyRate: labor.monthlyRate?.toString() || '',
-                                  });
-                                  setLaborDialog(true);
-                                }}
-                              >
-                                <Pencil className="h-4 w-4" />
+                              <Button size="sm" variant="ghost" disabled>
+                                Edit
                               </Button>
                             </div>
                           </TableCell>
@@ -321,7 +479,6 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
-            {/* Work Entries */}
             <TabsContent value="work" className="space-y-4">
               <div className="flex justify-end">
                 <Dialog open={workDialog} onOpenChange={setWorkDialog}>
@@ -342,18 +499,31 @@ export function LaborManagement() {
                           <Input
                             type="date"
                             value={workForm.date}
-                            onChange={(e) => setWorkForm({ ...workForm, date: e.target.value })}
+                            onChange={(e) =>
+                              setWorkForm({
+                                ...workForm,
+                                date: e.target.value,
+                              })
+                            }
                             required
                           />
                         </div>
                         <div>
                           <Label>Labor</Label>
-                          <Select value={workForm.laborId} onValueChange={(value) => setWorkForm({ ...workForm, laborId: value })}>
+                          <Select
+                            value={workForm.laborId}
+                            onValueChange={(value) =>
+                              setWorkForm({
+                                ...workForm,
+                                laborId: value,
+                              })
+                            }
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Select labor" />
                             </SelectTrigger>
                             <SelectContent>
-                              {labors.map((labor) => (
+                              {profiles.map((labor) => (
                                 <SelectItem key={labor.id} value={labor.id}>
                                   {labor.name}
                                 </SelectItem>
@@ -363,7 +533,15 @@ export function LaborManagement() {
                         </div>
                         <div>
                           <Label>Article</Label>
-                          <Select value={workForm.articleId} onValueChange={(value) => setWorkForm({ ...workForm, articleId: value })}>
+                          <Select
+                            value={workForm.articleId}
+                            onValueChange={(value) =>
+                              setWorkForm({
+                                ...workForm,
+                                articleId: value,
+                              })
+                            }
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Select article" />
                             </SelectTrigger>
@@ -382,7 +560,12 @@ export function LaborManagement() {
                             type="number"
                             step="1"
                             value={workForm.quantity}
-                            onChange={(e) => setWorkForm({ ...workForm, quantity: e.target.value })}
+                            onChange={(e) =>
+                              setWorkForm({
+                                ...workForm,
+                                quantity: e.target.value,
+                              })
+                            }
                             required
                           />
                         </div>
@@ -392,18 +575,33 @@ export function LaborManagement() {
                             type="number"
                             step="0.01"
                             value={workForm.rate}
-                            onChange={(e) => setWorkForm({ ...workForm, rate: e.target.value })}
+                            onChange={(e) =>
+                              setWorkForm({
+                                ...workForm,
+                                rate: e.target.value,
+                              })
+                            }
                             required
                           />
                         </div>
                       </div>
                       {workForm.quantity && workForm.rate && (
                         <div className="p-3 bg-muted rounded">
-                          <p>Total: {formatCurrency(parseFloat(workForm.quantity) * parseFloat(workForm.rate))}</p>
+                          <p>
+                            Total: {" "}
+                            {formatCurrency(
+                              parseFloat(workForm.quantity) *
+                                parseFloat(workForm.rate)
+                            )}
+                          </p>
                         </div>
                       )}
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" onClick={() => setWorkDialog(false)}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setWorkDialog(false)}
+                        >
                           Cancel
                         </Button>
                         <Button type="submit">Add Work</Button>
@@ -424,21 +622,33 @@ export function LaborManagement() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {workEntries.length === 0 ? (
+                  {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      <TableCell
+                        colSpan={6}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading work entries...
+                      </TableCell>
+                    </TableRow>
+                  ) : workEntries.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="text-center text-muted-foreground"
+                      >
                         No work entries yet
                       </TableCell>
                     </TableRow>
                   ) : (
                     workEntries.map((work) => (
                       <TableRow key={work.id}>
-                        <TableCell>{formatDate(work.date)}</TableCell>
+                        <TableCell>{formatDate(work.startDate)}</TableCell>
                         <TableCell>{work.laborName}</TableCell>
                         <TableCell>{work.articleName}</TableCell>
-                        <TableCell>{work.quantity}</TableCell>
-                        <TableCell>{formatCurrency(work.rate)}</TableCell>
-                        <TableCell>{formatCurrency(work.total)}</TableCell>
+                        <TableCell>{Number(work.quantity)}</TableCell>
+                        <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
+                        <TableCell>{formatCurrency(Number(work.total))}</TableCell>
                       </TableRow>
                     ))
                   )}
@@ -446,7 +656,6 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
-            {/* Kharcha */}
             <TabsContent value="kharcha" className="space-y-4">
               <div className="flex justify-end">
                 <Dialog open={kharchaDialog} onOpenChange={setKharchaDialog}>
@@ -466,20 +675,50 @@ export function LaborManagement() {
                         <Input
                           type="date"
                           value={kharchaForm.date}
-                          onChange={(e) => setKharchaForm({ ...kharchaForm, date: e.target.value })}
+                          onChange={(e) =>
+                            setKharchaForm({
+                              ...kharchaForm,
+                              date: e.target.value,
+                            })
+                          }
                           required
                         />
                       </div>
                       <div>
                         <Label>Labor</Label>
-                        <Select value={kharchaForm.laborId} onValueChange={(value) => setKharchaForm({ ...kharchaForm, laborId: value })}>
+                        <Select
+                          value={kharchaForm.laborId}
+                          onValueChange={(value) =>
+                            setKharchaForm({ ...kharchaForm, laborId: value })
+                          }
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Select labor" />
                           </SelectTrigger>
                           <SelectContent>
-                            {labors.map((labor) => (
+                            {profiles.map((labor) => (
                               <SelectItem key={labor.id} value={labor.id}>
                                 {labor.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Expense Category</Label>
+                        <Select
+                          value={kharchaForm.categoryId}
+                          onValueChange={(value) =>
+                            setKharchaForm({ ...kharchaForm, categoryId: value })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {expenseCategories.map((category) => (
+                              <SelectItem key={category.id} value={category.id}>
+                                {category.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -491,7 +730,12 @@ export function LaborManagement() {
                           type="number"
                           step="0.01"
                           value={kharchaForm.amount}
-                          onChange={(e) => setKharchaForm({ ...kharchaForm, amount: e.target.value })}
+                          onChange={(e) =>
+                            setKharchaForm({
+                              ...kharchaForm,
+                              amount: e.target.value,
+                            })
+                          }
                           required
                         />
                       </div>
@@ -499,13 +743,22 @@ export function LaborManagement() {
                         <Label>Reason</Label>
                         <Input
                           value={kharchaForm.reason}
-                          onChange={(e) => setKharchaForm({ ...kharchaForm, reason: e.target.value })}
+                          onChange={(e) =>
+                            setKharchaForm({
+                              ...kharchaForm,
+                              reason: e.target.value,
+                            })
+                          }
                           placeholder="Reason for advance..."
                           required
                         />
                       </div>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" onClick={() => setKharchaDialog(false)}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setKharchaDialog(false)}
+                        >
                           Cancel
                         </Button>
                         <Button type="submit">Record Kharcha</Button>
@@ -524,19 +777,33 @@ export function LaborManagement() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {kharchaEntries.length === 0 ? (
+                  {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading advances...
+                      </TableCell>
+                    </TableRow>
+                  ) : advanceEntries.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground"
+                      >
                         No kharcha entries yet
                       </TableCell>
                     </TableRow>
                   ) : (
-                    kharchaEntries.map((kharcha) => (
+                    advanceEntries.map((kharcha) => (
                       <TableRow key={kharcha.id}>
                         <TableCell>{formatDate(kharcha.date)}</TableCell>
                         <TableCell>{kharcha.laborName}</TableCell>
-                        <TableCell>{formatCurrency(kharcha.amount)}</TableCell>
-                        <TableCell>{kharcha.reason}</TableCell>
+                        <TableCell>
+                          {formatCurrency(Number(kharcha.amount))}
+                        </TableCell>
+                        <TableCell>{kharcha.reason || "-"}</TableCell>
                       </TableRow>
                     ))
                   )}
@@ -547,14 +814,21 @@ export function LaborManagement() {
         </CardContent>
       </Card>
 
-      {/* Labor Ledger Dialog */}
       <Dialog open={ledgerDialog} onOpenChange={setLedgerDialog}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Labor Ledger - {labors.find(l => l.id === viewingLaborId)?.name}</DialogTitle>
+            <DialogTitle>
+              Labor Ledger - {profiles.find((l) => l.id === viewingLaborId)?.name}
+            </DialogTitle>
           </DialogHeader>
           {viewingLaborId && (() => {
             const summary = getLaborSummary(viewingLaborId);
+            const workRows = summary.workEntries.map((work) => ({
+              ...work,
+              articleName:
+                articles.find((article) => article.id === work.articleId)?.name ??
+                "Unknown",
+            }));
             return (
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
@@ -563,7 +837,9 @@ export function LaborManagement() {
                       <CardTitle className="text-sm">Total Earned</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-2xl">{formatCurrency(summary.totalEarned)}</p>
+                      <p className="text-2xl">
+                        {formatCurrency(summary.totalEarnings)}
+                      </p>
                     </CardContent>
                   </Card>
                   <Card>
@@ -571,7 +847,9 @@ export function LaborManagement() {
                       <CardTitle className="text-sm">Total Kharcha</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-2xl">{formatCurrency(summary.totalKharcha)}</p>
+                      <p className="text-2xl">
+                        {formatCurrency(summary.totalAdvances)}
+                      </p>
                     </CardContent>
                   </Card>
                   <Card>
@@ -579,7 +857,9 @@ export function LaborManagement() {
                       <CardTitle className="text-sm">Net Payable</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-2xl text-green-600">{formatCurrency(summary.netPayable)}</p>
+                      <p className="text-2xl text-green-600">
+                        {formatCurrency(summary.netPayable)}
+                      </p>
                     </CardContent>
                   </Card>
                 </div>
@@ -596,13 +876,13 @@ export function LaborManagement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {summary.works.map((work) => (
+                      {workRows.map((work) => (
                         <TableRow key={work.id}>
-                          <TableCell>{formatDate(work.date)}</TableCell>
+                          <TableCell>{formatDate(work.startDate)}</TableCell>
                           <TableCell>{work.articleName}</TableCell>
-                          <TableCell>{work.quantity}</TableCell>
-                          <TableCell>{formatCurrency(work.rate)}</TableCell>
-                          <TableCell>{formatCurrency(work.total)}</TableCell>
+                          <TableCell>{Number(work.quantity)}</TableCell>
+                          <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
+                          <TableCell>{formatCurrency(Number(work.total))}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -619,11 +899,11 @@ export function LaborManagement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {summary.kharchas.map((kharcha) => (
+                      {summary.advances.map((kharcha) => (
                         <TableRow key={kharcha.id}>
                           <TableCell>{formatDate(kharcha.date)}</TableCell>
-                          <TableCell>{formatCurrency(kharcha.amount)}</TableCell>
-                          <TableCell>{kharcha.reason}</TableCell>
+                          <TableCell>{formatCurrency(Number(kharcha.amount))}</TableCell>
+                          <TableCell>{kharcha.reason || "-"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

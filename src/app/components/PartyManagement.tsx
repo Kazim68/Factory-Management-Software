@@ -1,25 +1,53 @@
-import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Plus, Pencil, Trash2, Eye } from 'lucide-react';
-import { storage, STORAGE_KEYS } from '../lib/storage';
-import { generateId, formatCurrency, formatDate } from '../lib/utils';
-import { Party, PartyLedgerEntry, ChemicalTransaction, RexineTransaction, MaterialTransaction, Payment } from '../types';
-import { toast } from 'sonner';
+import { useEffect, useMemo, useState } from "react";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Plus, Eye } from "lucide-react";
+import { formatCurrency, formatDate } from "../lib/utils";
+import { partyApi } from "../lib/api";
+import type { ApiParty, ApiPartyLedgerEntry, ApiPartyType } from "../types/api";
+import { toast } from "sonner";
+
+type UiParty = {
+  id: string;
+  name: string;
+  type: "customer" | "supplier" | "both";
+  openingBalance: number;
+  currentBalance: number;
+  createdAt: string;
+};
 
 export function PartyManagement() {
-  const [parties, setParties] = useState<Party[]>([]);
+  const [parties, setParties] = useState<UiParty[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingPartyId, setViewingPartyId] = useState<string | null>(null);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [paymentPartyId, setPaymentPartyId] = useState<string | null>(null);
+  const [ledgerEntries, setLedgerEntries] = useState<ApiPartyLedgerEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -33,56 +61,109 @@ export function PartyManagement() {
     description: '',
   });
 
+  const mapPartyType = (type: ApiPartyType): UiParty["type"] => {
+    switch (type) {
+      case "SUPPLIER":
+        return "supplier";
+      case "BOTH":
+        return "both";
+      default:
+        return "customer";
+    }
+  };
+
+  const toApiPartyType = (type: UiParty["type"]): ApiPartyType =>
+    type.toUpperCase() as ApiPartyType;
+
+  const computeBalance = (
+    party: ApiParty,
+    entries: ApiPartyLedgerEntry[]
+  ) => {
+    let balance = Number(party.openingBalance ?? 0);
+    for (const entry of entries) {
+      balance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+    }
+    return balance;
+  };
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const apiParties = await partyApi.listParties();
+      const ledgers = await Promise.all(
+        apiParties.map((party) =>
+          partyApi.getLedger(party.id).catch(() => [])
+        )
+      );
+
+      const mapped = apiParties.map((party, index) => ({
+        id: party.id,
+        name: party.name,
+        type: mapPartyType(party.type),
+        openingBalance: Number(party.openingBalance ?? 0),
+        currentBalance: computeBalance(party, ledgers[index]),
+        createdAt: party.createdAt,
+      }));
+
+      setParties(mapped);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load parties.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setParties(storage.get<Party>(STORAGE_KEYS.PARTIES));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const openingBalance = formData.openingBalance ? parseFloat(formData.openingBalance) : 0;
-    
-    const party: Party = {
-      id: editingId || generateId(),
-      name: formData.name,
-      type: formData.type,
-      openingBalance,
-      currentBalance: editingId ? parties.find(p => p.id === editingId)?.currentBalance || openingBalance : openingBalance,
-      createdAt: editingId ? parties.find(p => p.id === editingId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
-    };
-
-    if (editingId) {
-      storage.update(STORAGE_KEYS.PARTIES, editingId, party);
-      toast.success('Party updated');
-    } else {
-      storage.add(STORAGE_KEYS.PARTIES, party);
-      toast.success('Party added');
+  useEffect(() => {
+    if (!viewingPartyId) {
+      setLedgerEntries([]);
+      return;
     }
 
-    loadData();
-    resetForm();
-    setIsDialogOpen(false);
-  };
+    let active = true;
+    partyApi
+      .getLedger(viewingPartyId)
+      .then((entries) => {
+        if (active) {
+          setLedgerEntries(entries);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) {
+          toast.error("Failed to load party ledger.");
+        }
+      });
 
-  const handleEdit = (party: Party) => {
-    setEditingId(party.id);
-    setFormData({
-      name: party.name,
-      type: party.type,
-      openingBalance: party.openingBalance.toString(),
-    });
-    setIsDialogOpen(true);
-  };
+    return () => {
+      active = false;
+    };
+  }, [viewingPartyId]);
 
-  const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this party?')) {
-      storage.delete(STORAGE_KEYS.PARTIES, id);
-      toast.success('Party deleted');
-      loadData();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const openingBalance = formData.openingBalance
+      ? parseFloat(formData.openingBalance)
+      : 0;
+
+    try {
+      await partyApi.createParty({
+        name: formData.name.trim(),
+        type: toApiPartyType(formData.type),
+        openingBalance,
+      });
+      toast.success("Party added");
+      await loadData();
+      resetForm();
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to add party.");
     }
   };
 
@@ -92,144 +173,55 @@ export function PartyManagement() {
       type: 'customer',
       openingBalance: '',
     });
-    setEditingId(null);
   };
 
-  const handlePayment = (e: React.FormEvent) => {
+  const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     const party = parties.find(p => p.id === paymentPartyId);
     if (!party) return;
 
     const amount = parseFloat(paymentData.amount);
-    
-    // Record payment
-    const payment: Payment = {
-      id: generateId(),
-      date: paymentData.date,
-      partyId: party.id,
-      partyName: party.name,
-      amount,
-      description: paymentData.description,
-      createdAt: new Date().toISOString(),
-    };
-    storage.add(STORAGE_KEYS.PAYMENTS, payment);
-
-    // Update party balance
-    const updatedParty = { ...party, currentBalance: party.currentBalance - amount };
-    storage.update(STORAGE_KEYS.PARTIES, party.id, updatedParty);
-
-    toast.success('Payment recorded');
-    setPaymentData({ date: new Date().toISOString().split('T')[0], amount: '', description: '' });
-    setIsPaymentDialogOpen(false);
-    setPaymentPartyId(null);
-    loadData();
-  };
-
-  const getLedgerEntries = (partyId: string): PartyLedgerEntry[] => {
-    const chemicals = storage.get<ChemicalTransaction>(STORAGE_KEYS.CHEMICALS)
-      .filter(c => c.partyId === partyId);
-    const rexine = storage.get<RexineTransaction>(STORAGE_KEYS.REXINE)
-      .filter(r => r.partyId === partyId);
-    const materials = storage.get<MaterialTransaction>(STORAGE_KEYS.MATERIALS)
-      .filter(m => m.partyId === partyId);
-    const payments = storage.get<Payment>(STORAGE_KEYS.PAYMENTS)
-      .filter(p => p.partyId === partyId);
-
-    const entries: PartyLedgerEntry[] = [];
-
-    // Add opening balance
-    const party = parties.find(p => p.id === partyId);
-    if (party && party.openingBalance !== 0) {
-      entries.push({
-        id: 'opening',
-        date: party.createdAt.split('T')[0],
-        partyId,
-        reference: 'Opening Balance',
-        description: 'Opening Balance',
-        debit: party.openingBalance > 0 ? party.openingBalance : 0,
-        credit: party.openingBalance < 0 ? Math.abs(party.openingBalance) : 0,
-        balance: party.openingBalance,
-        type: 'opening',
-        createdAt: party.createdAt,
-      });
+    if (!Number.isFinite(amount)) {
+      toast.error("Enter a valid amount.");
+      return;
     }
 
-    // Add chemical transactions
-    chemicals.forEach(c => {
-      entries.push({
-        id: `chem-${c.id}`,
-        date: c.date,
-        partyId,
-        reference: `Chemical-${c.id.slice(0, 8)}`,
-        description: `Chemical: ${c.weight}kg @ ${c.rate}/kg - ${c.detail}`,
-        debit: c.balance,
-        credit: 0,
-        balance: 0,
-        type: 'chemical',
-        createdAt: c.createdAt,
+    try {
+      await partyApi.createPayment(party.id, {
+        date: paymentData.date,
+        amount,
+        method: "CASH",
+        description: paymentData.description || undefined,
       });
-    });
-
-    // Add rexine transactions
-    rexine.forEach(r => {
-      entries.push({
-        id: `rex-${r.id}`,
-        date: r.date,
-        partyId,
-        reference: `Rexine-${r.id.slice(0, 8)}`,
-        description: `Rexine: ${r.meters}m @ ${r.rate}/m - ${r.detail}`,
-        debit: r.balance,
-        credit: 0,
-        balance: 0,
-        type: 'rexine',
-        createdAt: r.createdAt,
+      toast.success("Payment recorded");
+      setPaymentData({
+        date: new Date().toISOString().split("T")[0],
+        amount: "",
+        description: "",
       });
-    });
-
-    // Add material transactions
-    materials.forEach(m => {
-      entries.push({
-        id: `mat-${m.id}`,
-        date: m.date,
-        partyId,
-        reference: `Material-${m.id.slice(0, 8)}`,
-        description: `${m.articleName}: ${m.quantity} pairs @ ${m.pricePerPair} - ${m.detail}`,
-        debit: m.balance,
-        credit: 0,
-        balance: 0,
-        type: 'material',
-        createdAt: m.createdAt,
-      });
-    });
-
-    // Add payments
-    payments.forEach(p => {
-      entries.push({
-        id: `pay-${p.id}`,
-        date: p.date,
-        partyId,
-        reference: `Payment-${p.id.slice(0, 8)}`,
-        description: p.description || 'Payment received',
-        debit: 0,
-        credit: p.amount,
-        balance: 0,
-        type: 'payment',
-        createdAt: p.createdAt,
-      });
-    });
-
-    // Sort by date
-    entries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    // Calculate running balance
-    let runningBalance = 0;
-    entries.forEach(entry => {
-      runningBalance += entry.debit - entry.credit;
-      entry.balance = runningBalance;
-    });
-
-    return entries;
+      setIsPaymentDialogOpen(false);
+      setPaymentPartyId(null);
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to record payment.");
+    }
   };
+
+  const ledgerWithOpening = useMemo(() => {
+    if (!viewingPartyId) return [];
+    const party = parties.find((p) => p.id === viewingPartyId);
+    if (!party) return ledgerEntries;
+
+    const entries = [...ledgerEntries].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+    let runningBalance = Number(party.openingBalance ?? 0);
+    return entries.map((entry) => {
+      runningBalance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+      return { ...entry, runningBalance };
+    });
+  }, [ledgerEntries, parties, viewingPartyId]);
 
   return (
     <div className="space-y-6">
@@ -249,7 +241,7 @@ export function PartyManagement() {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>{editingId ? 'Edit' : 'Add'} Party</DialogTitle>
+                  <DialogTitle>Add Party</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
@@ -288,9 +280,7 @@ export function PartyManagement() {
                     <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit">
-                      {editingId ? 'Update' : 'Add'} Party
-                    </Button>
+                    <Button type="submit">Add Party</Button>
                   </div>
                 </form>
               </DialogContent>
@@ -309,7 +299,13 @@ export function PartyManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {parties.length === 0 ? (
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    Loading parties...
+                  </TableCell>
+                </TableRow>
+              ) : parties.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
                     No parties yet
@@ -347,20 +343,6 @@ export function PartyManagement() {
                             Pay
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleEdit(party)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDelete(party.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -433,20 +415,35 @@ export function PartyManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {viewingPartyId && getLedgerEntries(viewingPartyId).map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell>{formatDate(entry.date)}</TableCell>
-                  <TableCell>{entry.reference}</TableCell>
-                  <TableCell>{entry.description}</TableCell>
-                  <TableCell>{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</TableCell>
-                  <TableCell>{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</TableCell>
-                  <TableCell>
-                    <span className={entry.balance > 0 ? 'text-red-600' : entry.balance < 0 ? 'text-green-600' : ''}>
-                      {formatCurrency(entry.balance)}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {viewingPartyId &&
+                ledgerWithOpening.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell>{formatDate(entry.date)}</TableCell>
+                    <TableCell>{entry.reference || "-"}</TableCell>
+                    <TableCell>{entry.description || "-"}</TableCell>
+                    <TableCell>
+                      {Number(entry.debit) > 0 ? formatCurrency(Number(entry.debit)) : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {Number(entry.credit) > 0
+                        ? formatCurrency(Number(entry.credit))
+                        : "-"}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={
+                          Number(entry.runningBalance) > 0
+                            ? "text-red-600"
+                            : Number(entry.runningBalance) < 0
+                              ? "text-green-600"
+                              : ""
+                        }
+                      >
+                        {formatCurrency(Number(entry.runningBalance ?? 0))}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
             </TableBody>
           </Table>
         </DialogContent>
