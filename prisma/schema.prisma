@@ -1,0 +1,326 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+enum BillType {
+  CASH
+  CREDIT
+}
+
+enum BillStatus {
+  DRAFT
+  CONFIRMED
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT
+  BANK
+}
+
+enum ExpenseModule {
+  CHEMICAL
+  REXINE
+  MATERIAL
+  LABOR
+  MISC
+}
+
+model Unit {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  symbol    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  paymentTypes PaymentCalculationType[]
+  laborRates   LaborRate[]
+  laborWork    LaborWorkEntry[]
+  materials    MaterialPurchase[]
+}
+
+model Article {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  laborRates LaborRate[]
+  laborWork  LaborWorkEntry[]
+  billLines  BillLine[]
+  materials  MaterialPurchase[]
+}
+
+model ExpenseCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expenses ExpenseEntry[]
+}
+
+model LaborCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  labors LaborProfile[]
+}
+
+model PaymentCalculationType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  unitId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  unit   Unit?           @relation(fields: [unitId], references: [id])
+  labors LaborProfile[]
+}
+
+model Party {
+  id             String            @id @default(cuid())
+  name           String            @unique
+  type           PartyType
+  openingBalance Decimal           @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  bills              Bill[]
+  ledgerEntries      PartyLedgerEntry[]
+  chemicalPurchases  ChemicalPurchase[]
+  rexinePurchases    RexinePurchase[]
+  materialPurchases  MaterialPurchase[]
+  payments           PartyPayment[]
+  expenses           ExpenseEntry[]
+}
+
+model PartyLedgerEntry {
+  id             String   @id @default(cuid())
+  partyId        String
+  date           DateTime
+  reference      String?
+  description    String?
+  debit          Decimal  @default(0)
+  credit         Decimal  @default(0)
+  runningBalance Decimal?
+  createdAt      DateTime @default(now())
+
+  party Party @relation(fields: [partyId], references: [id])
+
+  @@index([partyId, date])
+}
+
+model ExpenseEntry {
+  id                 String        @id @default(cuid())
+  date               DateTime
+  categoryId         String
+  partyId            String?
+  module             ExpenseModule @default(MISC)
+  amount             Decimal
+  description        String?
+  chemicalPurchaseId String?
+  rexinePurchaseId   String?
+  materialPurchaseId String?
+  laborAdvanceId     String?
+  createdAt          DateTime      @default(now())
+
+  category          ExpenseCategory  @relation(fields: [categoryId], references: [id])
+  party             Party?           @relation(fields: [partyId], references: [id])
+  chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
+  rexinePurchase    RexinePurchase?  @relation(fields: [rexinePurchaseId], references: [id])
+  materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
+  laborAdvance      LaborAdvance?    @relation(fields: [laborAdvanceId], references: [id])
+
+  @@index([date])
+}
+
+model LaborProfile {
+  id               String                   @id @default(cuid())
+  name             String
+  categoryId       String
+  paymentTypeId    String
+  defaultRate      Decimal?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  category     LaborCategory           @relation(fields: [categoryId], references: [id])
+  paymentType  PaymentCalculationType  @relation(fields: [paymentTypeId], references: [id])
+  rates        LaborRate[]
+  workEntries  LaborWorkEntry[]
+  advances     LaborAdvance[]
+
+  @@index([categoryId])
+}
+
+model LaborRate {
+  id        String   @id @default(cuid())
+  laborId   String
+  articleId String
+  unitId    String?
+  rate      Decimal
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  labor   LaborProfile @relation(fields: [laborId], references: [id])
+  article Article      @relation(fields: [articleId], references: [id])
+  unit    Unit?        @relation(fields: [unitId], references: [id])
+
+  @@unique([laborId, articleId, unitId])
+}
+
+model LaborWorkEntry {
+  id        String   @id @default(cuid())
+  laborId   String
+  articleId String
+  unitId    String?
+  startDate DateTime
+  endDate   DateTime
+  quantity  Decimal
+  rate      Decimal
+  total     Decimal
+  createdAt DateTime @default(now())
+
+  labor   LaborProfile @relation(fields: [laborId], references: [id])
+  article Article      @relation(fields: [articleId], references: [id])
+  unit    Unit?        @relation(fields: [unitId], references: [id])
+
+  @@index([laborId, startDate, endDate])
+}
+
+model LaborAdvance {
+  id             String   @id @default(cuid())
+  laborId        String
+  date           DateTime
+  amount         Decimal
+  reason         String?
+  expenseEntryId String?
+  createdAt      DateTime @default(now())
+
+  labor   LaborProfile  @relation(fields: [laborId], references: [id])
+  expense ExpenseEntry? @relation(fields: [expenseEntryId], references: [id])
+
+  @@index([laborId, date])
+}
+
+model Bill {
+  id         String     @id @default(cuid())
+  billNumber String     @unique
+  date       DateTime
+  partyId    String?
+  type       BillType   @default(CASH)
+  status     BillStatus @default(DRAFT)
+  total      Decimal
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  party    Party?    @relation(fields: [partyId], references: [id])
+  lines    BillLine[]
+  payments PartyPayment[]
+
+  @@index([date])
+}
+
+model BillLine {
+  id        String   @id @default(cuid())
+  billId    String
+  articleId String
+  quantity  Decimal
+  price     Decimal
+  total     Decimal
+
+  bill    Bill    @relation(fields: [billId], references: [id])
+  article Article @relation(fields: [articleId], references: [id])
+}
+
+model ChemicalPurchase {
+  id           String   @id @default(cuid())
+  date         DateTime
+  partyId      String?
+  quantityKg   Decimal
+  ratePerKg    Decimal
+  totalAmount  Decimal
+  paymentType  PaymentMethod @default(CASH)
+  createdAt    DateTime      @default(now())
+
+  party     Party?         @relation(fields: [partyId], references: [id])
+  expenses  ExpenseEntry[]
+  payments  PartyPayment[]
+
+  @@index([date])
+}
+
+model RexinePurchase {
+  id            String   @id @default(cuid())
+  date          DateTime
+  partyId       String?
+  quantityMeter Decimal
+  ratePerMeter  Decimal
+  totalAmount   Decimal
+  paymentType   PaymentMethod @default(CASH)
+  createdAt     DateTime      @default(now())
+
+  party     Party?         @relation(fields: [partyId], references: [id])
+  expenses  ExpenseEntry[]
+  payments  PartyPayment[]
+
+  @@index([date])
+}
+
+model MaterialPurchase {
+  id           String   @id @default(cuid())
+  date         DateTime
+  partyId      String?
+  articleId    String?
+  unitId       String?
+  quantity     Decimal
+  pricePerUnit Decimal
+  totalAmount  Decimal
+  paymentType  PaymentMethod @default(CASH)
+  createdAt    DateTime      @default(now())
+
+  party    Party?         @relation(fields: [partyId], references: [id])
+  article  Article?       @relation(fields: [articleId], references: [id])
+  unit     Unit?          @relation(fields: [unitId], references: [id])
+  expenses ExpenseEntry[]
+  payments PartyPayment[]
+
+  @@index([date])
+}
+
+model PartyPayment {
+  id                 String   @id @default(cuid())
+  partyId            String
+  date               DateTime
+  amount             Decimal
+  method             PaymentMethod @default(CASH)
+  reference          String?
+  description        String?
+  billId             String?
+  chemicalPurchaseId String?
+  rexinePurchaseId   String?
+  materialPurchaseId String?
+  createdAt          DateTime @default(now())
+
+  party             Party             @relation(fields: [partyId], references: [id])
+  bill              Bill?             @relation(fields: [billId], references: [id])
+  chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
+  rexinePurchase    RexinePurchase?   @relation(fields: [rexinePurchaseId], references: [id])
+  materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
+
+  @@index([partyId, date])
+}
