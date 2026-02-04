@@ -55,6 +55,50 @@ export const listChemicalPurchases = async (req, res) => {
   res.json(purchases);
 };
 
+export const updateChemicalPurchase = async (req, res) => {
+  const purchase = await prisma.$transaction(async (tx) => {
+    const updated = await tx.chemicalPurchase.update({
+      where: { id: req.params.purchaseId },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        partyId: req.body.partyId,
+        quantityKg: req.body.quantityKg,
+        ratePerKg: req.body.ratePerKg,
+        totalAmount: req.body.totalAmount,
+        paymentType: req.body.paymentType,
+      },
+    });
+
+    await tx.expenseEntry.updateMany({
+      where: { chemicalPurchaseId: updated.id },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        partyId: req.body.partyId,
+        categoryId: req.body.categoryId,
+        amount: req.body.totalAmount,
+        description: req.body.description,
+      },
+    });
+
+    return tx.chemicalPurchase.findUnique({
+      where: { id: updated.id },
+      include: { party: true, expenses: true },
+    });
+  });
+
+  res.json(purchase);
+};
+
+export const deleteChemicalPurchase = async (req, res) => {
+  await prisma.$transaction(async (tx) => {
+    await tx.expenseEntry.deleteMany({
+      where: { chemicalPurchaseId: req.params.purchaseId },
+    });
+    await tx.chemicalPurchase.delete({ where: { id: req.params.purchaseId } });
+  });
+  res.status(204).end();
+};
+
 export const createRexinePurchase = async (req, res) => {
   const {
     date,
@@ -114,6 +158,50 @@ export const listRexinePurchases = async (req, res) => {
     orderBy: { date: "desc" },
   });
   res.json(purchases);
+};
+
+export const updateRexinePurchase = async (req, res) => {
+  const purchase = await prisma.$transaction(async (tx) => {
+    const updated = await tx.rexinePurchase.update({
+      where: { id: req.params.purchaseId },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        partyId: req.body.partyId,
+        quantityMeter: req.body.quantityMeter,
+        ratePerMeter: req.body.ratePerMeter,
+        totalAmount: req.body.totalAmount,
+        paymentType: req.body.paymentType,
+      },
+    });
+
+    await tx.expenseEntry.updateMany({
+      where: { rexinePurchaseId: updated.id },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        partyId: req.body.partyId,
+        categoryId: req.body.categoryId,
+        amount: req.body.totalAmount,
+        description: req.body.description,
+      },
+    });
+
+    return tx.rexinePurchase.findUnique({
+      where: { id: updated.id },
+      include: { party: true, expenses: true },
+    });
+  });
+
+  res.json(purchase);
+};
+
+export const deleteRexinePurchase = async (req, res) => {
+  await prisma.$transaction(async (tx) => {
+    await tx.expenseEntry.deleteMany({
+      where: { rexinePurchaseId: req.params.purchaseId },
+    });
+    await tx.rexinePurchase.delete({ where: { id: req.params.purchaseId } });
+  });
+  res.status(204).end();
 };
 
 export const createMaterialPurchase = async (req, res) => {
@@ -179,4 +267,50 @@ export const listMaterialPurchases = async (req, res) => {
     orderBy: { date: "desc" },
   });
   res.json(purchases);
+};
+
+export const updateMaterialPurchase = async (req, res) => {
+  const purchase = await prisma.$transaction(async (tx) => {
+    const updated = await tx.materialPurchase.update({
+      where: { id: req.params.purchaseId },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        partyId: req.body.partyId,
+        articleId: req.body.articleId,
+        unitId: req.body.unitId,
+        quantity: req.body.quantity,
+        pricePerUnit: req.body.pricePerUnit,
+        totalAmount: req.body.totalAmount,
+        paymentType: req.body.paymentType,
+      },
+    });
+
+    await tx.expenseEntry.updateMany({
+      where: { materialPurchaseId: updated.id },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        partyId: req.body.partyId,
+        categoryId: req.body.categoryId,
+        amount: req.body.totalAmount,
+        description: req.body.description,
+      },
+    });
+
+    return tx.materialPurchase.findUnique({
+      where: { id: updated.id },
+      include: { party: true, article: true, unit: true, expenses: true },
+    });
+  });
+
+  res.json(purchase);
+};
+
+export const deleteMaterialPurchase = async (req, res) => {
+  await prisma.$transaction(async (tx) => {
+    await tx.expenseEntry.deleteMany({
+      where: { materialPurchaseId: req.params.purchaseId },
+    });
+    await tx.materialPurchase.delete({ where: { id: req.params.purchaseId } });
+  });
+  res.status(204).end();
 };

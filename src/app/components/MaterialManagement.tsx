@@ -46,6 +46,7 @@ export function MaterialManagement() {
   const [categories, setCategories] = useState<ApiExpenseCategory[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -106,25 +107,39 @@ export function MaterialManagement() {
     const totalAmount = quantity * pricePerPair;
 
     try {
-      await purchaseApi.createMaterial({
-        date: formData.date,
-        partyId: formData.partyId || undefined,
-        categoryId: formData.categoryId,
-        articleId: formData.articleId,
-        quantity,
-        pricePerUnit: pricePerPair,
-        totalAmount,
-        paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
-        description: formData.detail || undefined,
-      });
-
-      toast.success("Material purchase added");
+      if (editingId) {
+        await purchaseApi.updateMaterial(editingId, {
+          date: formData.date,
+          partyId: formData.partyId || undefined,
+          categoryId: formData.categoryId,
+          articleId: formData.articleId,
+          quantity,
+          pricePerUnit: pricePerPair,
+          totalAmount,
+          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          description: formData.detail || undefined,
+        });
+        toast.success("Material purchase updated");
+      } else {
+        await purchaseApi.createMaterial({
+          date: formData.date,
+          partyId: formData.partyId || undefined,
+          categoryId: formData.categoryId,
+          articleId: formData.articleId,
+          quantity,
+          pricePerUnit: pricePerPair,
+          totalAmount,
+          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          description: formData.detail || undefined,
+        });
+        toast.success("Material purchase added");
+      }
       await loadData();
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to add material purchase.");
+      toast.error("Failed to save material purchase.");
     }
   };
 
@@ -139,10 +154,38 @@ export function MaterialManagement() {
       paymentType: "cash",
       detail: "",
     });
+    setEditingId(null);
   };
 
   const getDetail = (purchase: ApiMaterialPurchase) =>
     purchase.expenses?.[0]?.description || "-";
+
+  const startEdit = (purchase: ApiMaterialPurchase) => {
+    setEditingId(purchase.id);
+    setFormData({
+      date: purchase.date.slice(0, 10),
+      partyId: purchase.partyId || "",
+      categoryId: purchase.expenses?.[0]?.categoryId || "",
+      articleId: purchase.articleId || "",
+      quantity: String(purchase.quantity),
+      pricePerPair: String(purchase.pricePerUnit),
+      paymentType: purchase.paymentType === "CREDIT" ? "credit" : "cash",
+      detail: purchase.expenses?.[0]?.description || "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (purchaseId: string) => {
+    if (!confirm("Delete this purchase?")) return;
+    try {
+      await purchaseApi.deleteMaterial(purchaseId);
+      toast.success("Purchase deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete purchase.");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -165,7 +208,9 @@ export function MaterialManagement() {
               </DialogTrigger>
               <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Add Material Purchase</DialogTitle>
+                  <DialogTitle>
+                    {editingId ? "Edit" : "Add"} Material Purchase
+                  </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -311,7 +356,9 @@ export function MaterialManagement() {
                     >
                       Cancel
                     </Button>
-                    <Button type="submit">Add Transaction</Button>
+                    <Button type="submit">
+                      {editingId ? "Update" : "Add"} Transaction
+                    </Button>
                   </div>
                 </form>
               </DialogContent>
@@ -332,18 +379,19 @@ export function MaterialManagement() {
                 <TableHead>Paid</TableHead>
                 <TableHead>Balance</TableHead>
                 <TableHead>Detail</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground">
                     No transactions yet
                   </TableCell>
                 </TableRow>
@@ -386,6 +434,16 @@ export function MaterialManagement() {
                         </span>
                       </TableCell>
                       <TableCell>{getDetail(transaction)}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(transaction)}>
+                            Edit
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => handleDelete(transaction.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })

@@ -40,6 +40,7 @@ export function RexineManagement() {
   const [categories, setCategories] = useState<ApiExpenseCategory[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -92,24 +93,37 @@ export function RexineManagement() {
     const totalAmount = meters * rate;
 
     try {
-      await purchaseApi.createRexine({
-        date: formData.date,
-        partyId: formData.partyId || undefined,
-        categoryId: formData.categoryId,
-        quantityMeter: meters,
-        ratePerMeter: rate,
-        totalAmount,
-        paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
-        description: formData.detail || undefined,
-      });
-
-      toast.success("Rexine purchase added");
+      if (editingId) {
+        await purchaseApi.updateRexine(editingId, {
+          date: formData.date,
+          partyId: formData.partyId || undefined,
+          categoryId: formData.categoryId,
+          quantityMeter: meters,
+          ratePerMeter: rate,
+          totalAmount,
+          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          description: formData.detail || undefined,
+        });
+        toast.success("Rexine purchase updated");
+      } else {
+        await purchaseApi.createRexine({
+          date: formData.date,
+          partyId: formData.partyId || undefined,
+          categoryId: formData.categoryId,
+          quantityMeter: meters,
+          ratePerMeter: rate,
+          totalAmount,
+          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          description: formData.detail || undefined,
+        });
+        toast.success("Rexine purchase added");
+      }
       await loadData();
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to add rexine purchase.");
+      toast.error("Failed to save rexine purchase.");
     }
   };
 
@@ -123,10 +137,37 @@ export function RexineManagement() {
       paymentType: "cash",
       detail: "",
     });
+    setEditingId(null);
   };
 
   const getDetail = (purchase: ApiRexinePurchase) =>
     purchase.expenses?.[0]?.description || "-";
+
+  const startEdit = (purchase: ApiRexinePurchase) => {
+    setEditingId(purchase.id);
+    setFormData({
+      date: purchase.date.slice(0, 10),
+      partyId: purchase.partyId || "",
+      categoryId: purchase.expenses?.[0]?.categoryId || "",
+      meters: String(purchase.quantityMeter),
+      rate: String(purchase.ratePerMeter),
+      paymentType: purchase.paymentType === "CREDIT" ? "credit" : "cash",
+      detail: purchase.expenses?.[0]?.description || "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (purchaseId: string) => {
+    if (!confirm("Delete this purchase?")) return;
+    try {
+      await purchaseApi.deleteRexine(purchaseId);
+      toast.success("Purchase deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete purchase.");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -149,7 +190,9 @@ export function RexineManagement() {
               </DialogTrigger>
               <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Add Rexine Purchase</DialogTitle>
+                  <DialogTitle>
+                    {editingId ? "Edit" : "Add"} Rexine Purchase
+                  </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -274,7 +317,9 @@ export function RexineManagement() {
                     >
                       Cancel
                     </Button>
-                    <Button type="submit">Add Transaction</Button>
+                    <Button type="submit">
+                      {editingId ? "Update" : "Add"} Transaction
+                    </Button>
                   </div>
                 </form>
               </DialogContent>
@@ -294,18 +339,19 @@ export function RexineManagement() {
                 <TableHead>Paid</TableHead>
                 <TableHead>Balance</TableHead>
                 <TableHead>Detail</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     No transactions yet
                   </TableCell>
                 </TableRow>
@@ -343,6 +389,16 @@ export function RexineManagement() {
                         </span>
                       </TableCell>
                       <TableCell>{getDetail(transaction)}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(transaction)}>
+                            Edit
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => handleDelete(transaction.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })

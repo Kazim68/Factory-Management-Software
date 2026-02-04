@@ -40,6 +40,7 @@ export function ChemicalManagement() {
   const [categories, setCategories] = useState<ApiExpenseCategory[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -92,24 +93,37 @@ export function ChemicalManagement() {
     const totalAmount = weight * rate;
 
     try {
-      await purchaseApi.createChemical({
-        date: formData.date,
-        partyId: formData.partyId || undefined,
-        categoryId: formData.categoryId,
-        quantityKg: weight,
-        ratePerKg: rate,
-        totalAmount,
-        paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
-        description: formData.detail || undefined,
-      });
-
-      toast.success("Chemical purchase added");
+      if (editingId) {
+        await purchaseApi.updateChemical(editingId, {
+          date: formData.date,
+          partyId: formData.partyId || undefined,
+          categoryId: formData.categoryId,
+          quantityKg: weight,
+          ratePerKg: rate,
+          totalAmount,
+          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          description: formData.detail || undefined,
+        });
+        toast.success("Chemical purchase updated");
+      } else {
+        await purchaseApi.createChemical({
+          date: formData.date,
+          partyId: formData.partyId || undefined,
+          categoryId: formData.categoryId,
+          quantityKg: weight,
+          ratePerKg: rate,
+          totalAmount,
+          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          description: formData.detail || undefined,
+        });
+        toast.success("Chemical purchase added");
+      }
       await loadData();
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to add chemical purchase.");
+      toast.error("Failed to save chemical purchase.");
     }
   };
 
@@ -123,6 +137,33 @@ export function ChemicalManagement() {
       paymentType: "cash",
       detail: "",
     });
+    setEditingId(null);
+  };
+
+  const startEdit = (purchase: ApiChemicalPurchase) => {
+    setEditingId(purchase.id);
+    setFormData({
+      date: purchase.date.slice(0, 10),
+      partyId: purchase.partyId || "",
+      categoryId: purchase.expenses?.[0]?.categoryId || "",
+      weight: String(purchase.quantityKg),
+      rate: String(purchase.ratePerKg),
+      paymentType: purchase.paymentType === "CREDIT" ? "credit" : "cash",
+      detail: purchase.expenses?.[0]?.description || "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (purchaseId: string) => {
+    if (!confirm("Delete this purchase?")) return;
+    try {
+      await purchaseApi.deleteChemical(purchaseId);
+      toast.success("Purchase deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete purchase.");
+    }
   };
 
   const getDetail = (purchase: ApiChemicalPurchase) =>
@@ -149,7 +190,9 @@ export function ChemicalManagement() {
               </DialogTrigger>
               <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Add Chemical Purchase</DialogTitle>
+                  <DialogTitle>
+                    {editingId ? "Edit" : "Add"} Chemical Purchase
+                  </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -274,7 +317,9 @@ export function ChemicalManagement() {
                     >
                       Cancel
                     </Button>
-                    <Button type="submit">Add Transaction</Button>
+                    <Button type="submit">
+                      {editingId ? "Update" : "Add"} Transaction
+                    </Button>
                   </div>
                 </form>
               </DialogContent>
@@ -294,18 +339,19 @@ export function ChemicalManagement() {
                 <TableHead>Paid</TableHead>
                 <TableHead>Balance</TableHead>
                 <TableHead>Detail</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={10} className="text-center text-muted-foreground">
                     No transactions yet
                   </TableCell>
                 </TableRow>
@@ -343,6 +389,16 @@ export function ChemicalManagement() {
                         </span>
                       </TableCell>
                       <TableCell>{getDetail(transaction)}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(transaction)}>
+                            Edit
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => handleDelete(transaction.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })

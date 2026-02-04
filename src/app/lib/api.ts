@@ -77,6 +77,17 @@ export const partyApi = {
     openingBalance?: number;
   }): Promise<ApiParty> =>
     request({ path: "/parties", method: "POST", body: data }),
+  updateParty: (
+    partyId: string,
+    data: {
+      name?: string;
+      type?: ApiParty["type"];
+      openingBalance?: number;
+    }
+  ): Promise<ApiParty> =>
+    request({ path: `/parties/${partyId}`, method: "PATCH", body: data }),
+  deleteParty: (partyId: string): Promise<void> =>
+    request({ path: `/parties/${partyId}`, method: "DELETE" }),
   getLedger: (partyId: string): Promise<ApiPartyLedgerEntry[]> =>
     get(`/parties/${partyId}/ledger`),
   createPayment: (
@@ -121,6 +132,20 @@ export const expenseApi = {
     moduleData?: Record<string, unknown>;
   }): Promise<ApiExpenseEntry> =>
     request({ path: "/expenses", method: "POST", body: data }),
+  updateExpense: (
+    expenseId: string,
+    data: {
+      date?: string;
+      categoryId?: string;
+      partyId?: string;
+      module?: ApiExpenseModule;
+      amount?: number;
+      description?: string;
+    }
+  ): Promise<ApiExpenseEntry> =>
+    request({ path: `/expenses/${expenseId}`, method: "PATCH", body: data }),
+  deleteExpense: (expenseId: string): Promise<void> =>
+    request({ path: `/expenses/${expenseId}`, method: "DELETE" }),
 };
 
 export const laborApi = {
@@ -132,6 +157,22 @@ export const laborApi = {
     defaultRate?: number;
   }): Promise<ApiLaborProfile> =>
     request({ path: "/labor/profiles", method: "POST", body: data }),
+  updateProfile: (
+    laborId: string,
+    data: {
+      name?: string;
+      categoryId?: string;
+      paymentTypeId?: string;
+      defaultRate?: number;
+    }
+  ): Promise<ApiLaborProfile> =>
+    request({
+      path: `/labor/profiles/${laborId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteProfile: (laborId: string): Promise<void> =>
+    request({ path: `/labor/profiles/${laborId}`, method: "DELETE" }),
   upsertRate: (data: {
     laborId: string;
     articleId: string;
@@ -150,6 +191,22 @@ export const laborApi = {
     total: number;
   }): Promise<ApiLaborWorkEntry> =>
     request({ path: "/labor/work", method: "POST", body: data }),
+  updateWorkEntry: (
+    workId: string,
+    data: {
+      laborId?: string;
+      articleId?: string;
+      unitId?: string;
+      startDate?: string;
+      endDate?: string;
+      quantity?: number;
+      rate?: number;
+      total?: number;
+    }
+  ): Promise<ApiLaborWorkEntry> =>
+    request({ path: `/labor/work/${workId}`, method: "PATCH", body: data }),
+  deleteWorkEntry: (workId: string): Promise<void> =>
+    request({ path: `/labor/work/${workId}`, method: "DELETE" }),
   createAdvance: (data: {
     laborId: string;
     date: string;
@@ -159,6 +216,23 @@ export const laborApi = {
     partyId?: string;
   }): Promise<{ advance: ApiLaborAdvance; expense: unknown }> =>
     request({ path: "/labor/advances", method: "POST", body: data }),
+  updateAdvance: (
+    advanceId: string,
+    data: {
+      laborId?: string;
+      date?: string;
+      amount?: number;
+      reason?: string;
+      categoryId?: string;
+    }
+  ): Promise<ApiLaborAdvance> =>
+    request({
+      path: `/labor/advances/${advanceId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteAdvance: (advanceId: string): Promise<void> =>
+    request({ path: `/labor/advances/${advanceId}`, method: "DELETE" }),
   getLedger: (laborId: string): Promise<ApiLaborLedger> =>
     get(`/labor/${laborId}/ledger`),
 };
@@ -179,6 +253,24 @@ export const billApi = {
   }): Promise<ApiBill> => request({ path: "/bills", method: "POST", body: data }),
   confirmBill: (billId: string): Promise<ApiBill> =>
     request({ path: `/bills/${billId}/confirm`, method: "POST" }),
+  updateBill: (
+    billId: string,
+    data: {
+      date?: string;
+      partyId?: string;
+      type?: ApiBillType;
+      status?: ApiBillStatus;
+      lines?: Array<{
+        articleId: string;
+        quantity: number;
+        price: number;
+        total: number;
+      }>;
+    }
+  ): Promise<ApiBill> =>
+    request({ path: `/bills/${billId}`, method: "PATCH", body: data }),
+  deleteBill: (billId: string): Promise<void> =>
+    request({ path: `/bills/${billId}`, method: "DELETE" }),
 };
 
 export const purchaseApi = {
@@ -194,6 +286,26 @@ export const purchaseApi = {
     description?: string;
   }): Promise<{ purchase: ApiChemicalPurchase }> =>
     request({ path: "/chemicals", method: "POST", body: data }),
+  updateChemical: (
+    purchaseId: string,
+    data: {
+      date?: string;
+      partyId?: string;
+      categoryId?: string;
+      quantityKg?: number;
+      ratePerKg?: number;
+      totalAmount?: number;
+      paymentType?: ApiPaymentMethod;
+      description?: string;
+    }
+  ): Promise<ApiChemicalPurchase> =>
+    request({
+      path: `/chemicals/${purchaseId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteChemical: (purchaseId: string): Promise<void> =>
+    request({ path: `/chemicals/${purchaseId}`, method: "DELETE" }),
 
   listRexine: (): Promise<ApiRexinePurchase[]> => get("/rexine"),
   createRexine: (data: {
@@ -207,6 +319,26 @@ export const purchaseApi = {
     description?: string;
   }): Promise<{ purchase: ApiRexinePurchase }> =>
     request({ path: "/rexine", method: "POST", body: data }),
+  updateRexine: (
+    purchaseId: string,
+    data: {
+      date?: string;
+      partyId?: string;
+      categoryId?: string;
+      quantityMeter?: number;
+      ratePerMeter?: number;
+      totalAmount?: number;
+      paymentType?: ApiPaymentMethod;
+      description?: string;
+    }
+  ): Promise<ApiRexinePurchase> =>
+    request({
+      path: `/rexine/${purchaseId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteRexine: (purchaseId: string): Promise<void> =>
+    request({ path: `/rexine/${purchaseId}`, method: "DELETE" }),
 
   listMaterials: (): Promise<ApiMaterialPurchase[]> => get("/materials"),
   createMaterial: (data: {
@@ -222,4 +354,26 @@ export const purchaseApi = {
     description?: string;
   }): Promise<{ purchase: ApiMaterialPurchase }> =>
     request({ path: "/materials", method: "POST", body: data }),
+  updateMaterial: (
+    purchaseId: string,
+    data: {
+      date?: string;
+      partyId?: string;
+      categoryId?: string;
+      articleId?: string;
+      unitId?: string;
+      quantity?: number;
+      pricePerUnit?: number;
+      totalAmount?: number;
+      paymentType?: ApiPaymentMethod;
+      description?: string;
+    }
+  ): Promise<ApiMaterialPurchase> =>
+    request({
+      path: `/materials/${purchaseId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteMaterial: (purchaseId: string): Promise<void> =>
+    request({ path: `/materials/${purchaseId}`, method: "DELETE" }),
 };

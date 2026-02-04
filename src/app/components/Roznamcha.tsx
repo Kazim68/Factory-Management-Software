@@ -44,6 +44,7 @@ export function Roznamcha() {
   const [labors, setLabors] = useState<ApiLaborProfile[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<ApiExpenseEntry | null>(null);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -98,7 +99,26 @@ export function Roznamcha() {
     }
 
     try {
-      if (formData.module === "LABOR") {
+      if (editingEntry) {
+        if (editingEntry.laborAdvanceId) {
+          await laborApi.updateAdvance(editingEntry.laborAdvanceId, {
+            date: formData.date,
+            amount,
+            reason: formData.description,
+            categoryId: formData.categoryId,
+          });
+        } else {
+          await expenseApi.updateExpense(editingEntry.id, {
+            date: formData.date,
+            categoryId: formData.categoryId,
+            partyId: formData.partyId || undefined,
+            module: formData.module,
+            amount,
+            description: formData.description,
+          });
+        }
+        toast.success("Expense updated");
+      } else if (formData.module === "LABOR") {
         if (!formData.laborId) {
           toast.error("Select a labor profile.");
           return;
@@ -110,6 +130,7 @@ export function Roznamcha() {
           reason: formData.description,
           categoryId: formData.categoryId,
         });
+        toast.success("Expense recorded");
       } else {
         await expenseApi.createExpense({
           date: formData.date,
@@ -119,15 +140,15 @@ export function Roznamcha() {
           amount,
           description: formData.description,
         });
+        toast.success("Expense recorded");
       }
 
-      toast.success("Expense recorded");
       await loadData();
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to record expense.");
+      toast.error("Failed to save expense.");
     }
   };
 
@@ -141,6 +162,37 @@ export function Roznamcha() {
       amount: "",
       description: "",
     });
+    setEditingEntry(null);
+  };
+
+  const startEdit = (entry: ApiExpenseEntry) => {
+    setEditingEntry(entry);
+    setFormData({
+      date: entry.date.slice(0, 10),
+      module: entry.module,
+      categoryId: entry.categoryId,
+      partyId: entry.partyId || "",
+      laborId: "",
+      amount: String(entry.amount),
+      description: entry.description || "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (entry: ApiExpenseEntry) => {
+    if (!confirm("Delete this expense?")) return;
+    try {
+      if (entry.laborAdvanceId) {
+        await laborApi.deleteAdvance(entry.laborAdvanceId);
+      } else {
+        await expenseApi.deleteExpense(entry.id);
+      }
+      toast.success("Expense deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete expense.");
+    }
   };
 
   const filteredEntries = filterDate
@@ -170,8 +222,10 @@ export function Roznamcha() {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Record Daily Expense</DialogTitle>
-                </DialogHeader>
+                    <DialogTitle>
+                      {editingEntry ? "Edit Expense" : "Record Daily Expense"}
+                    </DialogTitle>
+                  </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -193,6 +247,7 @@ export function Roznamcha() {
                             module: value as ApiExpenseModule,
                           })
                         }
+                        disabled={!!editingEntry}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -262,6 +317,7 @@ export function Roznamcha() {
                         onValueChange={(value) =>
                           setFormData({ ...formData, laborId: value })
                         }
+                        disabled={!!editingEntry}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select labor" />
@@ -302,7 +358,9 @@ export function Roznamcha() {
                     <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit">Record Expense</Button>
+                    <Button type="submit">
+                      {editingEntry ? "Update Expense" : "Record Expense"}
+                    </Button>
                   </div>
                 </form>
               </DialogContent>
@@ -364,7 +422,22 @@ export function Roznamcha() {
                     <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
                     <TableCell>{entry.description || "-"}</TableCell>
                     <TableCell>
-                      <span className="text-xs text-muted-foreground">No actions</span>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => startEdit(entry)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleDelete(entry)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

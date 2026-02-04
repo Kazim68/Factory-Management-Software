@@ -68,6 +68,9 @@ export function LaborManagement() {
   const [ledgerDialog, setLedgerDialog] = useState(false);
 
   const [viewingLaborId, setViewingLaborId] = useState<string | null>(null);
+  const [editingLaborId, setEditingLaborId] = useState<string | null>(null);
+  const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
+  const [editingAdvanceId, setEditingAdvanceId] = useState<string | null>(null);
 
   const [laborForm, setLaborForm] = useState({
     name: "",
@@ -180,15 +183,27 @@ export function LaborManagement() {
     }
 
     try {
-      await laborApi.createProfile({
-        name: laborForm.name.trim(),
-        categoryId: laborForm.categoryId,
-        paymentTypeId: laborForm.paymentTypeId,
-        defaultRate: laborForm.defaultRate
-          ? parseFloat(laborForm.defaultRate)
-          : undefined,
-      });
-      toast.success("Labor added");
+      if (editingLaborId) {
+        await laborApi.updateProfile(editingLaborId, {
+          name: laborForm.name.trim(),
+          categoryId: laborForm.categoryId,
+          paymentTypeId: laborForm.paymentTypeId,
+          defaultRate: laborForm.defaultRate
+            ? parseFloat(laborForm.defaultRate)
+            : undefined,
+        });
+        toast.success("Labor updated");
+      } else {
+        await laborApi.createProfile({
+          name: laborForm.name.trim(),
+          categoryId: laborForm.categoryId,
+          paymentTypeId: laborForm.paymentTypeId,
+          defaultRate: laborForm.defaultRate
+            ? parseFloat(laborForm.defaultRate)
+            : undefined,
+        });
+        toast.success("Labor added");
+      }
       await loadData();
       setLaborForm({
         name: "",
@@ -196,6 +211,7 @@ export function LaborManagement() {
         paymentTypeId: "",
         defaultRate: "",
       });
+      setEditingLaborId(null);
       setLaborDialog(false);
     } catch (error) {
       console.error(error);
@@ -220,16 +236,29 @@ export function LaborManagement() {
     const total = quantity * rate;
 
     try {
-      await laborApi.createWorkEntry({
-        laborId: workForm.laborId,
-        articleId: workForm.articleId,
-        startDate: workForm.date,
-        endDate: workForm.date,
-        quantity,
-        rate,
-        total,
-      });
-      toast.success("Work entry added");
+      if (editingWorkId) {
+        await laborApi.updateWorkEntry(editingWorkId, {
+          laborId: workForm.laborId,
+          articleId: workForm.articleId,
+          startDate: workForm.date,
+          endDate: workForm.date,
+          quantity,
+          rate,
+          total,
+        });
+        toast.success("Work entry updated");
+      } else {
+        await laborApi.createWorkEntry({
+          laborId: workForm.laborId,
+          articleId: workForm.articleId,
+          startDate: workForm.date,
+          endDate: workForm.date,
+          quantity,
+          rate,
+          total,
+        });
+        toast.success("Work entry added");
+      }
       await loadData();
       setWorkForm({
         laborId: "",
@@ -238,6 +267,7 @@ export function LaborManagement() {
         quantity: "",
         rate: "",
       });
+      setEditingWorkId(null);
       setWorkDialog(false);
     } catch (error) {
       console.error(error);
@@ -251,7 +281,7 @@ export function LaborManagement() {
       toast.error("Please select labor");
       return;
     }
-    if (!kharchaForm.categoryId) {
+    if (!kharchaForm.categoryId && !editingAdvanceId) {
       toast.error("Please select an expense category");
       return;
     }
@@ -262,14 +292,25 @@ export function LaborManagement() {
     }
 
     try {
-      await laborApi.createAdvance({
-        laborId: kharchaForm.laborId,
-        date: kharchaForm.date,
-        amount,
-        reason: kharchaForm.reason,
-        categoryId: kharchaForm.categoryId,
-      });
-      toast.success("Kharcha recorded");
+      if (editingAdvanceId) {
+        await laborApi.updateAdvance(editingAdvanceId, {
+          laborId: kharchaForm.laborId,
+          date: kharchaForm.date,
+          amount,
+          reason: kharchaForm.reason,
+          categoryId: kharchaForm.categoryId || undefined,
+        });
+        toast.success("Kharcha updated");
+      } else {
+        await laborApi.createAdvance({
+          laborId: kharchaForm.laborId,
+          date: kharchaForm.date,
+          amount,
+          reason: kharchaForm.reason,
+          categoryId: kharchaForm.categoryId,
+        });
+        toast.success("Kharcha recorded");
+      }
       await loadData();
       setKharchaForm({
         laborId: "",
@@ -278,10 +319,82 @@ export function LaborManagement() {
         amount: "",
         reason: "",
       });
+      setEditingAdvanceId(null);
       setKharchaDialog(false);
     } catch (error) {
       console.error(error);
       toast.error("Failed to record kharcha.");
+    }
+  };
+
+  const startEditLabor = (labor: ApiLaborProfile) => {
+    setEditingLaborId(labor.id);
+    setLaborForm({
+      name: labor.name,
+      categoryId: labor.categoryId,
+      paymentTypeId: labor.paymentTypeId,
+      defaultRate: labor.defaultRate ? String(labor.defaultRate) : "",
+    });
+    setLaborDialog(true);
+  };
+
+  const deleteLabor = async (laborId: string) => {
+    if (!confirm("Delete this labor profile?")) return;
+    try {
+      await laborApi.deleteProfile(laborId);
+      toast.success("Labor deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete labor.");
+    }
+  };
+
+  const startEditWork = (work: UiWorkEntry) => {
+    setEditingWorkId(work.id);
+    setWorkForm({
+      laborId: work.laborId,
+      date: work.startDate.slice(0, 10),
+      articleId: work.articleId,
+      quantity: String(work.quantity),
+      rate: String(work.rate),
+    });
+    setWorkDialog(true);
+  };
+
+  const deleteWork = async (workId: string) => {
+    if (!confirm("Delete this work entry?")) return;
+    try {
+      await laborApi.deleteWorkEntry(workId);
+      toast.success("Work entry deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete work entry.");
+    }
+  };
+
+  const startEditAdvance = (advance: UiAdvance) => {
+    setEditingAdvanceId(advance.id);
+    setKharchaForm({
+      laborId: advance.laborId,
+      date: advance.date.slice(0, 10),
+      categoryId: "",
+      amount: String(advance.amount),
+      reason: advance.reason || "",
+    });
+    setKharchaDialog(true);
+  };
+
+  const deleteAdvance = async (advanceId: string) => {
+    if (!confirm("Delete this advance?")) return;
+    try {
+      await laborApi.deleteAdvance(advanceId);
+      toast.success("Advance deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete advance.");
     }
   };
 
@@ -319,8 +432,8 @@ export function LaborManagement() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Labor</DialogTitle>
-                    </DialogHeader>
+                  <DialogTitle>{editingLaborId ? "Edit" : "Add"} Labor</DialogTitle>
+                </DialogHeader>
                     <form onSubmit={handleLaborSubmit} className="space-y-4">
                       <div>
                         <Label>Labor Name</Label>
@@ -394,12 +507,14 @@ export function LaborManagement() {
                         >
                           Cancel
                         </Button>
-                        <Button type="submit">Save</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
+                      <Button type="submit">
+                        {editingLaborId ? "Update" : "Save"}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -466,8 +581,19 @@ export function LaborManagement() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              <Button size="sm" variant="ghost" disabled>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startEditLabor(labor)}
+                              >
                                 Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => deleteLabor(labor.id)}
+                              >
+                                Delete
                               </Button>
                             </div>
                           </TableCell>
@@ -490,8 +616,10 @@ export function LaborManagement() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Work Entry</DialogTitle>
-                    </DialogHeader>
+                  <DialogTitle>
+                    {editingWorkId ? "Edit" : "Add"} Work Entry
+                  </DialogTitle>
+                </DialogHeader>
                     <form onSubmit={handleWorkSubmit} className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -604,7 +732,9 @@ export function LaborManagement() {
                         >
                           Cancel
                         </Button>
-                        <Button type="submit">Add Work</Button>
+                        <Button type="submit">
+                          {editingWorkId ? "Update" : "Add"} Work
+                        </Button>
                       </div>
                     </form>
                   </DialogContent>
@@ -619,6 +749,7 @@ export function LaborManagement() {
                     <TableHead>Quantity</TableHead>
                     <TableHead>Rate</TableHead>
                     <TableHead>Total</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -649,6 +780,24 @@ export function LaborManagement() {
                         <TableCell>{Number(work.quantity)}</TableCell>
                         <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
                         <TableCell>{formatCurrency(Number(work.total))}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => startEditWork(work)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => deleteWork(work.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}
@@ -667,8 +816,10 @@ export function LaborManagement() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Record Kharcha (Advance)</DialogTitle>
-                    </DialogHeader>
+                  <DialogTitle>
+                    {editingAdvanceId ? "Edit" : "Record"} Kharcha (Advance)
+                  </DialogTitle>
+                </DialogHeader>
                     <form onSubmit={handleKharchaSubmit} className="space-y-4">
                       <div>
                         <Label>Date</Label>
@@ -761,7 +912,9 @@ export function LaborManagement() {
                         >
                           Cancel
                         </Button>
-                        <Button type="submit">Record Kharcha</Button>
+                        <Button type="submit">
+                          {editingAdvanceId ? "Update" : "Record"} Kharcha
+                        </Button>
                       </div>
                     </form>
                   </DialogContent>
@@ -774,6 +927,7 @@ export function LaborManagement() {
                     <TableHead>Labor</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Reason</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -804,6 +958,24 @@ export function LaborManagement() {
                           {formatCurrency(Number(kharcha.amount))}
                         </TableCell>
                         <TableCell>{kharcha.reason || "-"}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => startEditAdvance(kharcha)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => deleteAdvance(kharcha.id)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))
                   )}

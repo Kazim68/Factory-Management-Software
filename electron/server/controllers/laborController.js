@@ -21,6 +21,24 @@ export const createLaborProfile = async (req, res) => {
   res.status(201).json(profile);
 };
 
+export const updateLaborProfile = async (req, res) => {
+  const profile = await prisma.laborProfile.update({
+    where: { id: req.params.laborId },
+    data: {
+      name: req.body.name,
+      categoryId: req.body.categoryId,
+      paymentTypeId: req.body.paymentTypeId,
+      defaultRate: req.body.defaultRate,
+    },
+  });
+  res.json(profile);
+};
+
+export const deleteLaborProfile = async (req, res) => {
+  await prisma.laborProfile.delete({ where: { id: req.params.laborId } });
+  res.status(204).end();
+};
+
 export const upsertLaborRate = async (req, res) => {
   const rate = await prisma.laborRate.upsert({
     where: {
@@ -59,6 +77,28 @@ export const createLaborWorkEntry = async (req, res) => {
   res.status(201).json(entry);
 };
 
+export const updateLaborWorkEntry = async (req, res) => {
+  const entry = await prisma.laborWorkEntry.update({
+    where: { id: req.params.workId },
+    data: {
+      laborId: req.body.laborId,
+      articleId: req.body.articleId,
+      unitId: req.body.unitId,
+      startDate: req.body.startDate ? new Date(req.body.startDate) : undefined,
+      endDate: req.body.endDate ? new Date(req.body.endDate) : undefined,
+      quantity: req.body.quantity,
+      rate: req.body.rate,
+      total: req.body.total,
+    },
+  });
+  res.json(entry);
+};
+
+export const deleteLaborWorkEntry = async (req, res) => {
+  await prisma.laborWorkEntry.delete({ where: { id: req.params.workId } });
+  res.status(204).end();
+};
+
 export const createLaborAdvance = async (req, res) => {
   const advance = await prisma.laborAdvance.create({
     data: {
@@ -81,12 +121,48 @@ export const createLaborAdvance = async (req, res) => {
     },
   });
 
-  await prisma.laborAdvance.update({
-    where: { id: advance.id },
-    data: { expenseEntryId: expense.id },
+  res.status(201).json({ advance, expense });
+};
+
+export const updateLaborAdvance = async (req, res) => {
+  const advance = await prisma.laborAdvance.update({
+    where: { id: req.params.advanceId },
+    data: {
+      laborId: req.body.laborId,
+      date: req.body.date ? new Date(req.body.date) : undefined,
+      amount: req.body.amount,
+      reason: req.body.reason,
+    },
   });
 
-  res.status(201).json({ advance, expense });
+  const expense = await prisma.expenseEntry.findFirst({
+    where: { laborAdvanceId: advance.id },
+  });
+
+  if (expense) {
+    await prisma.expenseEntry.update({
+      where: { id: expense.id },
+      data: {
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        amount: req.body.amount,
+        description: req.body.reason,
+        categoryId: req.body.categoryId,
+      },
+    });
+  }
+
+  res.json(advance);
+};
+
+export const deleteLaborAdvance = async (req, res) => {
+  await prisma.$transaction(async (tx) => {
+    await tx.expenseEntry.deleteMany({
+      where: { laborAdvanceId: req.params.advanceId },
+    });
+    await tx.laborAdvance.delete({ where: { id: req.params.advanceId } });
+  });
+
+  res.status(204).end();
 };
 
 export const getLaborLedger = async (req, res) => {

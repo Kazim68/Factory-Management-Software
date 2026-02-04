@@ -1,18 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { storage, STORAGE_KEYS } from '../lib/storage';
-import { formatCurrency } from '../lib/utils';
-import {
-  Party,
-  Bill,
-  RoznamchaEntry,
-  ChemicalTransaction,
-  RexineTransaction,
-  MaterialTransaction,
-  LaborWork,
-  LaborKharcha,
-} from '../types';
-import { DollarSign, Users, FileText, TrendingUp, TrendingDown, Package } from 'lucide-react';
+
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { formatCurrency } from "../lib/utils";
+import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api";
+import { DollarSign, Users, FileText, TrendingUp, TrendingDown, Package } from "lucide-react";
 
 export function Dashboard() {
   const [stats, setStats] = useState({
@@ -27,57 +18,93 @@ export function Dashboard() {
   });
 
   useEffect(() => {
-    calculateStats();
+    const loadStats = async () => {
+      try {
+        const [bills, expenses, parties, chemicals, rexine, materials, labors] =
+          await Promise.all([
+            billApi.listBills(),
+            expenseApi.listExpenses(),
+            partyApi.listParties(),
+            purchaseApi.listChemicals(),
+            purchaseApi.listRexine(),
+            purchaseApi.listMaterials(),
+            laborApi.listProfiles(),
+          ]);
+
+        const ledgers = await Promise.all(
+          parties.map((party) =>
+            partyApi.getLedger(party.id).catch(() => [])
+          )
+        );
+
+        const totalRevenue = bills.reduce(
+          (sum, bill) => sum + Number(bill.total),
+          0
+        );
+        const totalExpenses = expenses.reduce(
+          (sum, entry) => sum + Number(entry.amount),
+          0
+        );
+
+        const balances = parties.map((party, index) => {
+          const opening = Number(party.openingBalance ?? 0);
+          const ledger = ledgers[index];
+          const delta = ledger.reduce(
+            (sum, entry) => sum + Number(entry.credit ?? 0) - Number(entry.debit ?? 0),
+            0
+          );
+          return opening + delta;
+        });
+
+        const totalReceivables = balances
+          .filter((balance) => balance > 0)
+          .reduce((sum, balance) => sum + balance, 0);
+        const totalPayables = balances
+          .filter((balance) => balance < 0)
+          .reduce((sum, balance) => sum + Math.abs(balance), 0);
+
+        const laborLedgers = await Promise.all(
+          labors.map((labor) =>
+            laborApi.getLedger(labor.id).catch(() => ({
+              totalEarnings: 0,
+              totalAdvances: 0,
+              netPayable: 0,
+              workEntries: [],
+              advances: [],
+            }))
+          )
+        );
+
+        const laborCost = laborLedgers.reduce(
+          (sum, ledger) => sum + Number(ledger.totalEarnings),
+          0
+        );
+
+        const materialCost =
+          chemicals.reduce((sum, item) => sum + Number(item.totalAmount), 0) +
+          rexine.reduce((sum, item) => sum + Number(item.totalAmount), 0) +
+          materials.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+
+        setStats({
+          totalParties: parties.length,
+          totalBills: bills.length,
+          totalRevenue,
+          totalExpenses,
+          totalReceivables,
+          totalPayables,
+          laborCost,
+          materialCost,
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    loadStats();
   }, []);
 
-  const calculateStats = () => {
-    const parties = storage.get<Party>(STORAGE_KEYS.PARTIES);
-    const bills = storage.get<Bill>(STORAGE_KEYS.BILLS);
-    const roznamcha = storage.get<RoznamchaEntry>(STORAGE_KEYS.ROZNAMCHA);
-    const chemicals = storage.get<ChemicalTransaction>(STORAGE_KEYS.CHEMICALS);
-    const rexine = storage.get<RexineTransaction>(STORAGE_KEYS.REXINE);
-    const materials = storage.get<MaterialTransaction>(STORAGE_KEYS.MATERIALS);
-    const laborWork = storage.get<LaborWork>(STORAGE_KEYS.LABOR_WORK);
-    const laborKharcha = storage.get<LaborKharcha>(STORAGE_KEYS.LABOR_KHARCHA);
-
-    // Calculate revenue from bills
-    const totalRevenue = bills.reduce((sum, bill) => sum + bill.grandTotal, 0);
-
-    // Calculate total expenses from roznamcha
-    const totalExpenses = roznamcha.reduce((sum, entry) => sum + entry.amount, 0);
-
-    // Calculate receivables (positive balances)
-    const totalReceivables = parties
-      .filter(p => p.currentBalance > 0)
-      .reduce((sum, p) => sum + p.currentBalance, 0);
-
-    // Calculate payables (negative balances)
-    const totalPayables = parties
-      .filter(p => p.currentBalance < 0)
-      .reduce((sum, p) => sum + Math.abs(p.currentBalance), 0);
-
-    // Labor costs
-    const laborCost = laborWork.reduce((sum, work) => sum + work.total, 0);
-
-    // Material costs
-    const materialCost =
-      chemicals.reduce((sum, c) => sum + c.total, 0) +
-      rexine.reduce((sum, r) => sum + r.total, 0) +
-      materials.reduce((sum, m) => sum + m.total, 0);
-
-    setStats({
-      totalParties: parties.length,
-      totalBills: bills.length,
-      totalRevenue,
-      totalExpenses,
-      totalReceivables,
-      totalPayables,
-      laborCost,
-      materialCost,
-    });
-  };
-
-  const netProfit = stats.totalRevenue - stats.totalExpenses - stats.laborCost - stats.materialCost;
+  const netProfit =
+    stats.totalRevenue - stats.totalExpenses - stats.laborCost - stats.materialCost;
 
   return (
     <div className="space-y-6">
@@ -106,7 +133,7 @@ export function Dashboard() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`text-2xl ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
               {formatCurrency(netProfit)}
             </div>
             <p className="text-xs text-muted-foreground">Revenue - Expenses</p>
@@ -218,7 +245,7 @@ export function Dashboard() {
               </div>
               <div className="border-t pt-3 flex justify-between">
                 <span>Net Profit/Loss</span>
-                <span className={`font-medium ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span className={`font-medium ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
                   {formatCurrency(netProfit)}
                 </span>
               </div>

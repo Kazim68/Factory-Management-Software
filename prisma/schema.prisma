@@ -145,7 +145,7 @@ model ExpenseEntry {
   chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
   rexinePurchase    RexinePurchase?  @relation(fields: [rexinePurchaseId], references: [id])
   materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
-  laborAdvance      LaborAdvance?    @relation(fields: [laborAdvanceId], references: [id])
+  laborAdvance      LaborAdvance?     @relation(fields: [laborAdvanceId], references: [id])
 
   @@index([date])
 }
@@ -209,11 +209,10 @@ model LaborAdvance {
   date           DateTime
   amount         Decimal
   reason         String?
-  expenseEntryId String?
   createdAt      DateTime @default(now())
 
   labor   LaborProfile  @relation(fields: [laborId], references: [id])
-  expense ExpenseEntry? @relation(fields: [expenseEntryId], references: [id])
+  expenses ExpenseEntry[]
 
   @@index([laborId, date])
 }

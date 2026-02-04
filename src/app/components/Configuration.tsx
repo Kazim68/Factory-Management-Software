@@ -58,7 +58,7 @@ export function Configuration() {
   const [laborForm, setLaborForm] = useState({ name: "" });
   const [paymentForm, setPaymentForm] = useState({
     name: "",
-    unitId: "",
+    unitId: "none",
   });
   const [expenseForm, setExpenseForm] = useState({ name: "" });
 
@@ -144,10 +144,10 @@ export function Configuration() {
     try {
       await configApi.createPaymentType({
         name: paymentForm.name.trim(),
-        unitId: paymentForm.unitId || undefined,
+        unitId: paymentForm.unitId === "none" ? undefined : paymentForm.unitId,
       });
       toast.success("Payment type added");
-      setPaymentForm({ name: "", unitId: "" });
+      setPaymentForm({ name: "", unitId: "none" });
       setPaymentDialog(false);
       await loadConfig();
     } catch (error) {
@@ -439,7 +439,7 @@ export function Configuration() {
                             <SelectValue placeholder="No unit" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">No unit</SelectItem>
+                            <SelectItem value="none">No unit</SelectItem>
                             {units.map((unit) => (
                               <SelectItem key={unit.id} value={unit.id}>
                                 {unit.name}

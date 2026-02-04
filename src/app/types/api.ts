@@ -61,7 +61,6 @@ export interface ApiLaborAdvance {
   date: string;
   amount: number | string;
   reason?: string | null;
-  expenseEntryId?: string | null;
   createdAt: string;
 }
 

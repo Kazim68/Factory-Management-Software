@@ -144,17 +144,50 @@ export const createExpense = async (req, res) => {
       include: { category: true, party: true },
     });
 
-    if (laborAdvanceId) {
-      await tx.laborAdvance.update({
-        where: { id: laborAdvanceId },
-        data: { expenseEntryId: expense.id },
-      });
-    }
-
     return expense;
   });
 
   res.status(201).json(result);
+};
+
+export const updateExpense = async (req, res) => {
+  const expense = await prisma.expenseEntry.update({
+    where: { id: req.params.expenseId },
+    data: {
+      date: req.body.date ? new Date(req.body.date) : undefined,
+      categoryId: req.body.categoryId,
+      partyId: req.body.partyId,
+      module: req.body.module,
+      amount: req.body.amount,
+      description: req.body.description,
+    },
+    include: { category: true, party: true },
+  });
+  res.json(expense);
+};
+
+export const deleteExpense = async (req, res) => {
+  const expense = await prisma.expenseEntry.findUnique({
+    where: { id: req.params.expenseId },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    if (expense?.chemicalPurchaseId) {
+      await tx.chemicalPurchase.delete({ where: { id: expense.chemicalPurchaseId } });
+    }
+    if (expense?.rexinePurchaseId) {
+      await tx.rexinePurchase.delete({ where: { id: expense.rexinePurchaseId } });
+    }
+    if (expense?.materialPurchaseId) {
+      await tx.materialPurchase.delete({ where: { id: expense.materialPurchaseId } });
+    }
+    if (expense?.laborAdvanceId) {
+      await tx.laborAdvance.delete({ where: { id: expense.laborAdvanceId } });
+    }
+    await tx.expenseEntry.delete({ where: { id: req.params.expenseId } });
+  });
+
+  res.status(204).end();
 };
 
 export const getDailySummary = async (req, res) => {

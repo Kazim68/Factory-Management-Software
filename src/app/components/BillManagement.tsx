@@ -48,6 +48,7 @@ export function BillManagement() {
   const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -130,30 +131,38 @@ export function BillManagement() {
     const grandTotal = validItems.reduce((sum, item) => sum + item.total, 0);
 
     try {
-      const bill = await billApi.createBill({
+      const payload = {
         date: formData.date,
         partyId: formData.partyId,
         type: formData.paymentType === "credit" ? "CREDIT" : "CASH",
-        status: "CONFIRMED",
+        status: "CONFIRMED" as const,
         lines: validItems.map((item) => ({
           articleId: item.articleId,
           quantity: item.quantity,
           price: item.price,
           total: item.total,
         })),
-      });
+      };
 
-      if (bill.type === "CREDIT") {
-        await billApi.confirmBill(bill.id);
+      if (editingBillId) {
+        const bill = await billApi.updateBill(editingBillId, payload);
+        if (bill.type === "CREDIT" && bill.status !== "CONFIRMED") {
+          await billApi.confirmBill(bill.id);
+        }
+        toast.success("Bill updated successfully");
+      } else {
+        const bill = await billApi.createBill(payload);
+        if (bill.type === "CREDIT") {
+          await billApi.confirmBill(bill.id);
+        }
+        toast.success("Bill created successfully");
       }
-
-      toast.success("Bill created successfully");
       await loadData();
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to create bill.");
+      toast.error("Failed to save bill.");
     }
   };
 
@@ -164,6 +173,41 @@ export function BillManagement() {
       paymentType: "cash",
     });
     setItems([{ articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
+    setEditingBillId(null);
+  };
+
+  const startEdit = (bill: ApiBill) => {
+    setEditingBillId(bill.id);
+    setFormData({
+      date: bill.date.slice(0, 10),
+      partyId: bill.partyId || "",
+      paymentType: bill.type === "CREDIT" ? "credit" : "cash",
+    });
+    setItems(
+      bill.lines.map((line) => ({
+        articleId: line.articleId,
+        articleName:
+          line.article?.name ||
+          articles.find((article) => article.id === line.articleId)?.name ||
+          "",
+        quantity: Number(line.quantity),
+        price: Number(line.price),
+        total: Number(line.total),
+      }))
+    );
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (billId: string) => {
+    if (!confirm("Delete this bill?")) return;
+    try {
+      await billApi.deleteBill(billId);
+      toast.success("Bill deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete bill.");
+    }
   };
 
   const printBill = (bill: ApiBill) => {
@@ -257,7 +301,9 @@ export function BillManagement() {
               </DialogTrigger>
               <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Create New Bill</DialogTitle>
+                  <DialogTitle>
+                    {editingBillId ? "Edit" : "Create New"} Bill
+                  </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-3 gap-4">
@@ -410,7 +456,9 @@ export function BillManagement() {
                     >
                       Cancel
                     </Button>
-                    <Button type="submit">Create Bill</Button>
+                    <Button type="submit">
+                      {editingBillId ? "Update" : "Create"} Bill
+                    </Button>
                   </div>
                 </form>
               </DialogContent>
@@ -463,9 +511,17 @@ export function BillManagement() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Button size="sm" variant="outline" onClick={() => printBill(bill)}>
-                        <Printer className="h-4 w-4" />
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => printBill(bill)}>
+                          <Printer className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => startEdit(bill)}>
+                          Edit
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => handleDelete(bill.id)}>
+                          Delete
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

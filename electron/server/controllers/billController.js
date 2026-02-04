@@ -56,3 +56,47 @@ export const confirmBill = async (req, res) => {
 
   res.json(bill);
 };
+
+export const updateBill = async (req, res) => {
+  const { date, partyId, type, status, lines } = req.body;
+  const bill = await prisma.$transaction(async (tx) => {
+    const updated = await tx.bill.update({
+      where: { id: req.params.billId },
+      data: {
+        date: date ? new Date(date) : undefined,
+        partyId,
+        type,
+        status,
+        total: lines ? lines.reduce((sum, line) => sum + Number(line.total), 0) : undefined,
+      },
+    });
+
+    if (Array.isArray(lines)) {
+      await tx.billLine.deleteMany({ where: { billId: updated.id } });
+      await tx.billLine.createMany({
+        data: lines.map((line) => ({
+          billId: updated.id,
+          articleId: line.articleId,
+          quantity: line.quantity,
+          price: line.price,
+          total: line.total,
+        })),
+      });
+    }
+
+    return tx.bill.findUnique({
+      where: { id: updated.id },
+      include: { lines: { include: { article: true } }, party: true },
+    });
+  });
+
+  res.json(bill);
+};
+
+export const deleteBill = async (req, res) => {
+  await prisma.$transaction(async (tx) => {
+    await tx.billLine.deleteMany({ where: { billId: req.params.billId } });
+    await tx.bill.delete({ where: { id: req.params.billId } });
+  });
+  res.status(204).end();
+};

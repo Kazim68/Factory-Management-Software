@@ -43,6 +43,7 @@ type UiParty = {
 export function PartyManagement() {
   const [parties, setParties] = useState<UiParty[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingPartyId, setViewingPartyId] = useState<string | null>(null);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [paymentPartyId, setPaymentPartyId] = useState<string | null>(null);
@@ -152,18 +153,27 @@ export function PartyManagement() {
       : 0;
 
     try {
-      await partyApi.createParty({
-        name: formData.name.trim(),
-        type: toApiPartyType(formData.type),
-        openingBalance,
-      });
-      toast.success("Party added");
+      if (editingId) {
+        await partyApi.updateParty(editingId, {
+          name: formData.name.trim(),
+          type: toApiPartyType(formData.type),
+          openingBalance,
+        });
+        toast.success("Party updated");
+      } else {
+        await partyApi.createParty({
+          name: formData.name.trim(),
+          type: toApiPartyType(formData.type),
+          openingBalance,
+        });
+        toast.success("Party added");
+      }
       await loadData();
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to add party.");
+      toast.error("Failed to save party.");
     }
   };
 
@@ -173,6 +183,29 @@ export function PartyManagement() {
       type: 'customer',
       openingBalance: '',
     });
+    setEditingId(null);
+  };
+
+  const handleEdit = (party: UiParty) => {
+    setEditingId(party.id);
+    setFormData({
+      name: party.name,
+      type: party.type,
+      openingBalance: party.openingBalance.toString(),
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async (partyId: string) => {
+    if (!confirm("Are you sure you want to delete this party?")) return;
+    try {
+      await partyApi.deleteParty(partyId);
+      toast.success("Party deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete party.");
+    }
   };
 
   const handlePayment = async (e: React.FormEvent) => {
@@ -241,7 +274,7 @@ export function PartyManagement() {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Add Party</DialogTitle>
+                  <DialogTitle>{editingId ? "Edit" : "Add"} Party</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
@@ -280,7 +313,9 @@ export function PartyManagement() {
                     <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit">Add Party</Button>
+                    <Button type="submit">
+                      {editingId ? "Update" : "Add"} Party
+                    </Button>
                   </div>
                 </form>
               </DialogContent>
@@ -343,6 +378,20 @@ export function PartyManagement() {
                             Pay
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleEdit(party)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleDelete(party.id)}
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>

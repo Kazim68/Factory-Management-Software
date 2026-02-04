@@ -17,6 +17,23 @@ export const createParty = async (req, res) => {
   res.status(201).json(party);
 };
 
+export const updateParty = async (req, res) => {
+  const party = await prisma.party.update({
+    where: { id: req.params.partyId },
+    data: {
+      name: req.body.name,
+      type: req.body.type,
+      openingBalance: req.body.openingBalance,
+    },
+  });
+  res.json(party);
+};
+
+export const deleteParty = async (req, res) => {
+  await prisma.party.delete({ where: { id: req.params.partyId } });
+  res.status(204).end();
+};
+
 export const getPartyLedger = async (req, res) => {
   const start = toDate(req.query.start);
   const end = toDate(req.query.end);
