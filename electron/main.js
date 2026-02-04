@@ -1,25 +1,11 @@
-import { app, BrowserWindow , ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 import { startServer } from "./server/app.js";
+import registerIpc from "./ipc/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-
-ipcMain.handle("get-todos", async () => {
-  const res = await fetch("http://localhost:3001/todos");
-  return res.json();
-});
-
-ipcMain.handle("add-todo", async (_, text) => {
-  await fetch("http://localhost:3001/todos", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-});
-
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -38,6 +24,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  startServer();     // 🔴 REQUIRED
+  startServer();
+  registerIpc(ipcMain);
   createWindow();
 });

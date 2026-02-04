@@ -1,24 +1,21 @@
 import express from "express";
-import db from "./db.js";
+import routes from "./routes/index.js";
+import errorHandler from "./middleware/errorHandler.js";
 
-const app = express();
-app.use(express.json());
+export const createApp = () => {
+  const app = express();
 
-app.get("/todos", (req, res) => {
-  const todos = db.prepare("SELECT * FROM todos ORDER BY id DESC").all();
-  res.json(todos);
-});
+  app.use(express.json());
+  app.use(routes);
+  app.use(errorHandler);
 
-app.post("/todos", (req, res) => {
-  const { text } = req.body;
+  return app;
+};
 
-  db.prepare("INSERT INTO todos (text) VALUES (?)").run(text);
+export const startServer = (port = 3001) => {
+  const app = createApp();
 
-  res.json({ success: true });
-});
-
-export function startServer() {
-  app.listen(3001, () => {
-    console.log("Express + SQLite running");
+  app.listen(port, () => {
+    console.log(`Express + Prisma running on ${port}`);
   });
-}
+};
