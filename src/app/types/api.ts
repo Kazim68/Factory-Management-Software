@@ -175,7 +175,6 @@ export interface ApiExpenseEntry {
   createdAt: string;
   category?: ApiExpenseCategory | null;
   party?: ApiParty | null;
-  labor?: ApiLaborProfile | null;
   laborAdvance?: ApiLaborAdvance | null;
 }
 

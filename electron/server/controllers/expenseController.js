@@ -10,12 +10,7 @@ export const listExpenses = async (req, res) => {
       module: req.query.module,
       categoryId: req.query.categoryId,
     },
-    include: {
-      category: true,
-      party: true,
-      labor: true,
-      laborAdvance: { include: { labor: true } },
-    },
+    include: { category: true, party: true, laborAdvance: { include: { labor: true } } },
     orderBy: { date: "desc" },
   });
   res.json(expenses);
@@ -148,12 +143,7 @@ export const createExpense = async (req, res) => {
         materialPurchaseId,
         laborAdvanceId,
       },
-      include: {
-        category: true,
-        party: true,
-        labor: true,
-        laborAdvance: { include: { labor: true } },
-      },
+      include: { category: true, party: true, laborAdvance: { include: { labor: true } } },
     });
 
     return expense;
@@ -174,12 +164,7 @@ export const updateExpense = async (req, res) => {
       amount: req.body.amount,
       description: req.body.description,
     },
-    include: {
-      category: true,
-      party: true,
-      labor: true,
-      laborAdvance: { include: { labor: true } },
-    },
+    include: { category: true, party: true, laborAdvance: { include: { labor: true } } },
   });
   res.json(expense);
 };
