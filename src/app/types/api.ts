@@ -164,6 +164,7 @@ export interface ApiExpenseEntry {
   date: string;
   categoryId: string;
   partyId?: string | null;
+  laborId?: string | null;
   module: ApiExpenseModule;
   amount: number | string;
   description?: string | null;

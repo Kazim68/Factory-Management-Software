@@ -29,10 +29,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Plus, Eye, Wallet } from "lucide-react";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
-import { configApi, laborApi } from "../lib/api";
+import { configApi, expenseApi, laborApi } from "../lib/api";
 import type {
   ApiArticle,
   ApiExpenseCategory,
+  ApiExpenseEntry,
   ApiLaborCategory,
   ApiLaborLedger,
   ApiLaborProfile,
@@ -60,6 +61,8 @@ export function LaborManagement() {
   const [workEntries, setWorkEntries] = useState<UiWorkEntry[]>([]);
   const [advanceEntries, setAdvanceEntries] = useState<UiAdvance[]>([]);
   const [ledgerMap, setLedgerMap] = useState<Record<string, ApiLaborLedger>>({});
+  const [laborPayments, setLaborPayments] = useState<ApiExpenseEntry[]>([]);
+  const [laborPaymentsToday, setLaborPaymentsToday] = useState<ApiExpenseEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const [laborDialog, setLaborDialog] = useState(false);
@@ -98,18 +101,23 @@ export function LaborManagement() {
   const loadData = async () => {
     setIsLoading(true);
     try {
+      const today = getCurrentDate();
       const [
         profileData,
         categoryData,
         paymentData,
         articleData,
         expenseCategoryData,
+        laborExpenseData,
+        laborExpenseTodayData,
       ] = await Promise.all([
         laborApi.listProfiles(),
         configApi.listLaborCategories(),
         configApi.listPaymentTypes(),
         configApi.listArticles(),
         configApi.listExpenseCategories(),
+        expenseApi.listExpenses({ module: "LABOR" }),
+        expenseApi.listExpenses({ module: "LABOR", start: today, end: today }),
       ]);
 
       setProfiles(profileData);
@@ -117,6 +125,8 @@ export function LaborManagement() {
       setPaymentTypes(paymentData);
       setArticles(articleData);
       setExpenseCategories(expenseCategoryData);
+      setLaborPayments(laborExpenseData);
+      setLaborPaymentsToday(laborExpenseTodayData);
 
       const ledgerEntries = await Promise.all(
         profileData.map((profile) =>
@@ -407,6 +417,20 @@ export function LaborManagement() {
       netPayable: 0,
     };
 
+  const paidEntries = laborPayments.filter((entry) => !entry.laborAdvanceId);
+  const paidByLabor = paidEntries.reduce<Record<string, number>>(
+    (acc, entry) => {
+      if (entry.laborId) {
+        acc[entry.laborId] = (acc[entry.laborId] ?? 0) + Number(entry.amount ?? 0);
+      }
+      return acc;
+    },
+    {}
+  );
+  const paidTodayEntries = laborPaymentsToday.filter(
+    (entry) => !entry.laborAdvanceId
+  );
+
   return (
     <div className="space-y-6">
       <Card>
@@ -415,9 +439,10 @@ export function LaborManagement() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="labors">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
               <TabsTrigger value="work">Work Entries</TabsTrigger>
+              <TabsTrigger value="labor-paid-today">Labor Paid Today</TabsTrigger>
               <TabsTrigger value="kharcha">Kharcha (Advances)</TabsTrigger>
             </TabsList>
 
@@ -522,6 +547,7 @@ export function LaborManagement() {
                     <TableHead>Category</TableHead>
                     <TableHead>Payment Type</TableHead>
                     <TableHead>Total Earned</TableHead>
+                    <TableHead>Total Paid</TableHead>
                     <TableHead>Kharcha</TableHead>
                     <TableHead>Net Payable</TableHead>
                     <TableHead>Actions</TableHead>
@@ -531,7 +557,7 @@ export function LaborManagement() {
                   {isLoading ? (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center text-muted-foreground"
                       >
                         Loading labor profiles...
@@ -540,7 +566,7 @@ export function LaborManagement() {
                   ) : profiles.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center text-muted-foreground"
                       >
                         No labors yet
@@ -549,6 +575,7 @@ export function LaborManagement() {
                   ) : (
                     profiles.map((labor) => {
                       const summary = getLaborSummary(labor.id);
+                      const totalPaid = paidByLabor[labor.id] ?? 0;
                       return (
                         <TableRow key={labor.id}>
                           <TableCell>{labor.name}</TableCell>
@@ -557,6 +584,7 @@ export function LaborManagement() {
                           <TableCell>
                             {formatCurrency(summary.totalEarnings)}
                           </TableCell>
+                          <TableCell>{formatCurrency(totalPaid)}</TableCell>
                           <TableCell>
                             {formatCurrency(summary.totalAdvances)}
                           </TableCell>
@@ -805,6 +833,55 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
+            <TabsContent value="labor-paid-today" className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Labor Paid Today</h3>
+                <span className="text-sm text-muted-foreground">
+                  {formatDate(getCurrentDate())}
+                </span>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Labor</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Description</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading labor payments...
+                      </TableCell>
+                    </TableRow>
+                  ) : paidTodayEntries.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground"
+                      >
+                        No labor payments today
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    paidTodayEntries.map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell>{formatDate(entry.date)}</TableCell>
+                        <TableCell>{entry.labor?.name || "-"}</TableCell>
+                        <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
+                        <TableCell>{entry.description || "-"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TabsContent>
+
             <TabsContent value="kharcha" className="space-y-4">
               <div className="flex justify-end">
                 <Dialog open={kharchaDialog} onOpenChange={setKharchaDialog}>
@@ -1001,6 +1078,9 @@ export function LaborManagement() {
                 articles.find((article) => article.id === work.articleId)?.name ??
                 "Unknown",
             }));
+            const paymentRows = paidEntries.filter(
+              (entry) => entry.laborId === viewingLaborId
+            );
             return (
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
@@ -1078,6 +1158,38 @@ export function LaborManagement() {
                           <TableCell>{kharcha.reason || "-"}</TableCell>
                         </TableRow>
                       ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div>
+                  <h3 className="mb-2">Labor Payments</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Description</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paymentRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={3}
+                            className="text-center text-muted-foreground"
+                          >
+                            No labor payments yet
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        paymentRows.map((payment) => (
+                          <TableRow key={payment.id}>
+                            <TableCell>{formatDate(payment.date)}</TableCell>
+                            <TableCell>{formatCurrency(Number(payment.amount))}</TableCell>
+                            <TableCell>{payment.description || "-"}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>

@@ -179,6 +179,7 @@ export const expenseApi = {
     date: string;
     categoryId: string;
     partyId?: string;
+    laborId?: string;
     module?: ApiExpenseModule;
     amount: number;
     description?: string;
@@ -191,6 +192,7 @@ export const expenseApi = {
       date?: string;
       categoryId?: string;
       partyId?: string;
+      laborId?: string;
       module?: ApiExpenseModule;
       amount?: number;
       description?: string;

@@ -56,14 +56,16 @@ export function Roznamcha() {
     description: "",
   });
 
-  const [filterDate, setFilterDate] = useState('');
+  const [filterDate, setFilterDate] = useState(getCurrentDate());
 
-  const loadData = async () => {
+  const loadData = async (dateFilter: string) => {
     setIsLoading(true);
     try {
+      const start = dateFilter;
+      const end = dateFilter;
       const [expenseEntries, categoryData, partyData, laborData] =
         await Promise.all([
-          expenseApi.listExpenses(),
+          expenseApi.listExpenses({ start, end }),
           configApi.listExpenseCategories(),
           partyApi.listParties(),
           laborApi.listProfiles(),
@@ -81,8 +83,10 @@ export function Roznamcha() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (filterDate) {
+      loadData(filterDate);
+    }
+  }, [filterDate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,6 +117,7 @@ export function Roznamcha() {
             date: formData.date,
             categoryId: formData.categoryId,
             partyId: formData.partyId || undefined,
+            laborId: formData.module === "LABOR" ? formData.laborId : undefined,
             module: formData.module,
             amount,
             description: formData.description,
@@ -124,12 +129,13 @@ export function Roznamcha() {
           toast.error("Select a labor profile.");
           return;
         }
-        await laborApi.createAdvance({
-          laborId: formData.laborId,
+        await expenseApi.createExpense({
           date: formData.date,
-          amount,
-          reason: formData.description,
           categoryId: formData.categoryId,
+          laborId: formData.laborId,
+          module: formData.module,
+          amount,
+          description: formData.description,
         });
         toast.success("Expense recorded");
       } else {
@@ -144,7 +150,7 @@ export function Roznamcha() {
         toast.success("Expense recorded");
       }
 
-      await loadData();
+      await loadData(filterDate);
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
@@ -183,22 +189,16 @@ export function Roznamcha() {
   const handleDelete = async (entry: ApiExpenseEntry) => {
     if (!confirm("Delete this expense?")) return;
     try {
-      if (entry.laborAdvanceId) {
-        await laborApi.deleteAdvance(entry.laborAdvanceId);
-      } else {
-        await expenseApi.deleteExpense(entry.id);
-      }
+      await expenseApi.deleteExpense(entry.id);
       toast.success("Expense deleted");
-      await loadData();
+      await loadData(filterDate);
     } catch (error) {
       console.error(error);
       toast.error("Failed to delete expense.");
     }
   };
 
-  const filteredEntries = filterDate
-    ? entries.filter((entry) => entry.date.slice(0, 10) === filterDate)
-    : entries;
+  const filteredEntries = entries;
 
   const totalExpenses = filteredEntries.reduce(
     (sum, entry) => sum + Number(entry.amount ?? 0),
@@ -383,15 +383,12 @@ export function Roznamcha() {
               <Input
                 type="date"
                 value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
+                onChange={(e) =>
+                  setFilterDate(e.target.value || getCurrentDate())
+                }
                 placeholder="All dates"
               />
             </div>
-            {filterDate && (
-              <Button variant="outline" onClick={() => setFilterDate('')}>
-                Clear Filter
-              </Button>
-            )}
             <div className="p-4 bg-muted rounded">
               <p className="text-sm text-muted-foreground">Total Expenses</p>
               <p className="text-2xl">{formatCurrency(totalExpenses)}</p>
