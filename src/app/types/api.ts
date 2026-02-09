@@ -62,6 +62,7 @@ export interface ApiLaborAdvance {
   amount: number | string;
   reason?: string | null;
   createdAt: string;
+  labor?: ApiLaborProfile | null;
 }
 
 export interface ApiLaborLedger {
@@ -173,6 +174,7 @@ export interface ApiExpenseEntry {
   createdAt: string;
   category?: ApiExpenseCategory | null;
   party?: ApiParty | null;
+  laborAdvance?: ApiLaborAdvance | null;
 }
 
 export type ApiPartyType = "CUSTOMER" | "SUPPLIER" | "BOTH";

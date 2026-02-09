@@ -102,6 +102,7 @@ export function Roznamcha() {
       if (editingEntry) {
         if (editingEntry.laborAdvanceId) {
           await laborApi.updateAdvance(editingEntry.laborAdvanceId, {
+            laborId: formData.laborId,
             date: formData.date,
             amount,
             reason: formData.description,
@@ -172,7 +173,7 @@ export function Roznamcha() {
       module: entry.module,
       categoryId: entry.categoryId,
       partyId: entry.partyId || "",
-      laborId: "",
+      laborId: entry.laborAdvance?.laborId || "",
       amount: String(entry.amount),
       description: entry.description || "",
     });
@@ -203,6 +204,9 @@ export function Roznamcha() {
     (sum, entry) => sum + Number(entry.amount ?? 0),
     0
   );
+
+  const getPartyLaborLabel = (entry: ApiExpenseEntry) =>
+    entry.party?.name || entry.laborAdvance?.labor?.name || "-";
 
   return (
     <div className="space-y-6">
@@ -247,7 +251,7 @@ export function Roznamcha() {
                             module: value as ApiExpenseModule,
                           })
                         }
-                        disabled={!!editingEntry}
+                        disabled={!!editingEntry?.laborAdvanceId}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -257,7 +261,12 @@ export function Roznamcha() {
                           <SelectItem value="CHEMICAL">Chemical</SelectItem>
                           <SelectItem value="REXINE">Rexine</SelectItem>
                           <SelectItem value="MATERIAL">Material</SelectItem>
-                          <SelectItem value="LABOR">Labor</SelectItem>
+                          <SelectItem
+                            value="LABOR"
+                            disabled={!!editingEntry && !editingEntry.laborAdvanceId}
+                          >
+                            Labor
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -288,7 +297,7 @@ export function Roznamcha() {
                   formData.module === "MATERIAL" ||
                   formData.module === "REXINE" ? (
                     <div>
-                      <Label>Party (Optional)</Label>
+                      <Label>Party</Label>
                       <Select
                         value={formData.partyId}
                         onValueChange={(value) =>
@@ -299,6 +308,7 @@ export function Roznamcha() {
                           <SelectValue placeholder="Select party" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="">No party</SelectItem>
                           {parties.map((party) => (
                             <SelectItem key={party.id} value={party.id}>
                               {party.name}
@@ -311,13 +321,12 @@ export function Roznamcha() {
 
                   {formData.module === "LABOR" && (
                     <div>
-                      <Label>Labor (Optional)</Label>
+                      <Label>Labor</Label>
                       <Select
                         value={formData.laborId}
                         onValueChange={(value) =>
                           setFormData({ ...formData, laborId: value })
                         }
-                        disabled={!!editingEntry}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select labor" />
@@ -418,7 +427,7 @@ export function Roznamcha() {
                   <TableRow key={entry.id}>
                     <TableCell>{formatDate(entry.date)}</TableCell>
                     <TableCell>{entry.category?.name || "-"}</TableCell>
-                    <TableCell>{entry.party?.name || "-"}</TableCell>
+                    <TableCell>{getPartyLaborLabel(entry)}</TableCell>
                     <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
                     <TableCell>{entry.description || "-"}</TableCell>
                     <TableCell>
