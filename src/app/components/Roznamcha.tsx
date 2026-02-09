@@ -56,14 +56,16 @@ export function Roznamcha() {
     description: "",
   });
 
-  const [filterDate, setFilterDate] = useState('');
+  const [filterDate, setFilterDate] = useState(getCurrentDate());
 
-  const loadData = async () => {
+  const loadData = async (dateFilter: string) => {
     setIsLoading(true);
     try {
+      const start = dateFilter;
+      const end = dateFilter;
       const [expenseEntries, categoryData, partyData, laborData] =
         await Promise.all([
-          expenseApi.listExpenses(),
+          expenseApi.listExpenses({ start, end }),
           configApi.listExpenseCategories(),
           partyApi.listParties(),
           laborApi.listProfiles(),
@@ -81,8 +83,10 @@ export function Roznamcha() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (filterDate) {
+      loadData(filterDate);
+    }
+  }, [filterDate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,6 +106,7 @@ export function Roznamcha() {
       if (editingEntry) {
         if (editingEntry.laborAdvanceId) {
           await laborApi.updateAdvance(editingEntry.laborAdvanceId, {
+            laborId: formData.laborId,
             date: formData.date,
             amount,
             reason: formData.description,
@@ -112,6 +117,7 @@ export function Roznamcha() {
             date: formData.date,
             categoryId: formData.categoryId,
             partyId: formData.partyId || undefined,
+            laborId: formData.module === "LABOR" ? formData.laborId : undefined,
             module: formData.module,
             amount,
             description: formData.description,
@@ -123,12 +129,13 @@ export function Roznamcha() {
           toast.error("Select a labor profile.");
           return;
         }
-        await laborApi.createAdvance({
-          laborId: formData.laborId,
+        await expenseApi.createExpense({
           date: formData.date,
-          amount,
-          reason: formData.description,
           categoryId: formData.categoryId,
+          laborId: formData.laborId,
+          module: formData.module,
+          amount,
+          description: formData.description,
         });
         toast.success("Expense recorded");
       } else {
@@ -143,7 +150,7 @@ export function Roznamcha() {
         toast.success("Expense recorded");
       }
 
-      await loadData();
+      await loadData(filterDate);
       resetForm();
       setIsDialogOpen(false);
     } catch (error) {
@@ -172,7 +179,7 @@ export function Roznamcha() {
       module: entry.module,
       categoryId: entry.categoryId,
       partyId: entry.partyId || "",
-      laborId: "",
+      laborId: entry.laborId || entry.laborAdvance?.laborId || "",
       amount: String(entry.amount),
       description: entry.description || "",
     });
@@ -182,27 +189,27 @@ export function Roznamcha() {
   const handleDelete = async (entry: ApiExpenseEntry) => {
     if (!confirm("Delete this expense?")) return;
     try {
-      if (entry.laborAdvanceId) {
-        await laborApi.deleteAdvance(entry.laborAdvanceId);
-      } else {
-        await expenseApi.deleteExpense(entry.id);
-      }
+      await expenseApi.deleteExpense(entry.id);
       toast.success("Expense deleted");
-      await loadData();
+      await loadData(filterDate);
     } catch (error) {
       console.error(error);
       toast.error("Failed to delete expense.");
     }
   };
 
-  const filteredEntries = filterDate
-    ? entries.filter((entry) => entry.date.slice(0, 10) === filterDate)
-    : entries;
+  const filteredEntries = entries;
 
   const totalExpenses = filteredEntries.reduce(
     (sum, entry) => sum + Number(entry.amount ?? 0),
     0
   );
+
+  const getPartyLaborLabel = (entry: ApiExpenseEntry) =>
+    entry.party?.name ||
+    entry.labor?.name ||
+    entry.laborAdvance?.labor?.name ||
+    "-";
 
   return (
     <div className="space-y-6">
@@ -247,7 +254,7 @@ export function Roznamcha() {
                             module: value as ApiExpenseModule,
                           })
                         }
-                        disabled={!!editingEntry}
+                        disabled={!!editingEntry?.laborAdvanceId}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -257,7 +264,12 @@ export function Roznamcha() {
                           <SelectItem value="CHEMICAL">Chemical</SelectItem>
                           <SelectItem value="REXINE">Rexine</SelectItem>
                           <SelectItem value="MATERIAL">Material</SelectItem>
-                          <SelectItem value="LABOR">Labor</SelectItem>
+                          <SelectItem
+                            value="LABOR"
+                            disabled={!!editingEntry && !editingEntry.laborAdvanceId}
+                          >
+                            Labor
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -288,7 +300,7 @@ export function Roznamcha() {
                   formData.module === "MATERIAL" ||
                   formData.module === "REXINE" ? (
                     <div>
-                      <Label>Party (Optional)</Label>
+                      <Label>Party</Label>
                       <Select
                         value={formData.partyId}
                         onValueChange={(value) =>
@@ -299,6 +311,7 @@ export function Roznamcha() {
                           <SelectValue placeholder="Select party" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="">No party</SelectItem>
                           {parties.map((party) => (
                             <SelectItem key={party.id} value={party.id}>
                               {party.name}
@@ -311,13 +324,12 @@ export function Roznamcha() {
 
                   {formData.module === "LABOR" && (
                     <div>
-                      <Label>Labor (Optional)</Label>
+                      <Label>Labor</Label>
                       <Select
                         value={formData.laborId}
                         onValueChange={(value) =>
                           setFormData({ ...formData, laborId: value })
                         }
-                        disabled={!!editingEntry}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select labor" />
@@ -374,15 +386,12 @@ export function Roznamcha() {
               <Input
                 type="date"
                 value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
+                onChange={(e) =>
+                  setFilterDate(e.target.value || getCurrentDate())
+                }
                 placeholder="All dates"
               />
             </div>
-            {filterDate && (
-              <Button variant="outline" onClick={() => setFilterDate('')}>
-                Clear Filter
-              </Button>
-            )}
             <div className="p-4 bg-muted rounded">
               <p className="text-sm text-muted-foreground">Total Expenses</p>
               <p className="text-2xl">{formatCurrency(totalExpenses)}</p>
@@ -418,7 +427,7 @@ export function Roznamcha() {
                   <TableRow key={entry.id}>
                     <TableCell>{formatDate(entry.date)}</TableCell>
                     <TableCell>{entry.category?.name || "-"}</TableCell>
-                    <TableCell>{entry.party?.name || "-"}</TableCell>
+                    <TableCell>{getPartyLaborLabel(entry)}</TableCell>
                     <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
                     <TableCell>{entry.description || "-"}</TableCell>
                     <TableCell>

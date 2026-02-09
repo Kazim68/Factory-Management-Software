@@ -53,6 +53,14 @@ export function Configuration() {
   const [paymentDialog, setPaymentDialog] = useState(false);
   const [expenseDialog, setExpenseDialog] = useState(false);
 
+  const [editingUnit, setEditingUnit] = useState<ApiUnit | null>(null);
+  const [editingArticle, setEditingArticle] = useState<ApiArticle | null>(null);
+  const [editingLabor, setEditingLabor] = useState<ApiLaborCategory | null>(null);
+  const [editingPayment, setEditingPayment] = useState<ApiPaymentType | null>(null);
+  const [editingExpense, setEditingExpense] = useState<ApiExpenseCategory | null>(
+    null
+  );
+
   const [unitForm, setUnitForm] = useState({ name: "", symbol: "" });
   const [articleForm, setArticleForm] = useState({ name: "", code: "" });
   const [laborForm, setLaborForm] = useState({ name: "" });
@@ -94,12 +102,21 @@ export function Configuration() {
   const handleUnitSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await configApi.createUnit({
-        name: unitForm.name.trim(),
-        symbol: unitForm.symbol.trim() || undefined,
-      });
-      toast.success("Unit added");
+      if (editingUnit) {
+        await configApi.updateUnit(editingUnit.id, {
+          name: unitForm.name.trim(),
+          symbol: unitForm.symbol.trim() || null,
+        });
+        toast.success("Unit updated");
+      } else {
+        await configApi.createUnit({
+          name: unitForm.name.trim(),
+          symbol: unitForm.symbol.trim() || undefined,
+        });
+        toast.success("Unit added");
+      }
       setUnitForm({ name: "", symbol: "" });
+      setEditingUnit(null);
       setUnitDialog(false);
       await loadConfig();
     } catch (error) {
@@ -111,12 +128,21 @@ export function Configuration() {
   const handleArticleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await configApi.createArticle({
-        name: articleForm.name.trim(),
-        code: articleForm.code.trim() || undefined,
-      });
-      toast.success("Article added");
+      if (editingArticle) {
+        await configApi.updateArticle(editingArticle.id, {
+          name: articleForm.name.trim(),
+          code: articleForm.code.trim() || null,
+        });
+        toast.success("Article updated");
+      } else {
+        await configApi.createArticle({
+          name: articleForm.name.trim(),
+          code: articleForm.code.trim() || undefined,
+        });
+        toast.success("Article added");
+      }
       setArticleForm({ name: "", code: "" });
+      setEditingArticle(null);
       setArticleDialog(false);
       await loadConfig();
     } catch (error) {
@@ -128,9 +154,17 @@ export function Configuration() {
   const handleLaborSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await configApi.createLaborCategory({ name: laborForm.name.trim() });
-      toast.success("Labor category added");
+      if (editingLabor) {
+        await configApi.updateLaborCategory(editingLabor.id, {
+          name: laborForm.name.trim(),
+        });
+        toast.success("Labor category updated");
+      } else {
+        await configApi.createLaborCategory({ name: laborForm.name.trim() });
+        toast.success("Labor category added");
+      }
       setLaborForm({ name: "" });
+      setEditingLabor(null);
       setLaborDialog(false);
       await loadConfig();
     } catch (error) {
@@ -142,12 +176,21 @@ export function Configuration() {
   const handlePaymentSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await configApi.createPaymentType({
-        name: paymentForm.name.trim(),
-        unitId: paymentForm.unitId === "none" ? undefined : paymentForm.unitId,
-      });
-      toast.success("Payment type added");
+      if (editingPayment) {
+        await configApi.updatePaymentType(editingPayment.id, {
+          name: paymentForm.name.trim(),
+          unitId: paymentForm.unitId === "none" ? null : paymentForm.unitId,
+        });
+        toast.success("Payment type updated");
+      } else {
+        await configApi.createPaymentType({
+          name: paymentForm.name.trim(),
+          unitId: paymentForm.unitId === "none" ? undefined : paymentForm.unitId,
+        });
+        toast.success("Payment type added");
+      }
       setPaymentForm({ name: "", unitId: "none" });
+      setEditingPayment(null);
       setPaymentDialog(false);
       await loadConfig();
     } catch (error) {
@@ -159,16 +202,114 @@ export function Configuration() {
   const handleExpenseSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
-      await configApi.createExpenseCategory({
-        name: expenseForm.name.trim(),
-      });
-      toast.success("Expense category added");
+      if (editingExpense) {
+        await configApi.updateExpenseCategory(editingExpense.id, {
+          name: expenseForm.name.trim(),
+        });
+        toast.success("Expense category updated");
+      } else {
+        await configApi.createExpenseCategory({
+          name: expenseForm.name.trim(),
+        });
+        toast.success("Expense category added");
+      }
       setExpenseForm({ name: "" });
+      setEditingExpense(null);
       setExpenseDialog(false);
       await loadConfig();
     } catch (error) {
       console.error(error);
       toast.error("Unable to save expense category.");
+    }
+  };
+
+  const startUnitEdit = (unit: ApiUnit) => {
+    setEditingUnit(unit);
+    setUnitForm({ name: unit.name, symbol: unit.symbol || "" });
+    setUnitDialog(true);
+  };
+
+  const startArticleEdit = (article: ApiArticle) => {
+    setEditingArticle(article);
+    setArticleForm({ name: article.name, code: article.code || "" });
+    setArticleDialog(true);
+  };
+
+  const startLaborEdit = (category: ApiLaborCategory) => {
+    setEditingLabor(category);
+    setLaborForm({ name: category.name });
+    setLaborDialog(true);
+  };
+
+  const startPaymentEdit = (payment: ApiPaymentType) => {
+    setEditingPayment(payment);
+    setPaymentForm({ name: payment.name, unitId: payment.unitId || "none" });
+    setPaymentDialog(true);
+  };
+
+  const startExpenseEdit = (category: ApiExpenseCategory) => {
+    setEditingExpense(category);
+    setExpenseForm({ name: category.name });
+    setExpenseDialog(true);
+  };
+
+  const handleUnitDelete = async (unit: ApiUnit) => {
+    if (!confirm(`Delete unit "${unit.name}"?`)) return;
+    try {
+      await configApi.deleteUnit(unit.id);
+      toast.success("Unit deleted");
+      await loadConfig();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to delete unit.");
+    }
+  };
+
+  const handleArticleDelete = async (article: ApiArticle) => {
+    if (!confirm(`Delete article "${article.name}"?`)) return;
+    try {
+      await configApi.deleteArticle(article.id);
+      toast.success("Article deleted");
+      await loadConfig();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to delete article.");
+    }
+  };
+
+  const handleLaborDelete = async (category: ApiLaborCategory) => {
+    if (!confirm(`Delete labor category "${category.name}"?`)) return;
+    try {
+      await configApi.deleteLaborCategory(category.id);
+      toast.success("Labor category deleted");
+      await loadConfig();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to delete labor category.");
+    }
+  };
+
+  const handlePaymentDelete = async (payment: ApiPaymentType) => {
+    if (!confirm(`Delete payment type "${payment.name}"?`)) return;
+    try {
+      await configApi.deletePaymentType(payment.id);
+      toast.success("Payment type deleted");
+      await loadConfig();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to delete payment type.");
+    }
+  };
+
+  const handleExpenseDelete = async (category: ApiExpenseCategory) => {
+    if (!confirm(`Delete expense category "${category.name}"?`)) return;
+    try {
+      await configApi.deleteExpenseCategory(category.id);
+      toast.success("Expense category deleted");
+      await loadConfig();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to delete expense category.");
     }
   };
 
@@ -200,16 +341,32 @@ export function Configuration() {
 
             <TabsContent value="units" className="space-y-4">
               <div className="flex justify-end">
-                <Dialog open={unitDialog} onOpenChange={setUnitDialog}>
+                <Dialog
+                  open={unitDialog}
+                  onOpenChange={(open) => {
+                    setUnitDialog(open);
+                    if (!open) {
+                      setEditingUnit(null);
+                      setUnitForm({ name: "", symbol: "" });
+                    }
+                  }}
+                >
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button
+                      onClick={() => {
+                        setEditingUnit(null);
+                        setUnitForm({ name: "", symbol: "" });
+                      }}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add Unit
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Unit</DialogTitle>
+                      <DialogTitle>
+                        {editingUnit ? "Edit Unit" : "Add Unit"}
+                      </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleUnitSubmit} className="space-y-4">
                       <div>
@@ -250,17 +407,36 @@ export function Configuration() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Symbol</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading
-                    ? renderEmpty(2, "Loading units...")
+                    ? renderEmpty(3, "Loading units...")
                     : units.length === 0
-                      ? renderEmpty(2, "No units yet")
+                      ? renderEmpty(3, "No units yet")
                       : units.map((unit) => (
                           <TableRow key={unit.id}>
                             <TableCell>{unit.name}</TableCell>
                             <TableCell>{unit.symbol || "-"}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startUnitEdit(unit)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleUnitDelete(unit)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                 </TableBody>
@@ -269,16 +445,32 @@ export function Configuration() {
 
             <TabsContent value="articles" className="space-y-4">
               <div className="flex justify-end">
-                <Dialog open={articleDialog} onOpenChange={setArticleDialog}>
+                <Dialog
+                  open={articleDialog}
+                  onOpenChange={(open) => {
+                    setArticleDialog(open);
+                    if (!open) {
+                      setEditingArticle(null);
+                      setArticleForm({ name: "", code: "" });
+                    }
+                  }}
+                >
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button
+                      onClick={() => {
+                        setEditingArticle(null);
+                        setArticleForm({ name: "", code: "" });
+                      }}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add Article
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Article</DialogTitle>
+                      <DialogTitle>
+                        {editingArticle ? "Edit Article" : "Add Article"}
+                      </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleArticleSubmit} className="space-y-4">
                       <div>
@@ -325,17 +517,36 @@ export function Configuration() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Code</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading
-                    ? renderEmpty(2, "Loading articles...")
+                    ? renderEmpty(3, "Loading articles...")
                     : articles.length === 0
-                      ? renderEmpty(2, "No articles yet")
+                      ? renderEmpty(3, "No articles yet")
                       : articles.map((article) => (
                           <TableRow key={article.id}>
                             <TableCell>{article.name}</TableCell>
                             <TableCell>{article.code || "-"}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startArticleEdit(article)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleArticleDelete(article)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                 </TableBody>
@@ -344,16 +555,34 @@ export function Configuration() {
 
             <TabsContent value="labor" className="space-y-4">
               <div className="flex justify-end">
-                <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
+                <Dialog
+                  open={laborDialog}
+                  onOpenChange={(open) => {
+                    setLaborDialog(open);
+                    if (!open) {
+                      setEditingLabor(null);
+                      setLaborForm({ name: "" });
+                    }
+                  }}
+                >
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button
+                      onClick={() => {
+                        setEditingLabor(null);
+                        setLaborForm({ name: "" });
+                      }}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add Labor Category
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Labor Category</DialogTitle>
+                      <DialogTitle>
+                        {editingLabor
+                          ? "Edit Labor Category"
+                          : "Add Labor Category"}
+                      </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleLaborSubmit} className="space-y-4">
                       <div>
@@ -384,16 +613,35 @@ export function Configuration() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading
-                    ? renderEmpty(1, "Loading labor categories...")
+                    ? renderEmpty(2, "Loading labor categories...")
                     : laborCategories.length === 0
-                      ? renderEmpty(1, "No labor categories yet")
+                      ? renderEmpty(2, "No labor categories yet")
                       : laborCategories.map((category) => (
                           <TableRow key={category.id}>
                             <TableCell>{category.name}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startLaborEdit(category)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleLaborDelete(category)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                 </TableBody>
@@ -402,16 +650,32 @@ export function Configuration() {
 
             <TabsContent value="payment" className="space-y-4">
               <div className="flex justify-end">
-                <Dialog open={paymentDialog} onOpenChange={setPaymentDialog}>
+                <Dialog
+                  open={paymentDialog}
+                  onOpenChange={(open) => {
+                    setPaymentDialog(open);
+                    if (!open) {
+                      setEditingPayment(null);
+                      setPaymentForm({ name: "", unitId: "none" });
+                    }
+                  }}
+                >
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button
+                      onClick={() => {
+                        setEditingPayment(null);
+                        setPaymentForm({ name: "", unitId: "none" });
+                      }}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add Payment Type
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Payment Type</DialogTitle>
+                      <DialogTitle>
+                        {editingPayment ? "Edit Payment Type" : "Add Payment Type"}
+                      </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handlePaymentSubmit} className="space-y-4">
                       <div>
@@ -467,17 +731,36 @@ export function Configuration() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Unit</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading
-                    ? renderEmpty(2, "Loading payment types...")
+                    ? renderEmpty(3, "Loading payment types...")
                     : paymentTypes.length === 0
-                      ? renderEmpty(2, "No payment types yet")
+                      ? renderEmpty(3, "No payment types yet")
                       : paymentTypes.map((type) => (
                           <TableRow key={type.id}>
                             <TableCell>{type.name}</TableCell>
                             <TableCell>{type.unit?.name || "-"}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startPaymentEdit(type)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handlePaymentDelete(type)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                 </TableBody>
@@ -486,16 +769,34 @@ export function Configuration() {
 
             <TabsContent value="expenses" className="space-y-4">
               <div className="flex justify-end">
-                <Dialog open={expenseDialog} onOpenChange={setExpenseDialog}>
+                <Dialog
+                  open={expenseDialog}
+                  onOpenChange={(open) => {
+                    setExpenseDialog(open);
+                    if (!open) {
+                      setEditingExpense(null);
+                      setExpenseForm({ name: "" });
+                    }
+                  }}
+                >
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button
+                      onClick={() => {
+                        setEditingExpense(null);
+                        setExpenseForm({ name: "" });
+                      }}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add Expense Category
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Add Expense Category</DialogTitle>
+                      <DialogTitle>
+                        {editingExpense
+                          ? "Edit Expense Category"
+                          : "Add Expense Category"}
+                      </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleExpenseSubmit} className="space-y-4">
                       <div>
@@ -526,16 +827,35 @@ export function Configuration() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading
-                    ? renderEmpty(1, "Loading expense categories...")
+                    ? renderEmpty(2, "Loading expense categories...")
                     : expenseCategories.length === 0
-                      ? renderEmpty(1, "No expense categories yet")
+                      ? renderEmpty(2, "No expense categories yet")
                       : expenseCategories.map((category) => (
                           <TableRow key={category.id}>
                             <TableCell>{category.name}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startExpenseEdit(category)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleExpenseDelete(category)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         ))}
                 </TableBody>

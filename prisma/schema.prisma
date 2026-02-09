@@ -131,6 +131,7 @@ model ExpenseEntry {
   date               DateTime
   categoryId         String
   partyId            String?
+  laborId            String?
   module             ExpenseModule @default(MISC)
   amount             Decimal
   description        String?
@@ -142,6 +143,7 @@ model ExpenseEntry {
 
   category          ExpenseCategory  @relation(fields: [categoryId], references: [id])
   party             Party?           @relation(fields: [partyId], references: [id])
+  labor             LaborProfile?    @relation(fields: [laborId], references: [id])
   chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
   rexinePurchase    RexinePurchase?  @relation(fields: [rexinePurchaseId], references: [id])
   materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
@@ -164,6 +166,7 @@ model LaborProfile {
   rates        LaborRate[]
   workEntries  LaborWorkEntry[]
   advances     LaborAdvance[]
+  expenses     ExpenseEntry[]
 
   @@index([categoryId])
 }
