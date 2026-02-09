@@ -17,7 +17,15 @@ function createWindow() {
   });
 
   if (!app.isPackaged) {
-    win.loadURL("http://localhost:5173");
+    const loadDev = async () => {
+      try {
+        await win.loadURL("http://localhost:5173");
+      } catch (err) {
+        // Retry until Vite is ready
+        setTimeout(loadDev, 300);
+      }
+    };
+    loadDev();
   } else {
     win.loadFile(path.join(__dirname, "../dist/index.html"));
   }

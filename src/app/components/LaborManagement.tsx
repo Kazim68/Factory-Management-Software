@@ -438,7 +438,7 @@ export function LaborManagement() {
                       <div>
                         <Label>Labor Name</Label>
                         <Input
-                          value={laborForm.name}
+                          defaultValue={laborForm.name}
                           onChange={(e) =>
                             setLaborForm({ ...laborForm, name: e.target.value })
                           }
