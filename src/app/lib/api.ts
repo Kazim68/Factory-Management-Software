@@ -43,15 +43,40 @@ export const configApi = {
   listUnits: (): Promise<ApiUnit[]> => get("/config/units"),
   createUnit: (data: { name: string; symbol?: string }): Promise<ApiUnit> =>
     request({ path: "/config/units", method: "POST", body: data }),
+  updateUnit: (
+    unitId: string,
+    data: { name: string; symbol?: string | null }
+  ): Promise<ApiUnit> =>
+    request({ path: `/config/units/${unitId}`, method: "PATCH", body: data }),
+  deleteUnit: (unitId: string): Promise<void> =>
+    request({ path: `/config/units/${unitId}`, method: "DELETE" }),
 
   listArticles: (): Promise<ApiArticle[]> => get("/config/articles"),
   createArticle: (data: { name: string; code?: string }): Promise<ApiArticle> =>
     request({ path: "/config/articles", method: "POST", body: data }),
+  updateArticle: (
+    articleId: string,
+    data: { name: string; code?: string | null }
+  ): Promise<ApiArticle> =>
+    request({ path: `/config/articles/${articleId}`, method: "PATCH", body: data }),
+  deleteArticle: (articleId: string): Promise<void> =>
+    request({ path: `/config/articles/${articleId}`, method: "DELETE" }),
 
   listLaborCategories: (): Promise<ApiLaborCategory[]> =>
     get("/config/labor-categories"),
   createLaborCategory: (data: { name: string }): Promise<ApiLaborCategory> =>
     request({ path: "/config/labor-categories", method: "POST", body: data }),
+  updateLaborCategory: (
+    categoryId: string,
+    data: { name: string }
+  ): Promise<ApiLaborCategory> =>
+    request({
+      path: `/config/labor-categories/${categoryId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteLaborCategory: (categoryId: string): Promise<void> =>
+    request({ path: `/config/labor-categories/${categoryId}`, method: "DELETE" }),
 
   listPaymentTypes: (): Promise<ApiPaymentType[]> =>
     get("/config/payment-types"),
@@ -60,6 +85,20 @@ export const configApi = {
     unitId?: string;
   }): Promise<ApiPaymentType> =>
     request({ path: "/config/payment-types", method: "POST", body: data }),
+  updatePaymentType: (
+    paymentTypeId: string,
+    data: { name: string; unitId?: string | null }
+  ): Promise<ApiPaymentType> =>
+    request({
+      path: `/config/payment-types/${paymentTypeId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deletePaymentType: (paymentTypeId: string): Promise<void> =>
+    request({
+      path: `/config/payment-types/${paymentTypeId}`,
+      method: "DELETE",
+    }),
 
   listExpenseCategories: (): Promise<ApiExpenseCategory[]> =>
     get("/config/expense-categories"),
@@ -67,6 +106,20 @@ export const configApi = {
     name: string;
   }): Promise<ApiExpenseCategory> =>
     request({ path: "/config/expense-categories", method: "POST", body: data }),
+  updateExpenseCategory: (
+    expenseCategoryId: string,
+    data: { name: string }
+  ): Promise<ApiExpenseCategory> =>
+    request({
+      path: `/config/expense-categories/${expenseCategoryId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteExpenseCategory: (expenseCategoryId: string): Promise<void> =>
+    request({
+      path: `/config/expense-categories/${expenseCategoryId}`,
+      method: "DELETE",
+    }),
 };
 
 export const partyApi = {
