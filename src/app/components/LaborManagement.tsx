@@ -576,6 +576,7 @@ export function LaborManagement() {
                     profiles.map((labor) => {
                       const summary = getLaborSummary(labor.id);
                       const totalPaid = paidByLabor[labor.id] ?? 0;
+                      const adjustedNetPayable = summary.netPayable - totalPaid;
                       return (
                         <TableRow key={labor.id}>
                           <TableCell>{labor.name}</TableCell>
@@ -591,10 +592,10 @@ export function LaborManagement() {
                           <TableCell>
                             <span
                               className={
-                                summary.netPayable > 0 ? "text-green-600" : ""
+                                adjustedNetPayable > 0 ? "text-green-600" : ""
                               }
                             >
-                              {formatCurrency(summary.netPayable)}
+                              {formatCurrency(adjustedNetPayable)}
                             </span>
                           </TableCell>
                           <TableCell>
@@ -1072,6 +1073,8 @@ export function LaborManagement() {
           </DialogHeader>
           {viewingLaborId && (() => {
             const summary = getLaborSummary(viewingLaborId);
+            const totalPaid = paidByLabor[viewingLaborId] ?? 0;
+            const adjustedNetPayable = summary.netPayable - totalPaid;
             const workRows = summary.workEntries.map((work) => ({
               ...work,
               articleName:
@@ -1110,7 +1113,7 @@ export function LaborManagement() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-2xl text-green-600">
-                        {formatCurrency(summary.netPayable)}
+                        {formatCurrency(adjustedNetPayable)}
                       </p>
                     </CardContent>
                   </Card>

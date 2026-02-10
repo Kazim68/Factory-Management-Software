@@ -114,6 +114,7 @@ export const createLaborAdvance = async (req, res) => {
       date: new Date(req.body.date),
       categoryId: req.body.categoryId,
       partyId: req.body.partyId,
+      laborId: req.body.laborId,
       module: "LABOR",
       amount: req.body.amount,
       description: req.body.reason,
