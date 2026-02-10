@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://localhost:3001";
+const API_BASE_URL = "http://127.0.0.1:4001";
 
 const requestApi = async (payload) => {
   const { path, method = "GET", body } = payload ?? {};

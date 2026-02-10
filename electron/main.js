@@ -31,8 +31,8 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
-  startServer();
+app.whenReady().then(async () => {
+  await startServer();   // 🔴 IMPORTANT
   registerIpc(ipcMain);
   createWindow();
 });

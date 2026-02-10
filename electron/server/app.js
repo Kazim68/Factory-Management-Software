@@ -12,10 +12,24 @@ export const createApp = () => {
   return app;
 };
 
-export const startServer = (port = 3001) => {
+export function startServer() {
   const app = createApp();
+   return new Promise((resolve, reject) => {
+    try {
+      const server = app.listen(4001, "127.0.0.1" , () => {
+        console.log("✅ Express running on 3001");
+        resolve(server);
+      });
 
-  app.listen(port, () => {
-    console.log(`Express + Prisma running on ${port}`);
+      server.on("error", (err) => {
+        console.error("❌ Express server error:", err);
+        reject(err);
+      });
+
+    } catch (err) {
+      console.error("❌ Express crashed:", err);
+      reject(err);
+    }
   });
-};
+}
+
