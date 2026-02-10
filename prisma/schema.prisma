@@ -119,9 +119,15 @@ model PartyLedgerEntry {
   debit          Decimal  @default(0)
   credit         Decimal  @default(0)
   runningBalance Decimal?
+  chemicalPurchaseId String?
+  rexinePurchaseId   String?
+  materialPurchaseId String?
   createdAt      DateTime @default(now())
 
   party Party @relation(fields: [partyId], references: [id])
+  chemicalPurchase ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
+  rexinePurchase   RexinePurchase?   @relation(fields: [rexinePurchaseId], references: [id])
+  materialPurchase MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
 
   @@index([partyId, date])
 }
@@ -263,6 +269,7 @@ model ChemicalPurchase {
   party     Party?         @relation(fields: [partyId], references: [id])
   expenses  ExpenseEntry[]
   payments  PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
 
   @@index([date])
 }
@@ -280,6 +287,7 @@ model RexinePurchase {
   party     Party?         @relation(fields: [partyId], references: [id])
   expenses  ExpenseEntry[]
   payments  PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
 
   @@index([date])
 }
@@ -301,6 +309,7 @@ model MaterialPurchase {
   unit     Unit?          @relation(fields: [unitId], references: [id])
   expenses ExpenseEntry[]
   payments PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
 
   @@index([date])
 }

@@ -82,7 +82,13 @@ export function PartyManagement() {
   ) => {
     let balance = Number(party.openingBalance ?? 0);
     for (const entry of entries) {
-      balance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+      const isCash =
+        typeof entry.cash !== "undefined" ||
+        entry.reference?.toLowerCase().includes("cash") ||
+        entry.description?.toLowerCase().includes("cash");
+      if (!isCash) {
+        balance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+      }
     }
     return balance;
   };
@@ -223,7 +229,7 @@ export function PartyManagement() {
       await partyApi.createPayment(party.id, {
         date: paymentData.date,
         amount,
-        method: "CASH",
+        method: "CREDIT",
         description: paymentData.description || undefined,
       });
       toast.success("Payment recorded");
@@ -246,14 +252,33 @@ export function PartyManagement() {
     const party = parties.find((p) => p.id === viewingPartyId);
     if (!party) return ledgerEntries;
 
-    const entries = [...ledgerEntries].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    const entriesAsc = [...ledgerEntries].sort(
+      (a, b) => {
+        const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+        const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
+        return aCreated - bCreated;
+      }
     );
     let runningBalance = Number(party.openingBalance ?? 0);
-    return entries.map((entry) => {
-      runningBalance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
-      return { ...entry, runningBalance };
+    const withRunning = entriesAsc.map((entry) => {
+      const isCash =
+        typeof entry.cash !== "undefined" ||
+        entry.reference?.toLowerCase().includes("cash") ||
+        entry.description?.toLowerCase().includes("cash");
+      const cashAmount =
+        typeof entry.cash !== "undefined"
+          ? Number(entry.cash)
+          : isCash
+            ? Number(entry.debit ?? entry.credit ?? 0)
+            : 0;
+      if (!isCash) {
+        runningBalance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+      }
+      return { ...entry, runningBalance, isCash, cash: cashAmount };
     });
+    return withRunning.reverse();
   }, [ledgerEntries, parties, viewingPartyId]);
 
   return (
@@ -457,9 +482,9 @@ export function PartyManagement() {
               <TableRow>
                 <TableHead>Date</TableHead>
                 <TableHead>Reference</TableHead>
-                <TableHead>Description</TableHead>
                 <TableHead>Debit</TableHead>
                 <TableHead>Credit</TableHead>
+                <TableHead>Cash</TableHead>
                 <TableHead>Balance</TableHead>
               </TableRow>
             </TableHeader>
@@ -469,13 +494,23 @@ export function PartyManagement() {
                   <TableRow key={entry.id}>
                     <TableCell>{formatDate(entry.date)}</TableCell>
                     <TableCell>{entry.reference || "-"}</TableCell>
-                    <TableCell>{entry.description || "-"}</TableCell>
                     <TableCell>
-                      {Number(entry.debit) > 0 ? formatCurrency(Number(entry.debit)) : "-"}
+                      {entry.isCash
+                        ? "-"
+                        : Number(entry.debit) > 0
+                          ? formatCurrency(Number(entry.debit))
+                          : "-"}
                     </TableCell>
                     <TableCell>
-                      {Number(entry.credit) > 0
-                        ? formatCurrency(Number(entry.credit))
+                      {entry.isCash
+                        ? "-"
+                        : Number(entry.credit) > 0
+                          ? formatCurrency(Number(entry.credit))
+                          : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {entry.isCash
+                        ? formatCurrency(Number(entry.cash ?? 0))
                         : "-"}
                     </TableCell>
                     <TableCell>

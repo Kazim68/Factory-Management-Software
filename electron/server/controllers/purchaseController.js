@@ -37,6 +37,7 @@ export const createChemicalPurchase = async (req, res) => {
           description: req.body.description,
           debit: 0,
           credit: purchase.totalAmount,
+          chemicalPurchaseId: purchase.id,
         },
       });
     }
@@ -80,6 +81,40 @@ export const updateChemicalPurchase = async (req, res) => {
       },
     });
 
+    const existingLedger = await tx.partyLedgerEntry.findFirst({
+      where: { chemicalPurchaseId: updated.id },
+    });
+
+    if (updated.partyId && updated.paymentType === "CREDIT") {
+      if (existingLedger) {
+        await tx.partyLedgerEntry.update({
+          where: { id: existingLedger.id },
+          data: {
+            partyId: updated.partyId,
+            date: updated.date,
+            reference: "Chemical Purchase",
+            description: req.body.description,
+            debit: 0,
+            credit: updated.totalAmount,
+          },
+        });
+      } else {
+        await tx.partyLedgerEntry.create({
+          data: {
+            partyId: updated.partyId,
+            date: updated.date,
+            reference: "Chemical Purchase",
+            description: req.body.description,
+            debit: 0,
+            credit: updated.totalAmount,
+            chemicalPurchaseId: updated.id,
+          },
+        });
+      }
+    } else if (existingLedger) {
+      await tx.partyLedgerEntry.delete({ where: { id: existingLedger.id } });
+    }
+
     return tx.chemicalPurchase.findUnique({
       where: { id: updated.id },
       include: { party: true, expenses: true },
@@ -91,6 +126,9 @@ export const updateChemicalPurchase = async (req, res) => {
 
 export const deleteChemicalPurchase = async (req, res) => {
   await prisma.$transaction(async (tx) => {
+    await tx.partyLedgerEntry.deleteMany({
+      where: { chemicalPurchaseId: req.params.purchaseId },
+    });
     await tx.expenseEntry.deleteMany({
       where: { chemicalPurchaseId: req.params.purchaseId },
     });
@@ -142,6 +180,7 @@ export const createRexinePurchase = async (req, res) => {
           description: req.body.description,
           debit: 0,
           credit: purchase.totalAmount,
+          rexinePurchaseId: purchase.id,
         },
       });
     }
@@ -185,6 +224,40 @@ export const updateRexinePurchase = async (req, res) => {
       },
     });
 
+    const existingLedger = await tx.partyLedgerEntry.findFirst({
+      where: { rexinePurchaseId: updated.id },
+    });
+
+    if (updated.partyId && updated.paymentType === "CREDIT") {
+      if (existingLedger) {
+        await tx.partyLedgerEntry.update({
+          where: { id: existingLedger.id },
+          data: {
+            partyId: updated.partyId,
+            date: updated.date,
+            reference: "Rexine Purchase",
+            description: req.body.description,
+            debit: 0,
+            credit: updated.totalAmount,
+          },
+        });
+      } else {
+        await tx.partyLedgerEntry.create({
+          data: {
+            partyId: updated.partyId,
+            date: updated.date,
+            reference: "Rexine Purchase",
+            description: req.body.description,
+            debit: 0,
+            credit: updated.totalAmount,
+            rexinePurchaseId: updated.id,
+          },
+        });
+      }
+    } else if (existingLedger) {
+      await tx.partyLedgerEntry.delete({ where: { id: existingLedger.id } });
+    }
+
     return tx.rexinePurchase.findUnique({
       where: { id: updated.id },
       include: { party: true, expenses: true },
@@ -196,6 +269,9 @@ export const updateRexinePurchase = async (req, res) => {
 
 export const deleteRexinePurchase = async (req, res) => {
   await prisma.$transaction(async (tx) => {
+    await tx.partyLedgerEntry.deleteMany({
+      where: { rexinePurchaseId: req.params.purchaseId },
+    });
     await tx.expenseEntry.deleteMany({
       where: { rexinePurchaseId: req.params.purchaseId },
     });
@@ -251,6 +327,7 @@ export const createMaterialPurchase = async (req, res) => {
           description: req.body.description,
           debit: 0,
           credit: purchase.totalAmount,
+          materialPurchaseId: purchase.id,
         },
       });
     }
@@ -296,6 +373,40 @@ export const updateMaterialPurchase = async (req, res) => {
       },
     });
 
+    const existingLedger = await tx.partyLedgerEntry.findFirst({
+      where: { materialPurchaseId: updated.id },
+    });
+
+    if (updated.partyId && updated.paymentType === "CREDIT") {
+      if (existingLedger) {
+        await tx.partyLedgerEntry.update({
+          where: { id: existingLedger.id },
+          data: {
+            partyId: updated.partyId,
+            date: updated.date,
+            reference: "Material Purchase",
+            description: req.body.description,
+            debit: 0,
+            credit: updated.totalAmount,
+          },
+        });
+      } else {
+        await tx.partyLedgerEntry.create({
+          data: {
+            partyId: updated.partyId,
+            date: updated.date,
+            reference: "Material Purchase",
+            description: req.body.description,
+            debit: 0,
+            credit: updated.totalAmount,
+            materialPurchaseId: updated.id,
+          },
+        });
+      }
+    } else if (existingLedger) {
+      await tx.partyLedgerEntry.delete({ where: { id: existingLedger.id } });
+    }
+
     return tx.materialPurchase.findUnique({
       where: { id: updated.id },
       include: { party: true, article: true, unit: true, expenses: true },
@@ -307,6 +418,9 @@ export const updateMaterialPurchase = async (req, res) => {
 
 export const deleteMaterialPurchase = async (req, res) => {
   await prisma.$transaction(async (tx) => {
+    await tx.partyLedgerEntry.deleteMany({
+      where: { materialPurchaseId: req.params.purchaseId },
+    });
     await tx.expenseEntry.deleteMany({
       where: { materialPurchaseId: req.params.purchaseId },
     });

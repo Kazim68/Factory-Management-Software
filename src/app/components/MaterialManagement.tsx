@@ -237,7 +237,9 @@ export function MaterialManagement() {
                           <SelectValue placeholder="Select party" />
                         </SelectTrigger>
                         <SelectContent>
-                          {parties.map((party) => (
+                          {parties
+                            .filter((party) => party.type === "SUPPLIER")
+                            .map((party) => (
                             <SelectItem key={party.id} value={party.id}>
                               {party.name}
                             </SelectItem>
@@ -376,8 +378,6 @@ export function MaterialManagement() {
                 <TableHead>Price/Pair</TableHead>
                 <TableHead>Total</TableHead>
                 <TableHead>Payment Type</TableHead>
-                <TableHead>Paid</TableHead>
-                <TableHead>Balance</TableHead>
                 <TableHead>Detail</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -385,21 +385,19 @@ export function MaterialManagement() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     Loading transactions...
                   </TableCell>
                 </TableRow>
               ) : transactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     No transactions yet
                   </TableCell>
                 </TableRow>
               ) : (
                 transactions.map((transaction) => {
                   const total = Number(transaction.totalAmount);
-                  const paid = transaction.paymentType === "CASH" ? total : 0;
-                  const balance = transaction.paymentType === "CREDIT" ? total : 0;
                   return (
                     <TableRow key={transaction.id}>
                       <TableCell>{formatDate(transaction.date)}</TableCell>
@@ -419,21 +417,11 @@ export function MaterialManagement() {
                               ? "text-green-600"
                               : "text-orange-600"
                           }
-                        >
-                          {transaction.paymentType}
-                        </span>
-                      </TableCell>
-                      <TableCell>{formatCurrency(paid)}</TableCell>
-                      <TableCell>
-                        <span
-                          className={
-                            balance > 0 ? "text-red-600" : "text-green-600"
-                          }
-                        >
-                          {formatCurrency(balance)}
-                        </span>
-                      </TableCell>
-                      <TableCell>{getDetail(transaction)}</TableCell>
+                      >
+                        {transaction.paymentType}
+                      </span>
+                    </TableCell>
+                    <TableCell>{getDetail(transaction)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           <Button size="sm" variant="ghost" onClick={() => startEdit(transaction)}>

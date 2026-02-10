@@ -198,6 +198,8 @@ export interface ApiPartyLedgerEntry {
   description?: string | null;
   debit: number | string;
   credit: number | string;
+  cash?: number | string;
+  isCash?: boolean;
   runningBalance?: number | string | null;
   createdAt: string;
 }

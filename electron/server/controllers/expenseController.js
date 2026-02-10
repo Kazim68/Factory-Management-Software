@@ -191,12 +191,21 @@ export const deleteExpense = async (req, res) => {
 
   await prisma.$transaction(async (tx) => {
     if (expense?.chemicalPurchaseId) {
+      await tx.partyLedgerEntry.deleteMany({
+        where: { chemicalPurchaseId: expense.chemicalPurchaseId },
+      });
       await tx.chemicalPurchase.delete({ where: { id: expense.chemicalPurchaseId } });
     }
     if (expense?.rexinePurchaseId) {
+      await tx.partyLedgerEntry.deleteMany({
+        where: { rexinePurchaseId: expense.rexinePurchaseId },
+      });
       await tx.rexinePurchase.delete({ where: { id: expense.rexinePurchaseId } });
     }
     if (expense?.materialPurchaseId) {
+      await tx.partyLedgerEntry.deleteMany({
+        where: { materialPurchaseId: expense.materialPurchaseId },
+      });
       await tx.materialPurchase.delete({ where: { id: expense.materialPurchaseId } });
     }
     if (expense?.laborAdvanceId) {
