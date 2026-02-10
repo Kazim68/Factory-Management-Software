@@ -179,7 +179,7 @@ export function Roznamcha() {
       module: entry.module,
       categoryId: entry.categoryId,
       partyId: entry.partyId || "",
-      laborId: entry.laborAdvance?.laborId || "",
+      laborId: entry.laborId || entry.laborAdvance?.laborId || "",
       amount: String(entry.amount),
       description: entry.description || "",
     });
@@ -206,7 +206,7 @@ export function Roznamcha() {
   );
 
   const getPartyLaborLabel = (entry: ApiExpenseEntry) =>
-    entry.party?.name || entry.laborAdvance?.labor?.name || "-";
+    entry.party?.name || entry.labor?.name || entry.laborAdvance?.labor?.name || "-";
 
   return (
     <div className="space-y-6">
