@@ -116,7 +116,7 @@ export function Roznamcha() {
           await expenseApi.updateExpense(editingEntry.id, {
             date: formData.date,
             categoryId: formData.categoryId,
-            partyId: formData.partyId === "none" ? undefined : formData.partyId,
+            partyId: formData.partyId || undefined,
             laborId: formData.module === "LABOR" ? formData.laborId : undefined,
             module: formData.module,
             amount,
@@ -178,8 +178,8 @@ export function Roznamcha() {
       date: entry.date.slice(0, 10),
       module: entry.module,
       categoryId: entry.categoryId,
-      partyId: entry.partyId || "none",
-      laborId: entry.laborId || entry.laborAdvance?.laborId || "",
+      partyId: entry.partyId || "",
+      laborId: entry.laborAdvance?.laborId || "",
       amount: String(entry.amount),
       description: entry.description || "",
     });
@@ -205,20 +205,8 @@ export function Roznamcha() {
     0
   );
 
-  const laborNameById = Object.fromEntries(
-    labors.map((labor) => [labor.id, labor.name])
-  );
-  const partyNameById = Object.fromEntries(
-    parties.map((party) => [party.id, party.name])
-  );
-
   const getPartyLaborLabel = (entry: ApiExpenseEntry) =>
-    entry.party?.name ||
-    (entry.partyId ? partyNameById[entry.partyId] : undefined) ||
-    entry.labor?.name ||
-    (entry.laborId ? laborNameById[entry.laborId] : undefined) ||
-    entry.laborAdvance?.labor?.name ||
-    "-";
+    entry.party?.name || entry.laborAdvance?.labor?.name || "-";
 
   return (
     <div className="space-y-6">
@@ -310,21 +298,21 @@ export function Roznamcha() {
                   formData.module === "REXINE" ? (
                     <div>
                       <Label>Party</Label>
-                    <Select
-                      value={formData.partyId}
-                      onValueChange={(value) =>
-                        setFormData({ ...formData, partyId: value })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select party" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No party</SelectItem>
-                        {parties.map((party) => (
-                          <SelectItem key={party.id} value={party.id}>
-                            {party.name}
-                          </SelectItem>
+                      <Select
+                        value={formData.partyId}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, partyId: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select party" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">No party</SelectItem>
+                          {parties.map((party) => (
+                            <SelectItem key={party.id} value={party.id}>
+                              {party.name}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
