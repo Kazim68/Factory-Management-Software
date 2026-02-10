@@ -10,7 +10,12 @@ export const listExpenses = async (req, res) => {
       module: req.query.module,
       categoryId: req.query.categoryId,
     },
-    include: { category: true, party: true },
+    include: {
+      category: true,
+      party: true,
+      labor: true,
+      laborAdvance: { include: { labor: true } },
+    },
     orderBy: { date: "desc" },
   });
   res.json(expenses);
@@ -21,6 +26,7 @@ export const createExpense = async (req, res) => {
     date,
     categoryId,
     partyId,
+    laborId,
     module,
     amount,
     description,
@@ -133,6 +139,7 @@ export const createExpense = async (req, res) => {
         date: new Date(date),
         categoryId,
         partyId,
+        laborId,
         module: module ?? "MISC",
         amount,
         description,
@@ -141,7 +148,12 @@ export const createExpense = async (req, res) => {
         materialPurchaseId,
         laborAdvanceId,
       },
-      include: { category: true, party: true },
+      include: {
+        category: true,
+        party: true,
+        labor: true,
+        laborAdvance: { include: { labor: true } },
+      },
     });
 
     return expense;
@@ -157,11 +169,17 @@ export const updateExpense = async (req, res) => {
       date: req.body.date ? new Date(req.body.date) : undefined,
       categoryId: req.body.categoryId,
       partyId: req.body.partyId,
+      laborId: req.body.laborId,
       module: req.body.module,
       amount: req.body.amount,
       description: req.body.description,
     },
-    include: { category: true, party: true },
+    include: {
+      category: true,
+      party: true,
+      labor: true,
+      laborAdvance: { include: { labor: true } },
+    },
   });
   res.json(expense);
 };
