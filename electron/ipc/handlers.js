@@ -9,11 +9,33 @@ const requestApi = async (payload) => {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "API request failed");
+    const rawBody = await response.text();
+
+    if (!rawBody) {
+      throw new Error("API request failed");
+    }
+
+    let message = rawBody;
+    try {
+      const parsed = JSON.parse(rawBody);
+      message = parsed?.error || rawBody;
+    } catch {
+      message = rawBody;
+    }
+
+    throw new Error(message);
   }
 
-  return response.json();
+  const rawBody = await response.text();
+  if (!rawBody) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return rawBody;
+  }
 };
 
 export const registerIpcHandlers = (ipcMain) => {
