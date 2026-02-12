@@ -38,6 +38,11 @@ enum ExpenseModule {
   MISC
 }
 
+enum LaborStatus {
+  ACTIVE
+  FIRED
+}
+
 model Unit {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -164,6 +169,7 @@ model LaborProfile {
   categoryId       String
   paymentTypeId    String
   defaultRate      Decimal?
+  status           LaborStatus              @default(ACTIVE)
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 

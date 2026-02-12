@@ -54,6 +54,7 @@ type UiAdvance = ApiLaborAdvance & {
 
 export function LaborManagement() {
   const [profiles, setProfiles] = useState<ApiLaborProfile[]>([]);
+  const [allProfiles, setAllProfiles] = useState<ApiLaborProfile[]>([]);
   const [categories, setCategories] = useState<ApiLaborCategory[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
@@ -69,11 +70,13 @@ export function LaborManagement() {
   const [workDialog, setWorkDialog] = useState(false);
   const [kharchaDialog, setKharchaDialog] = useState(false);
   const [ledgerDialog, setLedgerDialog] = useState(false);
+  const [categoryDialog, setCategoryDialog] = useState(false);
 
   const [viewingLaborId, setViewingLaborId] = useState<string | null>(null);
   const [editingLaborId, setEditingLaborId] = useState<string | null>(null);
   const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
   const [editingAdvanceId, setEditingAdvanceId] = useState<string | null>(null);
+  const [editingCategory, setEditingCategory] = useState<ApiLaborCategory | null>(null);
 
   const [laborForm, setLaborForm] = useState({
     name: "",
@@ -98,11 +101,14 @@ export function LaborManagement() {
     reason: "",
   });
 
+  const [categoryForm, setCategoryForm] = useState({ name: "" });
+
   const loadData = async () => {
     setIsLoading(true);
     try {
       const today = getCurrentDate();
       const [
+        activeProfileData,
         profileData,
         categoryData,
         paymentData,
@@ -111,7 +117,8 @@ export function LaborManagement() {
         laborExpenseData,
         laborExpenseTodayData,
       ] = await Promise.all([
-        laborApi.listProfiles(),
+        laborApi.listProfiles({ status: "ACTIVE" }),
+        laborApi.listProfiles({ status: "ALL" }),
         configApi.listLaborCategories(),
         configApi.listPaymentTypes(),
         configApi.listArticles(),
@@ -120,7 +127,8 @@ export function LaborManagement() {
         expenseApi.listExpenses({ module: "LABOR", start: today, end: today }),
       ]);
 
-      setProfiles(profileData);
+      setProfiles(activeProfileData);
+      setAllProfiles(profileData);
       setCategories(categoryData);
       setPaymentTypes(paymentData);
       setArticles(articleData);
@@ -211,6 +219,7 @@ export function LaborManagement() {
           defaultRate: laborForm.defaultRate
             ? parseFloat(laborForm.defaultRate)
             : undefined,
+          status: "ACTIVE",
         });
         toast.success("Labor added");
       }
@@ -349,14 +358,14 @@ export function LaborManagement() {
   };
 
   const deleteLabor = async (laborId: string) => {
-    if (!confirm("Delete this labor profile?")) return;
+    if (!confirm("Fire this labor profile?")) return;
     try {
       await laborApi.deleteProfile(laborId);
-      toast.success("Labor deleted");
+      toast.success("Labor moved to fired status");
       await loadData();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to delete labor.");
+      toast.error("Failed to fire labor.");
     }
   };
 
@@ -408,6 +417,48 @@ export function LaborManagement() {
     }
   };
 
+
+
+  const handleCategorySubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      if (editingCategory) {
+        await configApi.updateLaborCategory(editingCategory.id, {
+          name: categoryForm.name.trim(),
+        });
+        toast.success("Labor category updated");
+      } else {
+        await configApi.createLaborCategory({ name: categoryForm.name.trim() });
+        toast.success("Labor category added");
+      }
+      setCategoryForm({ name: "" });
+      setEditingCategory(null);
+      setCategoryDialog(false);
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to save labor category.");
+    }
+  };
+
+  const startCategoryEdit = (category: ApiLaborCategory) => {
+    setEditingCategory(category);
+    setCategoryForm({ name: category.name });
+    setCategoryDialog(true);
+  };
+
+  const handleCategoryDelete = async (category: ApiLaborCategory) => {
+    if (!confirm(`Delete labor category "${category.name}"?`)) return;
+    try {
+      await configApi.deleteLaborCategory(category.id);
+      toast.success("Labor category deleted");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to delete labor category.");
+    }
+  };
+
   const getLaborSummary = (laborId: string) =>
     ledgerMap[laborId] ?? {
       workEntries: [],
@@ -439,11 +490,12 @@ export function LaborManagement() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="labors">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
               <TabsTrigger value="work">Work Entries</TabsTrigger>
               <TabsTrigger value="labor-paid-today">Labor Paid Today</TabsTrigger>
               <TabsTrigger value="kharcha">Kharcha (Advances)</TabsTrigger>
+              <TabsTrigger value="labor-categories">Labor Categories</TabsTrigger>
             </TabsList>
 
             <TabsContent value="labors" className="space-y-4">
@@ -546,6 +598,7 @@ export function LaborManagement() {
                     <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Payment Type</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Total Earned</TableHead>
                     <TableHead>Total Paid</TableHead>
                     <TableHead>Kharcha</TableHead>
@@ -557,7 +610,7 @@ export function LaborManagement() {
                   {isLoading ? (
                     <TableRow>
                       <TableCell
-                        colSpan={8}
+                        colSpan={9}
                         className="text-center text-muted-foreground"
                       >
                         Loading labor profiles...
@@ -566,7 +619,7 @@ export function LaborManagement() {
                   ) : profiles.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={8}
+                        colSpan={9}
                         className="text-center text-muted-foreground"
                       >
                         No labors yet
@@ -582,6 +635,7 @@ export function LaborManagement() {
                           <TableCell>{labor.name}</TableCell>
                           <TableCell>{labor.category?.name || "-"}</TableCell>
                           <TableCell>{labor.paymentType?.name || "-"}</TableCell>
+                          <TableCell>{labor.status}</TableCell>
                           <TableCell>
                             {formatCurrency(summary.totalEarnings)}
                           </TableCell>
@@ -1060,6 +1114,102 @@ export function LaborManagement() {
                 </TableBody>
               </Table>
             </TabsContent>
+
+            <TabsContent value="labor-categories" className="space-y-4">
+              <div className="flex justify-end">
+                <Dialog
+                  open={categoryDialog}
+                  onOpenChange={(open) => {
+                    setCategoryDialog(open);
+                    if (!open) {
+                      setEditingCategory(null);
+                      setCategoryForm({ name: "" });
+                    }
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button
+                      onClick={() => {
+                        setEditingCategory(null);
+                        setCategoryForm({ name: "" });
+                      }}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Labor Category
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {editingCategory ? "Edit Labor Category" : "Add Labor Category"}
+                      </DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={handleCategorySubmit} className="space-y-4">
+                      <div>
+                        <Label>Category Name</Label>
+                        <Input
+                          value={categoryForm.name}
+                          onChange={(event) =>
+                            setCategoryForm({ name: event.target.value })
+                          }
+                          required
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setCategoryDialog(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit">Save</Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="text-center text-muted-foreground">
+                        Loading labor categories...
+                      </TableCell>
+                    </TableRow>
+                  ) : categories.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="text-center text-muted-foreground">
+                        No labor categories yet
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    categories.map((category) => (
+                      <TableRow key={category.id}>
+                        <TableCell>{category.name}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="ghost" onClick={() => startCategoryEdit(category)}>
+                              Edit
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => handleCategoryDelete(category)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TabsContent>
+
           </Tabs>
         </CardContent>
       </Card>
@@ -1068,7 +1218,7 @@ export function LaborManagement() {
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              Labor Ledger - {profiles.find((l) => l.id === viewingLaborId)?.name}
+              Labor Ledger - {allProfiles.find((l) => l.id === viewingLaborId)?.name}
             </DialogTitle>
           </DialogHeader>
           {viewingLaborId && (() => {

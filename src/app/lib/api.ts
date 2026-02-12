@@ -204,12 +204,18 @@ export const expenseApi = {
 };
 
 export const laborApi = {
-  listProfiles: (): Promise<ApiLaborProfile[]> => get("/labor/profiles"),
+  listProfiles: (params?: { status?: "ACTIVE" | "FIRED" | "ALL" }): Promise<ApiLaborProfile[]> => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    const suffix = query.toString();
+    return get(`/labor/profiles${suffix ? `?${suffix}` : ""}`);
+  },
   createProfile: (data: {
     name: string;
     categoryId: string;
     paymentTypeId: string;
     defaultRate?: number;
+    status?: "ACTIVE" | "FIRED";
   }): Promise<ApiLaborProfile> =>
     request({ path: "/labor/profiles", method: "POST", body: data }),
   updateProfile: (
@@ -219,6 +225,7 @@ export const laborApi = {
       categoryId?: string;
       paymentTypeId?: string;
       defaultRate?: number;
+      status?: "ACTIVE" | "FIRED";
     }
   ): Promise<ApiLaborProfile> =>
     request({
