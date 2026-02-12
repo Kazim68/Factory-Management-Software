@@ -32,7 +32,6 @@ import { configApi } from "../lib/api";
 import type {
   ApiArticle,
   ApiExpenseCategory,
-  ApiLaborCategory,
   ApiPaymentType,
   ApiUnit,
 } from "../types/api";
@@ -42,20 +41,17 @@ type LoadState = "idle" | "loading" | "error";
 export function Configuration() {
   const [units, setUnits] = useState<ApiUnit[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
-  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ApiExpenseCategory[]>([]);
   const [status, setStatus] = useState<LoadState>("idle");
 
   const [unitDialog, setUnitDialog] = useState(false);
   const [articleDialog, setArticleDialog] = useState(false);
-  const [laborDialog, setLaborDialog] = useState(false);
   const [paymentDialog, setPaymentDialog] = useState(false);
   const [expenseDialog, setExpenseDialog] = useState(false);
 
   const [editingUnit, setEditingUnit] = useState<ApiUnit | null>(null);
   const [editingArticle, setEditingArticle] = useState<ApiArticle | null>(null);
-  const [editingLabor, setEditingLabor] = useState<ApiLaborCategory | null>(null);
   const [editingPayment, setEditingPayment] = useState<ApiPaymentType | null>(null);
   const [editingExpense, setEditingExpense] = useState<ApiExpenseCategory | null>(
     null
@@ -63,7 +59,6 @@ export function Configuration() {
 
   const [unitForm, setUnitForm] = useState({ name: "", symbol: "" });
   const [articleForm, setArticleForm] = useState({ name: "", code: "" });
-  const [laborForm, setLaborForm] = useState({ name: "" });
   const [paymentForm, setPaymentForm] = useState({
     name: "",
     unitId: "none",
@@ -73,18 +68,16 @@ export function Configuration() {
   const loadConfig = async () => {
     setStatus("loading");
     try {
-      const [unitsData, articlesData, laborData, paymentData, expenseData] =
+      const [unitsData, articlesData, paymentData, expenseData] =
         await Promise.all([
           configApi.listUnits(),
           configApi.listArticles(),
-          configApi.listLaborCategories(),
           configApi.listPaymentTypes(),
           configApi.listExpenseCategories(),
         ]);
 
       setUnits(unitsData);
       setArticles(articlesData);
-      setLaborCategories(laborData);
       setPaymentTypes(paymentData);
       setExpenseCategories(expenseData);
       setStatus("idle");
@@ -151,27 +144,6 @@ export function Configuration() {
     }
   };
 
-  const handleLaborSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    try {
-      if (editingLabor) {
-        await configApi.updateLaborCategory(editingLabor.id, {
-          name: laborForm.name.trim(),
-        });
-        toast.success("Labor category updated");
-      } else {
-        await configApi.createLaborCategory({ name: laborForm.name.trim() });
-        toast.success("Labor category added");
-      }
-      setLaborForm({ name: "" });
-      setEditingLabor(null);
-      setLaborDialog(false);
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to save labor category.");
-    }
-  };
 
   const handlePaymentSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -235,11 +207,6 @@ export function Configuration() {
     setArticleDialog(true);
   };
 
-  const startLaborEdit = (category: ApiLaborCategory) => {
-    setEditingLabor(category);
-    setLaborForm({ name: category.name });
-    setLaborDialog(true);
-  };
 
   const startPaymentEdit = (payment: ApiPaymentType) => {
     setEditingPayment(payment);
@@ -277,17 +244,6 @@ export function Configuration() {
     }
   };
 
-  const handleLaborDelete = async (category: ApiLaborCategory) => {
-    if (!confirm(`Delete labor category "${category.name}"?`)) return;
-    try {
-      await configApi.deleteLaborCategory(category.id);
-      toast.success("Labor category deleted");
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to delete labor category.");
-    }
-  };
 
   const handlePaymentDelete = async (payment: ApiPaymentType) => {
     if (!confirm(`Delete payment type "${payment.name}"?`)) return;
@@ -331,10 +287,9 @@ export function Configuration() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="units">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="units">Units</TabsTrigger>
               <TabsTrigger value="articles">Articles</TabsTrigger>
-              <TabsTrigger value="labor">Labor Categories</TabsTrigger>
               <TabsTrigger value="payment">Payment Types</TabsTrigger>
               <TabsTrigger value="expenses">Expense Categories</TabsTrigger>
             </TabsList>
@@ -553,100 +508,6 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="labor" className="space-y-4">
-              <div className="flex justify-end">
-                <Dialog
-                  open={laborDialog}
-                  onOpenChange={(open) => {
-                    setLaborDialog(open);
-                    if (!open) {
-                      setEditingLabor(null);
-                      setLaborForm({ name: "" });
-                    }
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button
-                      onClick={() => {
-                        setEditingLabor(null);
-                        setLaborForm({ name: "" });
-                      }}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Labor Category
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingLabor
-                          ? "Edit Labor Category"
-                          : "Add Labor Category"}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleLaborSubmit} className="space-y-4">
-                      <div>
-                        <Label>Category Name</Label>
-                        <Input
-                          value={laborForm.name}
-                          onChange={(event) =>
-                            setLaborForm({ name: event.target.value })
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setLaborDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">Save</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[140px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading
-                    ? renderEmpty(2, "Loading labor categories...")
-                    : laborCategories.length === 0
-                      ? renderEmpty(2, "No labor categories yet")
-                      : laborCategories.map((category) => (
-                          <TableRow key={category.id}>
-                            <TableCell>{category.name}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => startLaborEdit(category)}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleLaborDelete(category)}
-                                >
-                                  Delete
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                </TableBody>
-              </Table>
-            </TabsContent>
 
             <TabsContent value="payment" className="space-y-4">
               <div className="flex justify-end">

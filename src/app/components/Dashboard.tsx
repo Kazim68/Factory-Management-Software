@@ -28,7 +28,7 @@ export function Dashboard() {
             purchaseApi.listChemicals(),
             purchaseApi.listRexine(),
             purchaseApi.listMaterials(),
-            laborApi.listProfiles(),
+            laborApi.listProfiles({ status: "ALL" }),
           ]);
 
         const ledgers = await Promise.all(

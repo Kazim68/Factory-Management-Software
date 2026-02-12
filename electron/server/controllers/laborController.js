@@ -2,7 +2,16 @@ import prisma from "../prisma.js";
 import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
 
 export const listLaborProfiles = async (req, res) => {
+  const { status = "ACTIVE" } = req.query;
+  const where =
+    status === "ALL"
+      ? undefined
+      : {
+          status: status === "FIRED" ? "FIRED" : "ACTIVE",
+        };
+
   const profiles = await prisma.laborProfile.findMany({
+    where,
     include: { category: true, paymentType: true },
     orderBy: { name: "asc" },
   });
@@ -16,6 +25,7 @@ export const createLaborProfile = async (req, res) => {
       categoryId: req.body.categoryId,
       paymentTypeId: req.body.paymentTypeId,
       defaultRate: req.body.defaultRate,
+      status: req.body.status,
     },
   });
   res.status(201).json(profile);
@@ -29,13 +39,17 @@ export const updateLaborProfile = async (req, res) => {
       categoryId: req.body.categoryId,
       paymentTypeId: req.body.paymentTypeId,
       defaultRate: req.body.defaultRate,
+      status: req.body.status,
     },
   });
   res.json(profile);
 };
 
 export const deleteLaborProfile = async (req, res) => {
-  await prisma.laborProfile.delete({ where: { id: req.params.laborId } });
+  await prisma.laborProfile.update({
+    where: { id: req.params.laborId },
+    data: { status: "FIRED" },
+  });
   res.status(204).end();
 };
 

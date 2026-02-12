@@ -30,12 +30,15 @@ export interface ApiPaymentType {
   updatedAt: string;
 }
 
+export type ApiLaborStatus = "ACTIVE" | "FIRED";
+
 export interface ApiLaborProfile {
   id: string;
   name: string;
   categoryId: string;
   paymentTypeId: string;
   defaultRate?: number | string | null;
+  status: ApiLaborStatus;
   createdAt: string;
   updatedAt: string;
   category?: ApiLaborCategory | null;
