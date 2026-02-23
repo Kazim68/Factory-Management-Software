@@ -67,7 +67,7 @@ export interface ChemicalTransaction {
   weight: number; // kg
   rate: number;
   total: number;
-  paymentType: 'cash' | 'credit';
+  paymentType: 'cash' | 'payable';
   paymentReceived: number;
   balance: number;
   detail: string;
@@ -83,7 +83,7 @@ export interface RexineTransaction {
   meters: number;
   rate: number;
   total: number;
-  paymentType: 'cash' | 'credit';
+  paymentType: 'cash' | 'payable';
   paymentReceived: number;
   balance: number;
   detail: string;
@@ -101,7 +101,7 @@ export interface MaterialTransaction {
   quantity: number;
   pricePerPair: number;
   total: number;
-  paymentType: 'cash' | 'credit';
+  paymentType: 'cash' | 'payable';
   paymentReceived: number;
   balance: number;
   detail: string;
@@ -125,7 +125,7 @@ export interface Bill {
   partyName: string;
   items: BillItem[];
   grandTotal: number;
-  paymentType: 'cash' | 'credit';
+  paymentType: 'cash' | 'receivable';
   status: 'draft' | 'confirmed';
   createdAt: string;
   editHistory?: EditLog[];
@@ -137,8 +137,8 @@ export interface PartyLedgerEntry {
   partyId: string;
   reference: string; // bill no / payment receipt
   description: string;
-  debit: number;
-  credit: number;
+  payable: number;
+  receivable: number;
   balance: number;
   type: 'bill' | 'payment' | 'chemical' | 'rexine' | 'material' | 'opening';
   createdAt: string;

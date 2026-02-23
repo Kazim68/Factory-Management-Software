@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -26,13 +25,26 @@ import {
   DialogTrigger,
 } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Plus, Minus, Printer } from "lucide-react";
+import {
+  Plus,
+  Minus,
+  Printer,
+  Eye,
+  Banknote,
+  Pencil,
+  Trash2,
+  BadgeCheck,
+  CheckCircle2,
+} from "lucide-react";
 import { billApi, configApi, partyApi } from "../lib/api";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
-import type { ApiArticle, ApiBill, ApiParty } from "../types/api";
+import type {
+  ApiArticle,
+  ApiBill,
+  ApiBillLedgerEntry,
+  ApiParty,
+} from "../types/api";
 import { toast } from "sonner";
-
-type PaymentType = "cash" | "credit";
 
 type BillItemForm = {
   articleId: string;
@@ -50,10 +62,21 @@ export function BillManagement() {
   const [isLoading, setIsLoading] = useState(false);
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
 
+  const [ledgerBill, setLedgerBill] = useState<ApiBill | null>(null);
+  const [ledgerEntries, setLedgerEntries] = useState<ApiBillLedgerEntry[]>([]);
+  const [isLedgerOpen, setIsLedgerOpen] = useState(false);
+
+  const [paymentBill, setPaymentBill] = useState<ApiBill | null>(null);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [paymentData, setPaymentData] = useState({
+    date: getCurrentDate(),
+    amount: "",
+    description: "",
+  });
+
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
     partyId: "",
-    paymentType: "cash" as PaymentType,
   });
 
   const [items, setItems] = useState<BillItemForm[]>([
@@ -84,7 +107,10 @@ export function BillManagement() {
   }, []);
 
   const addItem = () => {
-    setItems([...items, { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
+    setItems([
+      ...items,
+      { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 },
+    ]);
   };
 
   const removeItem = (index: number) => {
@@ -93,7 +119,7 @@ export function BillManagement() {
     }
   };
 
-  const updateItem = (index: number, field: string, value: any) => {
+  const updateItem = (index: number, field: string, value: string | number) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
 
@@ -109,6 +135,15 @@ export function BillManagement() {
     }
 
     setItems(newItems);
+  };
+
+  const resetForm = () => {
+    setFormData({
+      date: getCurrentDate(),
+      partyId: "",
+    });
+    setItems([{ articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
+    setEditingBillId(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -128,13 +163,11 @@ export function BillManagement() {
       return;
     }
 
-    const grandTotal = validItems.reduce((sum, item) => sum + item.total, 0);
-
     try {
       const payload = {
         date: formData.date,
         partyId: formData.partyId,
-        type: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+        type: "RECEIVABLE" as const,
         status: "CONFIRMED" as const,
         lines: validItems.map((item) => ({
           articleId: item.articleId,
@@ -146,16 +179,16 @@ export function BillManagement() {
 
       if (editingBillId) {
         const bill = await billApi.updateBill(editingBillId, payload);
-        if (bill.type === "CREDIT" && bill.status !== "CONFIRMED") {
+        if (bill.type === "RECEIVABLE" && bill.status !== "CONFIRMED") {
           await billApi.confirmBill(bill.id);
         }
-        toast.success("Bill updated successfully");
+        toast.success("Bill updated");
       } else {
         const bill = await billApi.createBill(payload);
-        if (bill.type === "CREDIT") {
+        if (bill.type === "RECEIVABLE") {
           await billApi.confirmBill(bill.id);
         }
-        toast.success("Bill created successfully");
+        toast.success("Bill created");
       }
       await loadData();
       resetForm();
@@ -166,22 +199,11 @@ export function BillManagement() {
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      date: getCurrentDate(),
-      partyId: "",
-      paymentType: "cash",
-    });
-    setItems([{ articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
-    setEditingBillId(null);
-  };
-
   const startEdit = (bill: ApiBill) => {
     setEditingBillId(bill.id);
     setFormData({
       date: bill.date.slice(0, 10),
       partyId: bill.partyId || "",
-      paymentType: bill.type === "CREDIT" ? "credit" : "cash",
     });
     setItems(
       bill.lines.map((line) => ({
@@ -198,10 +220,10 @@ export function BillManagement() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = async (billId: string) => {
+  const handleDelete = async (bill: ApiBill) => {
     if (!confirm("Delete this bill?")) return;
     try {
-      await billApi.deleteBill(billId);
+      await billApi.deleteBill(bill.id);
       toast.success("Bill deleted");
       await loadData();
     } catch (error) {
@@ -210,15 +232,77 @@ export function BillManagement() {
     }
   };
 
+  const openLedger = async (bill: ApiBill) => {
+    try {
+      const entries = await billApi.getLedger(bill.id);
+      setLedgerBill(bill);
+      setLedgerEntries(entries);
+      setIsLedgerOpen(true);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load bill ledger.");
+    }
+  };
+
+  const openPayment = (bill: ApiBill) => {
+    setPaymentBill(bill);
+    setPaymentData({
+      date: getCurrentDate(),
+      amount: String(Number(bill.remaining ?? 0)),
+      description: "",
+    });
+    setIsPaymentOpen(true);
+  };
+
+  const handleReceivePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentBill) return;
+
+    const amount = Math.abs(Number(paymentData.amount));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter valid amount.");
+      return;
+    }
+
+    try {
+      await billApi.receivePayment(paymentBill.id, {
+        amount,
+        date: paymentData.date,
+        method: "KHATA",
+        description: paymentData.description || undefined,
+      });
+      toast.success("Payment received");
+      setIsPaymentOpen(false);
+      setPaymentBill(null);
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to receive payment.");
+    }
+  };
+
+  const handleVerify = async (bill: ApiBill) => {
+    try {
+      await billApi.verifyBill(bill.id);
+      toast.success("Bill verified");
+      await loadData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to verify bill.");
+    }
+  };
+
   const printBill = (bill: ApiBill) => {
     const printWindow = window.open("", "", "width=800,height=600");
     if (!printWindow) return;
 
-    const rows = bill.lines.map((line) => {
-      const articleName = line.article?.name ||
-        articles.find((article) => article.id === line.articleId)?.name ||
-        "Unknown";
-      return `
+    const rows = bill.lines
+      .map((line) => {
+        const articleName =
+          line.article?.name ||
+          articles.find((article) => article.id === line.articleId)?.name ||
+          "Unknown";
+        return `
                 <tr>
                   <td>${articleName}</td>
                   <td>${line.quantity}</td>
@@ -226,7 +310,8 @@ export function BillManagement() {
                   <td>${formatCurrency(Number(line.total))}</td>
                 </tr>
               `;
-    }).join("");
+      })
+      .join("");
 
     const html = `
       <!DOCTYPE html>
@@ -251,7 +336,8 @@ export function BillManagement() {
           <div class="info">
             <p><strong>Date:</strong> ${formatDate(bill.date)}</p>
             <p><strong>Party:</strong> ${bill.party?.name || "-"}</p>
-            <p><strong>Payment Type:</strong> ${bill.type}</p>
+            <p><strong>Grand Total:</strong> ${formatCurrency(Number(bill.total))}</p>
+            <p><strong>Remaining:</strong> ${formatCurrency(Number(bill.remaining ?? 0))}</p>
           </div>
           <table>
             <thead>
@@ -266,9 +352,6 @@ export function BillManagement() {
               ${rows}
             </tbody>
           </table>
-          <div class="total">
-            <p>Grand Total: ${formatCurrency(Number(bill.total))}</p>
-          </div>
         </body>
       </html>
     `;
@@ -279,6 +362,18 @@ export function BillManagement() {
   };
 
   const grandTotal = items.reduce((sum, item) => sum + item.total, 0);
+
+  const getStatusLabel = (bill: ApiBill) => {
+    if (bill.paymentStatus === "PAID") return "Paid";
+    if (bill.paymentStatus === "PARTIAL_PAID") return "Partial Paid";
+    return "Unpaid";
+  };
+
+  const getStatusClass = (bill: ApiBill) => {
+    if (bill.paymentStatus === "PAID") return "text-green-600";
+    if (bill.paymentStatus === "PARTIAL_PAID") return "text-orange-600";
+    return "text-red-600";
+  };
 
   return (
     <div className="space-y-6">
@@ -306,7 +401,7 @@ export function BillManagement() {
                   </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label>Date</Label>
                       <Input
@@ -335,23 +430,6 @@ export function BillManagement() {
                               {party.name}
                             </SelectItem>
                           ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Payment Type</Label>
-                      <Select
-                        value={formData.paymentType}
-                        onValueChange={(value: PaymentType) =>
-                          setFormData({ ...formData, paymentType: value })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="credit">Credit</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -472,9 +550,9 @@ export function BillManagement() {
                 <TableHead>Bill No.</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Party</TableHead>
-                <TableHead>Items</TableHead>
                 <TableHead>Grand Total</TableHead>
-                <TableHead>Payment Type</TableHead>
+                <TableHead>Remaining</TableHead>
+                <TableHead>Payment Status</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -492,44 +570,195 @@ export function BillManagement() {
                   </TableCell>
                 </TableRow>
               ) : (
-                bills.map((bill) => (
-                  <TableRow key={bill.id}>
-                    <TableCell>{bill.billNumber}</TableCell>
-                    <TableCell>{formatDate(bill.date)}</TableCell>
-                    <TableCell>{bill.party?.name || "-"}</TableCell>
-                    <TableCell>{bill.lines.length} item(s)</TableCell>
-                    <TableCell>{formatCurrency(Number(bill.total))}</TableCell>
-                    <TableCell>
-                      <span
-                        className={
-                          bill.type === "CASH"
-                            ? "text-green-600"
-                            : "text-orange-600"
-                        }
-                      >
-                        {bill.type}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => printBill(bill)}>
-                          <Printer className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => startEdit(bill)}>
-                          Edit
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => handleDelete(bill.id)}>
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                bills.map((bill) => {
+                  const total = Number(bill.total ?? 0);
+                  const remaining = Number(bill.remaining ?? 0);
+                  const totalPaid = Number(bill.totalPaid ?? 0);
+                  const canDelete = remaining === total && totalPaid === 0;
+                  const canEdit = remaining > 0;
+                  const canReceive = remaining > 0;
+                  const canVerify = remaining === 0 && !bill.isVerified;
+
+                  return (
+                    <TableRow key={bill.id}>
+                      <TableCell>{bill.billNumber}</TableCell>
+                      <TableCell>{formatDate(bill.date)}</TableCell>
+                      <TableCell>{bill.party?.name || "-"}</TableCell>
+                      <TableCell>{formatCurrency(total)}</TableCell>
+                      <TableCell>{formatCurrency(remaining)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className={getStatusClass(bill)}>{getStatusLabel(bill)}</span>
+                          {bill.paymentStatus === "PAID" && bill.isVerified && (
+                            <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => printBill(bill)}
+                            title="Print"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => openLedger(bill)}
+                            title="View Ledger"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {canReceive && (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={() => openPayment(bill)}
+                              title="Receive Payment"
+                            >
+                              <Banknote className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {canEdit && (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={() => startEdit(bill)}
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={() => handleDelete(bill)}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {canVerify && (
+                            <Button
+                              size="icon"
+                              variant="default"
+                              onClick={() => handleVerify(bill)}
+                              title="Verify"
+                              className="bg-amber-500 text-white hover:bg-amber-600 ring-2 ring-amber-300 animate-pulse"
+                            >
+                              <BadgeCheck className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Receive Payment {paymentBill ? `- ${paymentBill.billNumber}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleReceivePayment} className="space-y-4">
+            <div>
+              <Label>Date</Label>
+              <Input
+                type="date"
+                value={paymentData.date}
+                onChange={(e) =>
+                  setPaymentData({ ...paymentData, date: e.target.value })
+                }
+                required
+              />
+            </div>
+            <div>
+              <Label>Amount</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={paymentData.amount}
+                onChange={(e) =>
+                  setPaymentData({ ...paymentData, amount: e.target.value })
+                }
+                required
+              />
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Input
+                value={paymentData.description}
+                onChange={(e) =>
+                  setPaymentData({ ...paymentData, description: e.target.value })
+                }
+                placeholder="Optional note"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setIsPaymentOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Receive</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLedgerOpen} onOpenChange={setIsLedgerOpen}>
+        <DialogContent className="w-[50vw] max-w-[1400px] sm:max-w-[1400px] h-[82vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>
+              Bill Ledger {ledgerBill ? `- ${ledgerBill.billNumber}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto mt-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ledgerEntries.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No bill ledger records
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  ledgerEntries.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell>{formatDate(entry.date)}</TableCell>
+                      <TableCell title={entry.description || "-"}>
+                        {entry.description
+                          ? entry.description.slice(0, 12)
+                          : "-"}
+                      </TableCell>
+                      <TableCell>{entry.kind === "RECEIVABLE" ? "Receivable" : "Payment"}</TableCell>
+                      <TableCell>{formatCurrency(Number(entry.amount ?? 0))}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

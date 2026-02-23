@@ -37,7 +37,7 @@ import type {
 } from "../types/api";
 import { toast } from "sonner";
 
-type PaymentType = "cash" | "credit";
+type PaymentType = "cash" | "payable";
 
 export function MaterialManagement() {
   const [transactions, setTransactions] = useState<ApiMaterialPurchase[]>([]);
@@ -116,7 +116,7 @@ export function MaterialManagement() {
           quantity,
           pricePerUnit: pricePerPair,
           totalAmount,
-          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
         });
         toast.success("Material purchase updated");
@@ -129,7 +129,7 @@ export function MaterialManagement() {
           quantity,
           pricePerUnit: pricePerPair,
           totalAmount,
-          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
         });
         toast.success("Material purchase added");
@@ -169,7 +169,9 @@ export function MaterialManagement() {
       articleId: purchase.articleId || "",
       quantity: String(purchase.quantity),
       pricePerPair: String(purchase.pricePerUnit),
-      paymentType: purchase.paymentType === "CREDIT" ? "credit" : "cash",
+      paymentType: ["CREDIT", "KHATA"].includes(String(purchase.paymentType))
+        ? "payable"
+        : "cash",
       detail: purchase.expenses?.[0]?.description || "",
     });
     setIsDialogOpen(true);
@@ -312,7 +314,7 @@ export function MaterialManagement() {
                       />
                     </div>
                     <div>
-                      <Label>Payment Type</Label>
+                      <Label>Settlement Type</Label>
                       <Select
                         value={formData.paymentType}
                         onValueChange={(value: PaymentType) =>
@@ -324,7 +326,7 @@ export function MaterialManagement() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="credit">Credit</SelectItem>
+                          <SelectItem value="payable">Payable</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -377,7 +379,7 @@ export function MaterialManagement() {
                 <TableHead>Quantity</TableHead>
                 <TableHead>Price/Pair</TableHead>
                 <TableHead>Total</TableHead>
-                <TableHead>Payment Type</TableHead>
+                <TableHead>Settlement Type</TableHead>
                 <TableHead>Detail</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -418,7 +420,9 @@ export function MaterialManagement() {
                               : "text-orange-600"
                           }
                       >
-                        {transaction.paymentType}
+                        {["CREDIT", "KHATA"].includes(String(transaction.paymentType))
+                          ? "PAYABLE"
+                          : "CASH"}
                       </span>
                     </TableCell>
                     <TableCell>{getDetail(transaction)}</TableCell>

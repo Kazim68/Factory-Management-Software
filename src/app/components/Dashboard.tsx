@@ -41,19 +41,20 @@ export function Dashboard() {
           (sum, bill) => sum + Number(bill.total),
           0
         );
-        const totalExpenses = expenses.reduce(
-          (sum, entry) => sum + Number(entry.amount),
-          0
-        );
+        // Only misc outflows here. Labor and material are added separately.
+        const miscExpenses = expenses.reduce((sum, entry) => {
+          const amount = Number(entry.amount);
+          return entry.module === "MISC" && amount > 0 ? sum + amount : sum;
+        }, 0);
 
         const balances = parties.map((party, index) => {
-          const opening = Number(party.openingBalance ?? 0);
           const ledger = ledgers[index];
           const delta = ledger.reduce(
-            (sum, entry) => sum + Number(entry.credit ?? 0) - Number(entry.debit ?? 0),
+            (sum, entry) =>
+              sum + Number(entry.receivable ?? 0) - Number(entry.payable ?? 0),
             0
           );
-          return opening + delta;
+          return delta;
         });
 
         const totalReceivables = balances
@@ -89,7 +90,7 @@ export function Dashboard() {
           totalParties: parties.length,
           totalBills: bills.length,
           totalRevenue,
-          totalExpenses,
+          totalExpenses: miscExpenses,
           totalReceivables,
           totalPayables,
           laborCost,
@@ -206,7 +207,7 @@ export function Dashboard() {
           <CardContent>
             <div className="space-y-3">
               <div className="flex justify-between">
-                <span>Daily Expenses (Roznamcha)</span>
+                <span>Misc Expenses</span>
                 <span className="font-medium">{formatCurrency(stats.totalExpenses)}</span>
               </div>
               <div className="flex justify-between">

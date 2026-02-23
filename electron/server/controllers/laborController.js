@@ -126,13 +126,15 @@ export const createLaborAdvance = async (req, res) => {
   const expense = await prisma.expenseEntry.create({
     data: {
       date: new Date(req.body.date),
-      categoryId: req.body.categoryId,
       partyId: req.body.partyId,
       laborId: req.body.laborId,
       module: "LABOR",
+      paymentType: "CASH",
       amount: req.body.amount,
       description: req.body.reason,
       laborAdvanceId: advance.id,
+      source: "SYSTEM",
+      sourceSystem: "LABOR_ADVANCE",
     },
   });
 
@@ -159,9 +161,15 @@ export const updateLaborAdvance = async (req, res) => {
       where: { id: expense.id },
       data: {
         date: req.body.date ? new Date(req.body.date) : undefined,
+        paymentType: req.body.paymentType
+          ? String(req.body.paymentType).toUpperCase() === "KHATA"
+            ? "CREDIT"
+            : String(req.body.paymentType).toUpperCase() === "CREDIT"
+              ? "CREDIT"
+              : "CASH"
+          : undefined,
         amount: req.body.amount,
         description: req.body.reason,
-        categoryId: req.body.categoryId,
       },
     });
   }

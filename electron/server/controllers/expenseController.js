@@ -1,6 +1,15 @@
 import prisma from "../prisma.js";
 import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
 
+const toDbPaymentType = (paymentType) => {
+  const normalized = String(paymentType ?? "CASH").toUpperCase();
+  if (normalized === "KHATA") return "CREDIT";
+  return normalized === "CREDIT" ? "CREDIT" : "CASH";
+};
+
+const isKhata = (paymentType) =>
+  ["CREDIT", "KHATA"].includes(String(paymentType ?? "CASH").toUpperCase());
+
 export const listExpenses = async (req, res) => {
   const start = toDate(req.query.start);
   const end = toDate(req.query.end);
@@ -8,10 +17,8 @@ export const listExpenses = async (req, res) => {
     where: {
       date: withDateRange(start, end),
       module: req.query.module,
-      categoryId: req.query.categoryId,
     },
     include: {
-      category: true,
       party: true,
       labor: true,
       laborAdvance: { include: { labor: true } },
@@ -24,7 +31,6 @@ export const listExpenses = async (req, res) => {
 export const createExpense = async (req, res) => {
   const {
     date,
-    categoryId,
     partyId,
     laborId,
     module,
@@ -47,20 +53,19 @@ export const createExpense = async (req, res) => {
           quantityKg: moduleData.quantityKg,
           ratePerKg: moduleData.ratePerKg,
           totalAmount: moduleData.totalAmount ?? amount,
-          paymentType: moduleData.paymentType ?? "CASH",
+          paymentType: toDbPaymentType(moduleData.paymentType ?? "CASH"),
         },
       });
       chemicalPurchaseId = purchase.id;
 
-      if (purchase.partyId && purchase.paymentType === "CREDIT") {
+      if (purchase.partyId && isKhata(purchase.paymentType)) {
         await tx.partyLedgerEntry.create({
           data: {
             partyId: purchase.partyId,
             date: purchase.date,
             reference: "Chemical Purchase",
             description,
-            debit: 0,
-            credit: purchase.totalAmount,
+            balance: -Number(purchase.totalAmount),
           },
         });
       }
@@ -74,20 +79,19 @@ export const createExpense = async (req, res) => {
           quantityMeter: moduleData.quantityMeter,
           ratePerMeter: moduleData.ratePerMeter,
           totalAmount: moduleData.totalAmount ?? amount,
-          paymentType: moduleData.paymentType ?? "CASH",
+          paymentType: toDbPaymentType(moduleData.paymentType ?? "CASH"),
         },
       });
       rexinePurchaseId = purchase.id;
 
-      if (purchase.partyId && purchase.paymentType === "CREDIT") {
+      if (purchase.partyId && isKhata(purchase.paymentType)) {
         await tx.partyLedgerEntry.create({
           data: {
             partyId: purchase.partyId,
             date: purchase.date,
             reference: "Rexine Purchase",
             description,
-            debit: 0,
-            credit: purchase.totalAmount,
+            balance: -Number(purchase.totalAmount),
           },
         });
       }
@@ -103,20 +107,19 @@ export const createExpense = async (req, res) => {
           quantity: moduleData.quantity,
           pricePerUnit: moduleData.pricePerUnit,
           totalAmount: moduleData.totalAmount ?? amount,
-          paymentType: moduleData.paymentType ?? "CASH",
+          paymentType: toDbPaymentType(moduleData.paymentType ?? "CASH"),
         },
       });
       materialPurchaseId = purchase.id;
 
-      if (purchase.partyId && purchase.paymentType === "CREDIT") {
+      if (purchase.partyId && isKhata(purchase.paymentType)) {
         await tx.partyLedgerEntry.create({
           data: {
             partyId: purchase.partyId,
             date: purchase.date,
             reference: "Material Purchase",
             description,
-            debit: 0,
-            credit: purchase.totalAmount,
+            balance: -Number(purchase.totalAmount),
           },
         });
       }
@@ -137,19 +140,20 @@ export const createExpense = async (req, res) => {
     const expense = await tx.expenseEntry.create({
       data: {
         date: new Date(date),
-        categoryId,
         partyId,
         laborId,
         module: module ?? "MISC",
+        paymentType: toDbPaymentType(req.body.paymentType ?? moduleData?.paymentType),
         amount,
         description,
         chemicalPurchaseId,
         rexinePurchaseId,
         materialPurchaseId,
         laborAdvanceId,
+        source: "MANUAL",
+        sourceSystem: "ROZNAMCHA_MANUAL",
       },
       include: {
-        category: true,
         party: true,
         labor: true,
         laborAdvance: { include: { labor: true } },
@@ -163,19 +167,32 @@ export const createExpense = async (req, res) => {
 };
 
 export const updateExpense = async (req, res) => {
+  const existing = await prisma.expenseEntry.findUnique({
+    where: { id: req.params.expenseId },
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Expense not found." });
+    return;
+  }
+  if (existing.source === "SYSTEM") {
+    res.status(403).json({ error: "System entries cannot be edited from Roznamcha." });
+    return;
+  }
+
   const expense = await prisma.expenseEntry.update({
     where: { id: req.params.expenseId },
     data: {
       date: req.body.date ? new Date(req.body.date) : undefined,
-      categoryId: req.body.categoryId,
       partyId: req.body.partyId,
       laborId: req.body.laborId,
       module: req.body.module,
+      paymentType: req.body.paymentType
+        ? toDbPaymentType(req.body.paymentType)
+        : undefined,
       amount: req.body.amount,
       description: req.body.description,
     },
     include: {
-      category: true,
       party: true,
       labor: true,
       laborAdvance: { include: { labor: true } },
@@ -188,6 +205,14 @@ export const deleteExpense = async (req, res) => {
   const expense = await prisma.expenseEntry.findUnique({
     where: { id: req.params.expenseId },
   });
+  if (!expense) {
+    res.status(404).json({ error: "Expense not found." });
+    return;
+  }
+  if (expense.source === "SYSTEM") {
+    res.status(403).json({ error: "System entries cannot be deleted from Roznamcha." });
+    return;
+  }
 
   await prisma.$transaction(async (tx) => {
     if (expense?.chemicalPurchaseId) {

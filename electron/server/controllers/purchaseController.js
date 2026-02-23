@@ -1,5 +1,14 @@
 import prisma from "../prisma.js";
 
+const toDbPaymentType = (paymentType) => {
+  const normalized = String(paymentType ?? "CASH").toUpperCase();
+  if (normalized === "KHATA") return "CREDIT";
+  return normalized === "CREDIT" ? "CREDIT" : "CASH";
+};
+
+const isKhata = (paymentType) =>
+  ["CREDIT", "KHATA"].includes(String(paymentType ?? "CASH").toUpperCase());
+
 export const createChemicalPurchase = async (req, res) => {
   const { date, partyId, quantityKg, ratePerKg, totalAmount, paymentType } =
     req.body;
@@ -12,31 +21,32 @@ export const createChemicalPurchase = async (req, res) => {
         quantityKg,
         ratePerKg,
         totalAmount,
-        paymentType: paymentType ?? "CASH",
+        paymentType: toDbPaymentType(paymentType ?? "CASH"),
       },
     });
 
     const expense = await tx.expenseEntry.create({
       data: {
         date: new Date(date),
-        categoryId: req.body.categoryId,
         partyId,
         module: "CHEMICAL",
+        paymentType: purchase.paymentType,
         amount: totalAmount,
         description: req.body.description,
         chemicalPurchaseId: purchase.id,
+        source: "SYSTEM",
+        sourceSystem: "CHEMICAL_PURCHASE",
       },
     });
 
-    if (purchase.partyId && purchase.paymentType === "CREDIT") {
+    if (purchase.partyId && isKhata(purchase.paymentType)) {
       await tx.partyLedgerEntry.create({
         data: {
           partyId: purchase.partyId,
           date: purchase.date,
           reference: "Chemical Purchase",
           description: req.body.description,
-          debit: 0,
-          credit: purchase.totalAmount,
+          balance: -Number(purchase.totalAmount),
           chemicalPurchaseId: purchase.id,
         },
       });
@@ -66,7 +76,7 @@ export const updateChemicalPurchase = async (req, res) => {
         quantityKg: req.body.quantityKg,
         ratePerKg: req.body.ratePerKg,
         totalAmount: req.body.totalAmount,
-        paymentType: req.body.paymentType,
+        paymentType: toDbPaymentType(req.body.paymentType),
       },
     });
 
@@ -75,7 +85,7 @@ export const updateChemicalPurchase = async (req, res) => {
       data: {
         date: req.body.date ? new Date(req.body.date) : undefined,
         partyId: req.body.partyId,
-        categoryId: req.body.categoryId,
+        paymentType: updated.paymentType,
         amount: req.body.totalAmount,
         description: req.body.description,
       },
@@ -85,7 +95,7 @@ export const updateChemicalPurchase = async (req, res) => {
       where: { chemicalPurchaseId: updated.id },
     });
 
-    if (updated.partyId && updated.paymentType === "CREDIT") {
+    if (updated.partyId && isKhata(updated.paymentType)) {
       if (existingLedger) {
         await tx.partyLedgerEntry.update({
           where: { id: existingLedger.id },
@@ -94,8 +104,7 @@ export const updateChemicalPurchase = async (req, res) => {
             date: updated.date,
             reference: "Chemical Purchase",
             description: req.body.description,
-            debit: 0,
-            credit: updated.totalAmount,
+            balance: -Number(updated.totalAmount),
           },
         });
       } else {
@@ -105,8 +114,7 @@ export const updateChemicalPurchase = async (req, res) => {
             date: updated.date,
             reference: "Chemical Purchase",
             description: req.body.description,
-            debit: 0,
-            credit: updated.totalAmount,
+            balance: -Number(updated.totalAmount),
             chemicalPurchaseId: updated.id,
           },
         });
@@ -155,31 +163,32 @@ export const createRexinePurchase = async (req, res) => {
         quantityMeter,
         ratePerMeter,
         totalAmount,
-        paymentType: paymentType ?? "CASH",
+        paymentType: toDbPaymentType(paymentType ?? "CASH"),
       },
     });
 
     const expense = await tx.expenseEntry.create({
       data: {
         date: new Date(date),
-        categoryId: req.body.categoryId,
         partyId,
         module: "REXINE",
+        paymentType: purchase.paymentType,
         amount: totalAmount,
         description: req.body.description,
         rexinePurchaseId: purchase.id,
+        source: "SYSTEM",
+        sourceSystem: "REXINE_PURCHASE",
       },
     });
 
-    if (purchase.partyId && purchase.paymentType === "CREDIT") {
+    if (purchase.partyId && isKhata(purchase.paymentType)) {
       await tx.partyLedgerEntry.create({
         data: {
           partyId: purchase.partyId,
           date: purchase.date,
           reference: "Rexine Purchase",
           description: req.body.description,
-          debit: 0,
-          credit: purchase.totalAmount,
+          balance: -Number(purchase.totalAmount),
           rexinePurchaseId: purchase.id,
         },
       });
@@ -209,7 +218,7 @@ export const updateRexinePurchase = async (req, res) => {
         quantityMeter: req.body.quantityMeter,
         ratePerMeter: req.body.ratePerMeter,
         totalAmount: req.body.totalAmount,
-        paymentType: req.body.paymentType,
+        paymentType: toDbPaymentType(req.body.paymentType),
       },
     });
 
@@ -218,7 +227,7 @@ export const updateRexinePurchase = async (req, res) => {
       data: {
         date: req.body.date ? new Date(req.body.date) : undefined,
         partyId: req.body.partyId,
-        categoryId: req.body.categoryId,
+        paymentType: updated.paymentType,
         amount: req.body.totalAmount,
         description: req.body.description,
       },
@@ -228,7 +237,7 @@ export const updateRexinePurchase = async (req, res) => {
       where: { rexinePurchaseId: updated.id },
     });
 
-    if (updated.partyId && updated.paymentType === "CREDIT") {
+    if (updated.partyId && isKhata(updated.paymentType)) {
       if (existingLedger) {
         await tx.partyLedgerEntry.update({
           where: { id: existingLedger.id },
@@ -237,8 +246,7 @@ export const updateRexinePurchase = async (req, res) => {
             date: updated.date,
             reference: "Rexine Purchase",
             description: req.body.description,
-            debit: 0,
-            credit: updated.totalAmount,
+            balance: -Number(updated.totalAmount),
           },
         });
       } else {
@@ -248,8 +256,7 @@ export const updateRexinePurchase = async (req, res) => {
             date: updated.date,
             reference: "Rexine Purchase",
             description: req.body.description,
-            debit: 0,
-            credit: updated.totalAmount,
+            balance: -Number(updated.totalAmount),
             rexinePurchaseId: updated.id,
           },
         });
@@ -302,31 +309,32 @@ export const createMaterialPurchase = async (req, res) => {
         quantity,
         pricePerUnit,
         totalAmount,
-        paymentType: paymentType ?? "CASH",
+        paymentType: toDbPaymentType(paymentType ?? "CASH"),
       },
     });
 
     const expense = await tx.expenseEntry.create({
       data: {
         date: new Date(date),
-        categoryId: req.body.categoryId,
         partyId,
         module: "MATERIAL",
+        paymentType: purchase.paymentType,
         amount: totalAmount,
         description: req.body.description,
         materialPurchaseId: purchase.id,
+        source: "SYSTEM",
+        sourceSystem: "MATERIAL_PURCHASE",
       },
     });
 
-    if (purchase.partyId && purchase.paymentType === "CREDIT") {
+    if (purchase.partyId && isKhata(purchase.paymentType)) {
       await tx.partyLedgerEntry.create({
         data: {
           partyId: purchase.partyId,
           date: purchase.date,
           reference: "Material Purchase",
           description: req.body.description,
-          debit: 0,
-          credit: purchase.totalAmount,
+          balance: -Number(purchase.totalAmount),
           materialPurchaseId: purchase.id,
         },
       });
@@ -358,7 +366,7 @@ export const updateMaterialPurchase = async (req, res) => {
         quantity: req.body.quantity,
         pricePerUnit: req.body.pricePerUnit,
         totalAmount: req.body.totalAmount,
-        paymentType: req.body.paymentType,
+        paymentType: toDbPaymentType(req.body.paymentType),
       },
     });
 
@@ -367,7 +375,7 @@ export const updateMaterialPurchase = async (req, res) => {
       data: {
         date: req.body.date ? new Date(req.body.date) : undefined,
         partyId: req.body.partyId,
-        categoryId: req.body.categoryId,
+        paymentType: updated.paymentType,
         amount: req.body.totalAmount,
         description: req.body.description,
       },
@@ -377,7 +385,7 @@ export const updateMaterialPurchase = async (req, res) => {
       where: { materialPurchaseId: updated.id },
     });
 
-    if (updated.partyId && updated.paymentType === "CREDIT") {
+    if (updated.partyId && isKhata(updated.paymentType)) {
       if (existingLedger) {
         await tx.partyLedgerEntry.update({
           where: { id: existingLedger.id },
@@ -386,8 +394,7 @@ export const updateMaterialPurchase = async (req, res) => {
             date: updated.date,
             reference: "Material Purchase",
             description: req.body.description,
-            debit: 0,
-            credit: updated.totalAmount,
+            balance: -Number(updated.totalAmount),
           },
         });
       } else {
@@ -397,8 +404,7 @@ export const updateMaterialPurchase = async (req, res) => {
             date: updated.date,
             reference: "Material Purchase",
             description: req.body.description,
-            debit: 0,
-            credit: updated.totalAmount,
+            balance: -Number(updated.totalAmount),
             materialPurchaseId: updated.id,
           },
         });

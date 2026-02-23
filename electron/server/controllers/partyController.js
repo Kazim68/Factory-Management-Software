@@ -1,5 +1,6 @@
 import prisma from "../prisma.js";
 import { toDate, withDateRange } from "../utils/date.js";
+import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
 
 export const listParties = async (req, res) => {
   const parties = await prisma.party.findMany({ orderBy: { name: "asc" } });
@@ -11,7 +12,8 @@ export const createParty = async (req, res) => {
     data: {
       name: req.body.name,
       type: req.body.type,
-      openingBalance: req.body.openingBalance ?? 0,
+      // Balance is derived from ledger entries; keep opening balance neutral.
+      openingBalance: 0,
     },
   });
   res.status(201).json(party);
@@ -23,7 +25,6 @@ export const updateParty = async (req, res) => {
     data: {
       name: req.body.name,
       type: req.body.type,
-      openingBalance: req.body.openingBalance,
     },
   });
   res.json(party);
@@ -88,7 +89,7 @@ export const getPartyLedger = async (req, res) => {
   );
 
   const makeKey = (entry) => {
-    const amount = Number(entry.amount ?? entry.debit ?? entry.credit ?? 0);
+    const amount = Number(entry.amount ?? entry.balance ?? 0);
     const reference = entry.reference ?? "";
     const description = entry.description ?? "";
     const date = entry.date instanceof Date ? entry.date.toISOString() : `${entry.date}`;
@@ -105,8 +106,9 @@ export const getPartyLedger = async (req, res) => {
     date: payment.date,
     reference: payment.reference ?? "Cash Payment",
     description: payment.description ?? "Cash payment",
-    debit: 0,
-    credit: 0,
+    balance: 0,
+    payable: 0,
+    receivable: 0,
     cash: payment.amount,
     createdAt: payment.createdAt,
     isCash: true,
@@ -119,8 +121,9 @@ export const getPartyLedger = async (req, res) => {
       date: purchase.date,
       reference: "Chemical Purchase",
       description: purchase.expenses?.[0]?.description ?? "Cash purchase",
-      debit: 0,
-      credit: 0,
+      balance: 0,
+      payable: 0,
+      receivable: 0,
       cash: purchase.totalAmount,
       createdAt: purchase.createdAt,
       isCash: true,
@@ -131,8 +134,9 @@ export const getPartyLedger = async (req, res) => {
       date: purchase.date,
       reference: "Rexine Purchase",
       description: purchase.expenses?.[0]?.description ?? "Cash purchase",
-      debit: 0,
-      credit: 0,
+      balance: 0,
+      payable: 0,
+      receivable: 0,
       cash: purchase.totalAmount,
       createdAt: purchase.createdAt,
       isCash: true,
@@ -143,8 +147,9 @@ export const getPartyLedger = async (req, res) => {
       date: purchase.date,
       reference: "Material Purchase",
       description: purchase.expenses?.[0]?.description ?? "Cash purchase",
-      debit: 0,
-      credit: 0,
+      balance: 0,
+      payable: 0,
+      receivable: 0,
       cash: purchase.totalAmount,
       createdAt: purchase.createdAt,
       isCash: true,
@@ -157,9 +162,18 @@ export const getPartyLedger = async (req, res) => {
     const isCash =
       reference.toLowerCase().includes("cash") ||
       description.toLowerCase().includes("cash");
+    const balance = Number(entry.balance ?? 0);
+    const receivable = balance > 0 ? balance : 0;
+    const payable = balance < 0 ? Math.abs(balance) : 0;
+    const mapped = {
+      ...entry,
+      balance,
+      payable,
+      receivable,
+    };
     return isCash
-      ? { ...entry, cash: Number(entry.debit ?? entry.credit ?? 0), isCash: true }
-      : entry;
+      ? { ...mapped, cash: Math.abs(balance), isCash: true }
+      : mapped;
   });
 
   res.json(
@@ -177,42 +191,142 @@ export const getPartyLedger = async (req, res) => {
 
 export const createPartyPayment = async (req, res) => {
   const rawMethod = (req.body.method ?? "CASH").toString().toUpperCase();
-  const method = ["CASH", "CREDIT", "BANK"].includes(rawMethod)
-    ? rawMethod
+  const method =
+    rawMethod === "KHATA" || rawMethod === "BANK"
+      ? "CREDIT"
+      : ["CASH", "CREDIT"].includes(rawMethod)
+        ? rawMethod
     : "CASH";
   const isCash = method === "CASH";
+  const direction = (req.body.direction ?? "PAY").toString().toUpperCase();
+  const normalizedDirection =
+    direction === "RECEIVE" || direction === "PAY" ? direction : "PAY";
+  const amount = Math.abs(Number(req.body.amount ?? 0));
   const reference =
-    req.body.reference ?? (isCash ? "Cash Payment" : "Payment");
+    req.body.reference ?? (isCash ? "Cash Payment" : "Khata Settlement");
   const description =
-    req.body.description ?? (isCash ? "Cash payment" : undefined);
+    req.body.description ?? (isCash ? "Cash payment" : "Khata settlement");
 
-  const payment = await prisma.partyPayment.create({
-    data: {
-      partyId: req.params.partyId,
-      date: new Date(req.body.date),
-      amount: req.body.amount,
-      method,
-      reference,
-      description,
-      billId: req.body.billId,
-      chemicalPurchaseId: req.body.chemicalPurchaseId,
-      rexinePurchaseId: req.body.rexinePurchaseId,
-      materialPurchaseId: req.body.materialPurchaseId,
-    },
-  });
+  const paymentDate = new Date(req.body.date);
+  const payment = await prisma.$transaction(async (tx) => {
+      const allocations = [];
+      if (
+        normalizedDirection === "RECEIVE" &&
+        !req.body.billId &&
+        !req.body.chemicalPurchaseId &&
+        !req.body.rexinePurchaseId &&
+        !req.body.materialPurchaseId
+      ) {
+        const bills = await tx.bill.findMany({
+          where: {
+            partyId: req.params.partyId,
+            type: "CREDIT",
+          },
+          include: { payments: true },
+          orderBy: { date: "asc" },
+        });
 
-  if (!isCash) {
-    await prisma.partyLedgerEntry.create({
-      data: {
-        partyId: req.params.partyId,
-        date: new Date(req.body.date),
-        reference,
+        let remainingToAllocate = amount;
+        for (const bill of bills) {
+          if (remainingToAllocate <= 0) break;
+          const total = Number(bill.total ?? 0);
+          const totalPaid = (bill.payments ?? []).reduce(
+            (sum, p) => sum + Number(p.amount ?? 0),
+            0
+          );
+          const remaining = Math.max(total - totalPaid, 0);
+          if (remaining <= 0) continue;
+          const applied = Math.min(remaining, remainingToAllocate);
+          allocations.push({ amount: applied, billId: bill.id });
+          remainingToAllocate -= applied;
+        }
+
+        if (remainingToAllocate > 0) {
+          allocations.push({ amount: remainingToAllocate, billId: null });
+        }
+      } else {
+        if (normalizedDirection === "RECEIVE" && req.body.billId) {
+          const bill = await tx.bill.findUnique({
+            where: { id: req.body.billId },
+            include: { payments: true },
+          });
+          if (!bill || bill.partyId !== req.params.partyId) {
+            throw new Error("Selected bill does not belong to this party.");
+          }
+          const total = Number(bill.total ?? 0);
+          const totalPaid = (bill.payments ?? []).reduce(
+            (sum, p) => sum + Number(p.amount ?? 0),
+            0
+          );
+          const remaining = Math.max(total - totalPaid, 0);
+          if (remaining <= 0) {
+            throw new Error("Selected bill is already fully paid.");
+          }
+          if (amount > remaining) {
+            throw new Error("Payment exceeds selected bill remaining amount.");
+          }
+        }
+
+        allocations.push({
+          amount,
+          billId: req.body.billId ?? null,
+          chemicalPurchaseId: req.body.chemicalPurchaseId ?? null,
+          rexinePurchaseId: req.body.rexinePurchaseId ?? null,
+          materialPurchaseId: req.body.materialPurchaseId ?? null,
+        });
+      }
+
+      const createdPayments = [];
+      for (const allocation of allocations) {
+        const created = await tx.partyPayment.create({
+          data: {
+            partyId: req.params.partyId,
+            date: paymentDate,
+            amount: allocation.amount,
+            method,
+            reference,
+            description,
+            billId: allocation.billId ?? null,
+            chemicalPurchaseId: allocation.chemicalPurchaseId ?? null,
+            rexinePurchaseId: allocation.rexinePurchaseId ?? null,
+            materialPurchaseId: allocation.materialPurchaseId ?? null,
+          },
+        });
+        createdPayments.push(created);
+      }
+
+      if (!isCash) {
+        const balance = normalizedDirection === "RECEIVE" ? -amount : amount;
+        await tx.partyLedgerEntry.create({
+          data: {
+            partyId: req.params.partyId,
+            date: paymentDate,
+            reference,
+            description,
+            balance,
+          },
+        });
+      }
+
+      await createSystemRoznamchaEntry(tx, {
+        date: paymentDate,
+        amount: normalizedDirection === "RECEIVE" ? -amount : amount,
         description,
-        debit: req.body.amount,
-        credit: 0,
-      },
+        partyId: req.params.partyId,
+        paymentType: method,
+        sourceSystem:
+          normalizedDirection === "RECEIVE"
+            ? "PARTY_PAYMENT_RECEIVED"
+            : "PARTY_PAYMENT_PAID",
+      });
+
+      return createdPayments[0];
+    }).catch((error) => {
+      res.status(400).json({ error: error.message ?? "Failed to record payment." });
+      return null;
     });
-  }
+
+  if (!payment) return;
 
   res.status(201).json(payment);
 };

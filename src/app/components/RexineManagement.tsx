@@ -32,7 +32,7 @@ import { configApi, partyApi, purchaseApi } from "../lib/api";
 import type { ApiExpenseCategory, ApiParty, ApiRexinePurchase } from "../types/api";
 import { toast } from "sonner";
 
-type PaymentType = "cash" | "credit";
+type PaymentType = "cash" | "payable";
 
 export function RexineManagement() {
   const [transactions, setTransactions] = useState<ApiRexinePurchase[]>([]);
@@ -101,7 +101,7 @@ export function RexineManagement() {
           quantityMeter: meters,
           ratePerMeter: rate,
           totalAmount,
-          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
         });
         toast.success("Rexine purchase updated");
@@ -113,7 +113,7 @@ export function RexineManagement() {
           quantityMeter: meters,
           ratePerMeter: rate,
           totalAmount,
-          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
         });
         toast.success("Rexine purchase added");
@@ -151,7 +151,9 @@ export function RexineManagement() {
       categoryId: purchase.expenses?.[0]?.categoryId || "",
       meters: String(purchase.quantityMeter),
       rate: String(purchase.ratePerMeter),
-      paymentType: purchase.paymentType === "CREDIT" ? "credit" : "cash",
+      paymentType: ["CREDIT", "KHATA"].includes(String(purchase.paymentType))
+        ? "payable"
+        : "cash",
       detail: purchase.expenses?.[0]?.description || "",
     });
     setIsDialogOpen(true);
@@ -274,7 +276,7 @@ export function RexineManagement() {
                       />
                     </div>
                     <div>
-                      <Label>Payment Type</Label>
+                      <Label>Settlement Type</Label>
                       <Select
                         value={formData.paymentType}
                         onValueChange={(value: PaymentType) =>
@@ -286,7 +288,7 @@ export function RexineManagement() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="credit">Credit</SelectItem>
+                          <SelectItem value="payable">Payable</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -337,7 +339,7 @@ export function RexineManagement() {
                 <TableHead>Meters</TableHead>
                 <TableHead>Rate</TableHead>
                 <TableHead>Total</TableHead>
-                <TableHead>Payment Type</TableHead>
+                <TableHead>Settlement Type</TableHead>
                 <TableHead>Detail</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -373,7 +375,9 @@ export function RexineManagement() {
                               : "text-orange-600"
                           }
                       >
-                        {transaction.paymentType}
+                        {["CREDIT", "KHATA"].includes(String(transaction.paymentType))
+                          ? "PAYABLE"
+                          : "CASH"}
                       </span>
                     </TableCell>
                     <TableCell>{getDetail(transaction)}</TableCell>

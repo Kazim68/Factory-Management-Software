@@ -76,8 +76,9 @@ export interface ApiLaborLedger {
   netPayable: number;
 }
 
-export type ApiBillType = "CASH" | "CREDIT";
+export type ApiBillType = "CASH" | "RECEIVABLE";
 export type ApiBillStatus = "DRAFT" | "CONFIRMED";
+export type ApiBillPaymentStatus = "PAID" | "UNPAID" | "PARTIAL_PAID";
 
 export interface ApiBillLine {
   id: string;
@@ -97,13 +98,29 @@ export interface ApiBill {
   type: ApiBillType;
   status: ApiBillStatus;
   total: number | string;
+  totalPaid: number;
+  remaining: number;
+  paymentStatus: ApiBillPaymentStatus;
+  isVerified: boolean;
+  verifiedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   lines: ApiBillLine[];
+  payments?: ApiPartyPayment[];
   party?: ApiParty | null;
 }
 
-export type ApiPaymentMethod = "CASH" | "CREDIT" | "BANK";
+export interface ApiBillLedgerEntry {
+  id: string;
+  date: string;
+  reference?: string | null;
+  description?: string | null;
+  amount: number;
+  kind: "RECEIVABLE" | "PAYMENT";
+  method?: "CASH" | "KHATA" | "CREDIT" | "BANK";
+}
+
+export type ApiPaymentMethod = "CASH" | "KHATA" | "CREDIT" | "BANK";
 
 export interface ApiChemicalPurchase {
   id: string;
@@ -162,19 +179,24 @@ export type ApiExpenseModule =
   | "LABOR"
   | "MISC";
 
+export type ApiExpenseSource = "MANUAL" | "SYSTEM";
+
 export interface ApiExpenseEntry {
   id: string;
   date: string;
-  categoryId: string;
+  categoryId?: string | null;
   partyId?: string | null;
   laborId?: string | null;
   module: ApiExpenseModule;
+  paymentType?: ApiPaymentMethod;
   amount: number | string;
   description?: string | null;
   chemicalPurchaseId?: string | null;
   rexinePurchaseId?: string | null;
   materialPurchaseId?: string | null;
   laborAdvanceId?: string | null;
+  source?: ApiExpenseSource;
+  sourceSystem?: string | null;
   createdAt: string;
   category?: ApiExpenseCategory | null;
   party?: ApiParty | null;
@@ -199,8 +221,9 @@ export interface ApiPartyLedgerEntry {
   date: string;
   reference?: string | null;
   description?: string | null;
-  debit: number | string;
-  credit: number | string;
+  balance: number | string;
+  payable: number | string;
+  receivable: number | string;
   cash?: number | string;
   isCash?: boolean;
   runningBalance?: number | string | null;
@@ -212,7 +235,8 @@ export interface ApiPartyPayment {
   partyId: string;
   date: string;
   amount: number | string;
-  method: "CASH" | "CREDIT" | "BANK";
+  method: "CASH" | "KHATA" | "CREDIT" | "BANK";
+  direction?: "RECEIVE" | "PAY";
   reference?: string | null;
   description?: string | null;
   billId?: string | null;

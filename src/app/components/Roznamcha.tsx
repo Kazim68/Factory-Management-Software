@@ -24,12 +24,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardHeader } from "./ui/card";
 import { Plus } from "lucide-react";
-import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
-import { configApi, expenseApi, laborApi, partyApi } from "../lib/api";
+import { formatCurrency, getCurrentDate } from "../lib/utils";
+import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api";
 import type {
-  ApiExpenseCategory,
+  ApiBill,
   ApiExpenseEntry,
   ApiExpenseModule,
   ApiLaborProfile,
@@ -38,40 +38,61 @@ import type {
 import { toast } from "sonner";
 
 export function Roznamcha() {
+  type RoznamchaModule = ApiExpenseModule | "BILL";
+  type EntryViewFilter =
+    | "ALL"
+    | "IN_ONLY"
+    | "OUT_ONLY"
+    | "LABOR_ONLY"
+    | "PARTY_ONLY";
+
   const [entries, setEntries] = useState<ApiExpenseEntry[]>([]);
-  const [categories, setCategories] = useState<ApiExpenseCategory[]>([]);
   const [parties, setParties] = useState<ApiParty[]>([]);
   const [labors, setLabors] = useState<ApiLaborProfile[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [billOptions, setBillOptions] = useState<ApiBill[]>([]);
+  const [isLoadingBills, setIsLoadingBills] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ApiExpenseEntry | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [entryFilter, setEntryFilter] = useState<EntryViewFilter>("ALL");
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
-    module: "MISC" as ApiExpenseModule,
-    categoryId: "",
+    module: "MISC" as RoznamchaModule,
+    direction: "OUT" as "IN" | "OUT",
+    paymentType: "CASH" as "CASH" | "KHATA",
     partyId: "none",
+    billId: "",
     laborId: "",
+    quantity: "",
+    rate: "",
     amount: "",
     description: "",
   });
 
   const [filterDate, setFilterDate] = useState(getCurrentDate());
+  const computedPurchaseAmount =
+    Number(formData.quantity || 0) * Number(formData.rate || 0);
+  const selectedBill = billOptions.find((bill) => bill.id === formData.billId);
+  const selectedBillRemaining = Number(selectedBill?.remaining ?? 0);
+  const exceedsBillAmount =
+    formData.module === "BILL" &&
+    !!selectedBill &&
+    Number(formData.amount || 0) > selectedBillRemaining;
 
   const loadData = async (dateFilter: string) => {
     setIsLoading(true);
     try {
       const start = dateFilter;
       const end = dateFilter;
-      const [expenseEntries, categoryData, partyData, laborData] =
+      const [expenseEntries, partyData, laborData] =
         await Promise.all([
           expenseApi.listExpenses({ start, end }),
-          configApi.listExpenseCategories(),
           partyApi.listParties(),
           laborApi.listProfiles(),
         ]);
       setEntries(expenseEntries);
-      setCategories(categoryData);
       setParties(partyData);
       setLabors(laborData);
     } catch (error) {
@@ -88,19 +109,58 @@ export function Roznamcha() {
     }
   }, [filterDate]);
 
+  useEffect(() => {
+    if (!isDialogOpen || formData.module !== "BILL" || !formData.partyId || formData.partyId === "none") {
+      setBillOptions([]);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingBills(true);
+    billApi
+      .listBills()
+      .then((bills) => {
+        if (!active) return;
+        const filtered = bills.filter(
+          (bill) =>
+            bill.partyId === formData.partyId &&
+            Number(bill.remaining ?? 0) > 0
+        );
+        setBillOptions(filtered);
+        const first = filtered[0];
+        if (first) {
+          setFormData((prev) => ({
+            ...prev,
+            billId: first.id,
+            amount: String(Number(first.remaining ?? 0)),
+          }));
+        } else {
+          setFormData((prev) => ({ ...prev, billId: "", amount: "" }));
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) toast.error("Failed to load bills for selected party.");
+      })
+      .finally(() => {
+        if (active) setIsLoadingBills(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isDialogOpen, formData.module, formData.partyId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isPurchaseModule =
+      formData.module === "CHEMICAL" ||
+      formData.module === "REXINE" ||
+      formData.module === "MATERIAL";
 
-    if (!formData.categoryId) {
-      toast.error("Select an expense category.");
-      return;
-    }
-
-    const amount = parseFloat(formData.amount);
-    if (!Number.isFinite(amount)) {
-      toast.error("Enter a valid amount.");
-      return;
-    }
+    const amount = parseFloat(formData.amount || "0");
+    const quantity = parseFloat(formData.quantity || "0");
+    const rate = parseFloat(formData.rate || "0");
 
     try {
       if (editingEntry) {
@@ -110,44 +170,109 @@ export function Roznamcha() {
             date: formData.date,
             amount,
             reason: formData.description,
-            categoryId: formData.categoryId,
           });
         } else {
           await expenseApi.updateExpense(editingEntry.id, {
             date: formData.date,
-            categoryId: formData.categoryId,
-            partyId: formData.partyId || undefined,
+            partyId: formData.partyId === "none" ? undefined : formData.partyId,
             laborId: formData.module === "LABOR" ? formData.laborId : undefined,
-            module: formData.module,
+            module: formData.module === "BILL" ? "MISC" : formData.module,
+            paymentType: formData.paymentType,
             amount,
             description: formData.description,
           });
         }
         toast.success("Expense updated");
+      } else if (formData.module === "BILL") {
+        if (!formData.partyId || formData.partyId === "none") {
+          toast.error("Select a party.");
+          return;
+        }
+        if (!formData.billId) {
+          toast.error("Select a bill.");
+          return;
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+          toast.error("Enter a valid amount.");
+          return;
+        }
+        if (selectedBill && amount > Number(selectedBill.remaining ?? 0)) {
+          toast.error("Amount exceeds bill remaining.");
+          return;
+        }
+        await billApi.receivePayment(formData.billId, {
+          amount,
+          date: formData.date,
+          method: "CASH",
+          description: formData.description || undefined,
+        });
+        toast.success("Bill payment recorded");
+      } else if (isPurchaseModule) {
+        if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(rate) || rate <= 0) {
+          toast.error("Enter valid quantity and rate.");
+          return;
+        }
+        const totalAmount = Number((quantity * rate).toFixed(2));
+        const purchasePayload = {
+          date: formData.date,
+          partyId: formData.partyId === "none" ? undefined : formData.partyId,
+          totalAmount,
+          paymentType: formData.paymentType,
+          description: formData.description,
+        };
+
+        if (formData.module === "CHEMICAL") {
+          await purchaseApi.createChemical({
+            ...purchasePayload,
+            quantityKg: quantity,
+            ratePerKg: rate,
+          });
+        } else if (formData.module === "REXINE") {
+          await purchaseApi.createRexine({
+            ...purchasePayload,
+            quantityMeter: quantity,
+            ratePerMeter: rate,
+          });
+        } else {
+          await purchaseApi.createMaterial({
+            ...purchasePayload,
+            quantity,
+            pricePerUnit: rate,
+          });
+        }
+        toast.success("Purchase recorded");
       } else if (formData.module === "LABOR") {
+        if (!Number.isFinite(amount) || amount <= 0) {
+          toast.error("Enter a valid amount.");
+          return;
+        }
         if (!formData.laborId) {
           toast.error("Select a labor profile.");
           return;
         }
         await expenseApi.createExpense({
           date: formData.date,
-          categoryId: formData.categoryId,
           laborId: formData.laborId,
           module: formData.module,
+          paymentType: formData.paymentType,
           amount,
           description: formData.description,
         });
         toast.success("Expense recorded");
       } else {
+        if (!Number.isFinite(amount) || amount <= 0) {
+          toast.error("Enter a valid amount.");
+          return;
+        }
         await expenseApi.createExpense({
           date: formData.date,
-          categoryId: formData.categoryId,
           partyId: formData.partyId === "none" ? undefined : formData.partyId,
           module: formData.module,
-          amount,
+          paymentType: formData.paymentType,
+          amount: formData.direction === "IN" ? -amount : amount,
           description: formData.description,
         });
-        toast.success("Expense recorded");
+        toast.success("Entry recorded");
       }
 
       await loadData(filterDate);
@@ -163,9 +288,13 @@ export function Roznamcha() {
     setFormData({
       date: getCurrentDate(),
       module: "MISC",
-      categoryId: "",
+      direction: "OUT",
+      paymentType: "CASH",
       partyId: "none",
+      billId: "",
       laborId: "",
+      quantity: "",
+      rate: "",
       amount: "",
       description: "",
     });
@@ -177,9 +306,16 @@ export function Roznamcha() {
     setFormData({
       date: entry.date.slice(0, 10),
       module: entry.module,
-      categoryId: entry.categoryId,
-      partyId: entry.partyId || "",
+      direction: Number(entry.amount) < 0 ? "IN" : "OUT",
+      paymentType:
+        String(entry.paymentType ?? "CASH").toUpperCase() === "CASH"
+          ? "CASH"
+          : "KHATA",
+      partyId: entry.partyId || "none",
+      billId: "",
       laborId: entry.laborId || entry.laborAdvance?.laborId || "",
+      quantity: "",
+      rate: "",
       amount: String(entry.amount),
       description: entry.description || "",
     });
@@ -198,36 +334,155 @@ export function Roznamcha() {
     }
   };
 
-  const filteredEntries = entries;
+  const cashOutToday = entries.reduce((sum, entry) => {
+    const amount = Number(entry.amount ?? 0);
+    return amount >= 0 ? sum + amount : sum;
+  }, 0);
 
-  const totalExpenses = filteredEntries.reduce(
-    (sum, entry) => sum + Number(entry.amount ?? 0),
-    0
-  );
+  const cashInToday = entries.reduce((sum, entry) => {
+    const amount = Number(entry.amount ?? 0);
+    return amount < 0 ? sum + Math.abs(amount) : sum;
+  }, 0);
 
   const getPartyLaborLabel = (entry: ApiExpenseEntry) =>
     entry.party?.name || entry.labor?.name || entry.laborAdvance?.labor?.name || "-";
+
+  const getReferenceLabel = (entry: ApiExpenseEntry) => {
+    if (entry.sourceSystem === "BILL_PAYMENT_RECEIVED") return "Bill";
+    if (entry.sourceSystem === "PARTY_PAYMENT_RECEIVED") return "Party";
+    if (entry.sourceSystem === "PARTY_PAYMENT_PAID") return "Party";
+    if (entry.sourceSystem === "LABOR_ADVANCE") return "Labor";
+    if (entry.sourceSystem === "CHEMICAL_PURCHASE") return "Chemical";
+    if (entry.sourceSystem === "REXINE_PURCHASE") return "Rexine";
+    if (entry.sourceSystem === "MATERIAL_PURCHASE") return "Material";
+
+    switch (entry.module) {
+      case "CHEMICAL":
+        return "Chemical";
+      case "REXINE":
+        return "Rexine";
+      case "MATERIAL":
+        return "Material";
+      case "LABOR":
+        return "Labor";
+      default:
+        return "Misc";
+    }
+  };
+
+  const getInOut = (amount: number) => (amount < 0 ? "In" : "Out");
+  const getPaymentTypeLabel = (entry: ApiExpenseEntry) =>
+    String(entry.paymentType ?? "CASH").toUpperCase() === "CASH"
+      ? "Cash"
+      : "Khata";
+
+  const formatTime = (entry: ApiExpenseEntry) => {
+    const value = entry.createdAt || entry.date;
+    return new Date(value).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const filteredEntries = entries.filter((entry) => {
+    const amount = Number(entry.amount ?? 0);
+    const isLaborEntry =
+      entry.module === "LABOR" || !!entry.laborId || !!entry.laborAdvanceId;
+    const isPartyEntry = !!entry.partyId;
+
+    const matchesFilter =
+      entryFilter === "ALL" ||
+      (entryFilter === "IN_ONLY" && amount < 0) ||
+      (entryFilter === "OUT_ONLY" && amount >= 0) ||
+      (entryFilter === "LABOR_ONLY" && isLaborEntry) ||
+      (entryFilter === "PARTY_ONLY" && isPartyEntry);
+
+    if (!matchesFilter) return false;
+
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+
+    const searchable = [
+      getReferenceLabel(entry),
+      getPartyLaborLabel(entry),
+      entry.description || "",
+      getPaymentTypeLabel(entry),
+      getInOut(amount),
+      String(Math.abs(amount)),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return searchable.includes(query);
+  });
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Roznamcha (Daily Expenses)</CardTitle>
+          <div className="flex items-end justify-between gap-4">
+            <div className="flex flex-1 flex-wrap items-end gap-3">
+              <div className="min-w-[210px]">
+                <Label htmlFor="roznamcha-date" className="mb-1.5 inline-block px-0.5 text-xs uppercase tracking-wide text-muted-foreground">
+                  Date
+                </Label>
+                <Input
+                  id="roznamcha-date"
+                  type="date"
+                  value={filterDate}
+                  onChange={(e) =>
+                    setFilterDate(e.target.value || getCurrentDate())
+                  }
+                  className="h-10 w-[190px] pr-2 [&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:ml-1 [&::-webkit-calendar-picker-indicator]:p-0 [&::-webkit-calendar-picker-indicator]:w-4 [&::-webkit-calendar-picker-indicator]:h-4"
+                />
+              </div>
+              <div className="min-w-[260px] flex-1 md:max-w-[380px]">
+                <Label htmlFor="roznamcha-search" className="mb-1.5 inline-block px-0.5 text-xs uppercase tracking-wide text-muted-foreground">
+                  Search
+                </Label>
+                <Input
+                  id="roznamcha-search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search reference, party, labor, amount..."
+                  className="h-10"
+                />
+              </div>
+              <div className="min-w-[220px]">
+                <Label className="mb-1.5 inline-block px-0.5 text-xs uppercase tracking-wide text-muted-foreground">
+                  Filter
+                </Label>
+                <Select
+                  value={entryFilter}
+                  onValueChange={(value) => setEntryFilter(value as EntryViewFilter)}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Entries</SelectItem>
+                    <SelectItem value="IN_ONLY">Only In</SelectItem>
+                    <SelectItem value="OUT_ONLY">Only Out</SelectItem>
+                    <SelectItem value="LABOR_ONLY">Only Labor</SelectItem>
+                    <SelectItem value="PARTY_ONLY">Only Party</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <Dialog open={isDialogOpen} onOpenChange={(open) => {
               setIsDialogOpen(open);
               if (!open) resetForm();
             }}>
               <DialogTrigger asChild>
-                <Button>
+                <Button className="h-10 self-end">
                   <Plus className="mr-2 h-4 w-4" />
-                  Add Expense
+                  Add Entry
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                     <DialogTitle>
-                      {editingEntry ? "Edit Expense" : "Record Daily Expense"}
+                      {editingEntry ? "Edit Entry" : "Record Entry"}
                     </DialogTitle>
                   </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -245,12 +500,16 @@ export function Roznamcha() {
                       <Label>Module</Label>
                       <Select
                         value={formData.module}
-                        onValueChange={(value) =>
+                        onValueChange={(value) => {
+                          const nextModule = value as RoznamchaModule;
                           setFormData({
                             ...formData,
-                            module: value as ApiExpenseModule,
-                          })
-                        }
+                            module: nextModule,
+                            direction: nextModule === "BILL" ? "IN" : formData.direction,
+                            paymentType: nextModule === "BILL" ? "CASH" : formData.paymentType,
+                            billId: nextModule === "BILL" ? "" : formData.billId,
+                          });
+                        }}
                         disabled={!!editingEntry?.laborAdvanceId}
                       >
                         <SelectTrigger>
@@ -258,6 +517,7 @@ export function Roznamcha() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="MISC">Misc</SelectItem>
+                          <SelectItem value="BILL">Bill</SelectItem>
                           <SelectItem value="CHEMICAL">Chemical</SelectItem>
                           <SelectItem value="REXINE">Rexine</SelectItem>
                           <SelectItem value="MATERIAL">Material</SelectItem>
@@ -272,28 +532,53 @@ export function Roznamcha() {
                     </div>
                   </div>
 
-                  <div>
-                    <Label>Expense Category</Label>
-                    <Select
-                      value={formData.categoryId}
-                      onValueChange={(value) =>
-                        setFormData({ ...formData, categoryId: value })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map((cat) => (
-                          <SelectItem key={cat.id} value={cat.id}>
-                            {cat.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>In/Out</Label>
+                      <Select
+                        value={formData.direction}
+                        onValueChange={(value: "IN" | "OUT") =>
+                          setFormData({ ...formData, direction: value })
+                        }
+                        disabled={
+                          formData.module === "BILL" ||
+                          formData.module === "CHEMICAL" ||
+                          formData.module === "MATERIAL" ||
+                          formData.module === "REXINE" ||
+                          formData.module === "LABOR"
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="OUT">Out</SelectItem>
+                          <SelectItem value="IN">In</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Payment Type</Label>
+                      <Select
+                        value={formData.paymentType}
+                        onValueChange={(value: "CASH" | "KHATA") =>
+                          setFormData({ ...formData, paymentType: value })
+                        }
+                        disabled={formData.module === "BILL"}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CASH">Cash</SelectItem>
+                          <SelectItem value="KHATA">Khata</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
-                  {formData.module === "CHEMICAL" ||
+                  {formData.module === "BILL" ||
+                  formData.module === "CHEMICAL" ||
                   formData.module === "MATERIAL" ||
                   formData.module === "REXINE" ? (
                     <div>
@@ -301,14 +586,18 @@ export function Roznamcha() {
                       <Select
                         value={formData.partyId}
                         onValueChange={(value) =>
-                          setFormData({ ...formData, partyId: value })
+                          setFormData({
+                            ...formData,
+                            partyId: value,
+                            billId: formData.module === "BILL" ? "" : formData.billId,
+                          })
                         }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select party" />
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">No party</SelectItem>
+                      <SelectContent>
+                          {formData.module !== "BILL" && <SelectItem value="none">No party</SelectItem>}
                           {parties.map((party) => (
                             <SelectItem key={party.id} value={party.id}>
                               {party.name}
@@ -318,6 +607,102 @@ export function Roznamcha() {
                       </Select>
                     </div>
                   ) : null}
+
+                  {formData.module === "BILL" && (
+                    <div className="space-y-2">
+                      <Label>Bill</Label>
+                      <Select
+                        value={formData.billId}
+                        onValueChange={(value) => {
+                          const bill = billOptions.find((item) => item.id === value);
+                          setFormData({
+                            ...formData,
+                            billId: value,
+                            amount: bill ? String(Number(bill.remaining ?? 0)) : formData.amount,
+                            direction: "IN",
+                            paymentType: "CASH",
+                          });
+                        }}
+                        disabled={isLoadingBills || billOptions.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={
+                              isLoadingBills
+                                ? "Loading bills..."
+                                : billOptions.length === 0
+                                  ? "No pending bills"
+                                  : "Select bill"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {billOptions.map((bill) => (
+                            <SelectItem key={bill.id} value={bill.id}>
+                              {bill.billNumber}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedBill && (
+                        <div className="rounded border p-3 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Bill No</span>
+                            <span>{selectedBill.billNumber}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Remaining</span>
+                            <span>{formatCurrency(Number(selectedBill.remaining ?? 0))}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(formData.module === "CHEMICAL" ||
+                    formData.module === "REXINE" ||
+                    formData.module === "MATERIAL") && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>
+                          {formData.module === "CHEMICAL"
+                            ? "Quantity (Kg)"
+                            : formData.module === "REXINE"
+                              ? "Quantity (Meter)"
+                              : "Quantity"}
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={formData.quantity}
+                          onChange={(e) =>
+                            setFormData({ ...formData, quantity: e.target.value })
+                          }
+                          required={!editingEntry}
+                        />
+                      </div>
+                      <div>
+                        <Label>
+                          {formData.module === "CHEMICAL"
+                            ? "Rate / Kg"
+                            : formData.module === "REXINE"
+                              ? "Rate / Meter"
+                              : "Price / Unit"}
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={formData.rate}
+                          onChange={(e) =>
+                            setFormData({ ...formData, rate: e.target.value })
+                          }
+                          required={!editingEntry}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {formData.module === "LABOR" && (
                     <div>
@@ -347,11 +732,34 @@ export function Roznamcha() {
                     <Input
                       type="number"
                       step="0.01"
-                      value={formData.amount}
+                      min="0"
+                      value={
+                        formData.module === "CHEMICAL" ||
+                        formData.module === "REXINE" ||
+                        formData.module === "MATERIAL"
+                          ? String(Number.isFinite(computedPurchaseAmount) ? computedPurchaseAmount : 0)
+                          : formData.amount
+                      }
                       onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                      required
-                    />
-                  </div>
+                      required={
+                        !(
+                          formData.module === "CHEMICAL" ||
+                          formData.module === "REXINE" ||
+                          formData.module === "MATERIAL"
+                        )
+                      }
+                      disabled={
+                        formData.module === "CHEMICAL" ||
+                        formData.module === "REXINE" ||
+                        formData.module === "MATERIAL"
+                      }
+                  />
+                  {formData.module === "BILL" && exceedsBillAmount && (
+                    <p className="mt-1 text-xs text-red-600">
+                      Amount cannot exceed {formatCurrency(selectedBillRemaining)} for this bill.
+                    </p>
+                  )}
+                </div>
 
                   <div>
                     <Label>Description</Label>
@@ -367,8 +775,8 @@ export function Roznamcha() {
                     <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit">
-                      {editingEntry ? "Update Expense" : "Record Expense"}
+                    <Button type="submit" disabled={formData.module === "BILL" && exceedsBillAmount}>
+                      {editingEntry ? "Update Entry" : "Record Entry"}
                     </Button>
                   </div>
                 </form>
@@ -377,73 +785,72 @@ export function Roznamcha() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 flex items-center gap-4">
-            <div className="flex-1">
-              <Label>Filter by Date</Label>
-              <Input
-                type="date"
-                value={filterDate}
-                onChange={(e) =>
-                  setFilterDate(e.target.value || getCurrentDate())
-                }
-                placeholder="All dates"
-              />
+          <div className="mb-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded border p-4">
+              <p className="text-sm text-muted-foreground">Cash In Today</p>
+              <p className="text-2xl text-green-600">{formatCurrency(cashInToday)}</p>
             </div>
-            <div className="p-4 bg-muted rounded">
-              <p className="text-sm text-muted-foreground">Total Expenses</p>
-              <p className="text-2xl">{formatCurrency(totalExpenses)}</p>
+            <div className="rounded border p-4">
+              <p className="text-sm text-muted-foreground">Cash Out Today</p>
+              <p className="text-2xl text-red-600">{formatCurrency(cashOutToday)}</p>
             </div>
           </div>
 
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Expense Type</TableHead>
+                <TableHead>Time</TableHead>
+                <TableHead>Reference</TableHead>
                 <TableHead>Party/Labor</TableHead>
+                <TableHead>Payment Type</TableHead>
+                <TableHead>In/Out</TableHead>
                 <TableHead>Amount</TableHead>
-                <TableHead>Description</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
                     Loading expenses...
                   </TableCell>
                 </TableRow>
               ) : filteredEntries.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
                     No expenses recorded yet
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredEntries.map((entry) => (
                   <TableRow key={entry.id}>
-                    <TableCell>{formatDate(entry.date)}</TableCell>
-                    <TableCell>{entry.category?.name || "-"}</TableCell>
+                    <TableCell>{formatTime(entry)}</TableCell>
+                    <TableCell>{getReferenceLabel(entry)}</TableCell>
                     <TableCell>{getPartyLaborLabel(entry)}</TableCell>
-                    <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
-                    <TableCell>{entry.description || "-"}</TableCell>
+                    <TableCell>{getPaymentTypeLabel(entry)}</TableCell>
+                    <TableCell>{getInOut(Number(entry.amount))}</TableCell>
+                    <TableCell>{formatCurrency(Math.abs(Number(entry.amount)))}</TableCell>
                     <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => startEdit(entry)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDelete(entry)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
+                      {entry.source === "MANUAL" || typeof entry.source === "undefined" ? (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => startEdit(entry)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDelete(entry)}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">System</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

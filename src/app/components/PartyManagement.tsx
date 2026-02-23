@@ -27,15 +27,14 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Plus, Eye } from "lucide-react";
 import { formatCurrency, formatDate } from "../lib/utils";
-import { partyApi } from "../lib/api";
-import type { ApiParty, ApiPartyLedgerEntry, ApiPartyType } from "../types/api";
+import { billApi, partyApi } from "../lib/api";
+import type { ApiBill, ApiPartyLedgerEntry, ApiPartyType } from "../types/api";
 import { toast } from "sonner";
 
 type UiParty = {
   id: string;
   name: string;
   type: "customer" | "supplier" | "both";
-  openingBalance: number;
   currentBalance: number;
   createdAt: string;
 };
@@ -47,18 +46,20 @@ export function PartyManagement() {
   const [viewingPartyId, setViewingPartyId] = useState<string | null>(null);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [paymentPartyId, setPaymentPartyId] = useState<string | null>(null);
+  const [paymentBills, setPaymentBills] = useState<ApiBill[]>([]);
+  const [isLoadingPaymentBills, setIsLoadingPaymentBills] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<ApiPartyLedgerEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
     type: 'customer' as 'customer' | 'supplier' | 'both',
-    openingBalance: '',
   });
 
   const [paymentData, setPaymentData] = useState({
     date: new Date().toISOString().split('T')[0],
     amount: '',
+    billId: "",
     description: '',
   });
 
@@ -76,18 +77,15 @@ export function PartyManagement() {
   const toApiPartyType = (type: UiParty["type"]): ApiPartyType =>
     type.toUpperCase() as ApiPartyType;
 
-  const computeBalance = (
-    party: ApiParty,
-    entries: ApiPartyLedgerEntry[]
-  ) => {
-    let balance = Number(party.openingBalance ?? 0);
+  const computeBalance = (entries: ApiPartyLedgerEntry[]) => {
+    let balance = 0;
     for (const entry of entries) {
       const isCash =
         typeof entry.cash !== "undefined" ||
         entry.reference?.toLowerCase().includes("cash") ||
         entry.description?.toLowerCase().includes("cash");
       if (!isCash) {
-        balance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+        balance += Number(entry.receivable ?? 0) - Number(entry.payable ?? 0);
       }
     }
     return balance;
@@ -107,8 +105,7 @@ export function PartyManagement() {
         id: party.id,
         name: party.name,
         type: mapPartyType(party.type),
-        openingBalance: Number(party.openingBalance ?? 0),
-        currentBalance: computeBalance(party, ledgers[index]),
+        currentBalance: computeBalance(ledgers[index]),
         createdAt: party.createdAt,
       }));
 
@@ -151,26 +148,67 @@ export function PartyManagement() {
     };
   }, [viewingPartyId]);
 
+  useEffect(() => {
+    if (!isPaymentDialogOpen || !paymentPartyId) {
+      setPaymentBills([]);
+      setPaymentData((prev) => ({ ...prev, billId: "" }));
+      return;
+    }
+
+    const party = parties.find((p) => p.id === paymentPartyId);
+    const isReceive = (party?.currentBalance ?? 0) > 0;
+    if (!isReceive) {
+      setPaymentBills([]);
+      setPaymentData((prev) => ({ ...prev, billId: "" }));
+      return;
+    }
+
+    let active = true;
+    setIsLoadingPaymentBills(true);
+    billApi
+      .listBills()
+      .then((allBills) => {
+        if (!active) return;
+        const filtered = allBills.filter(
+          (bill) =>
+            bill.partyId === paymentPartyId &&
+            Number(bill.remaining ?? 0) > 0
+        );
+        setPaymentBills(filtered);
+        const defaultRemaining = Number(filtered[0]?.remaining ?? 0);
+        setPaymentData((prev) => ({
+          ...prev,
+          billId: filtered[0]?.id ?? "",
+          amount: filtered[0] ? String(defaultRemaining) : prev.amount,
+        }));
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) toast.error("Failed to load bills for this party.");
+      })
+      .finally(() => {
+        if (active) setIsLoadingPaymentBills(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isPaymentDialogOpen, paymentPartyId, parties]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const openingBalance = formData.openingBalance
-      ? parseFloat(formData.openingBalance)
-      : 0;
 
     try {
       if (editingId) {
         await partyApi.updateParty(editingId, {
           name: formData.name.trim(),
           type: toApiPartyType(formData.type),
-          openingBalance,
         });
         toast.success("Party updated");
       } else {
         await partyApi.createParty({
           name: formData.name.trim(),
           type: toApiPartyType(formData.type),
-          openingBalance,
         });
         toast.success("Party added");
       }
@@ -187,7 +225,6 @@ export function PartyManagement() {
     setFormData({
       name: '',
       type: 'customer',
-      openingBalance: '',
     });
     setEditingId(null);
   };
@@ -197,21 +234,8 @@ export function PartyManagement() {
     setFormData({
       name: party.name,
       type: party.type,
-      openingBalance: party.openingBalance.toString(),
     });
     setIsDialogOpen(true);
-  };
-
-  const handleDelete = async (partyId: string) => {
-    if (!confirm("Are you sure you want to delete this party?")) return;
-    try {
-      await partyApi.deleteParty(partyId);
-      toast.success("Party deleted");
-      await loadData();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to delete party.");
-    }
   };
 
   const handlePayment = async (e: React.FormEvent) => {
@@ -226,16 +250,31 @@ export function PartyManagement() {
     }
 
     try {
+      const direction = party.currentBalance > 0 ? "RECEIVE" : "PAY";
+      if (direction === "RECEIVE" && !paymentData.billId) {
+        toast.error("Select a bill to receive payment against.");
+        return;
+      }
+      if (
+        direction === "RECEIVE" &&
+        selectedPaymentBill &&
+        amount > Number(selectedPaymentBill.remaining ?? 0)
+      ) {
+        return;
+      }
       await partyApi.createPayment(party.id, {
         date: paymentData.date,
         amount,
-        method: "CREDIT",
+        method: "KHATA",
+        direction,
+        billId: direction === "RECEIVE" ? paymentData.billId : undefined,
         description: paymentData.description || undefined,
       });
       toast.success("Payment recorded");
       setPaymentData({
         date: new Date().toISOString().split("T")[0],
         amount: "",
+        billId: "",
         description: "",
       });
       setIsPaymentDialogOpen(false);
@@ -246,6 +285,19 @@ export function PartyManagement() {
       toast.error("Failed to record payment.");
     }
   };
+
+  const selectedPaymentBill = paymentBills.find(
+    (bill) => bill.id === paymentData.billId
+  );
+  const isReceivePayment =
+    (parties.find((p) => p.id === paymentPartyId)?.currentBalance ?? 0) > 0;
+  const selectedBillRemaining = Number(selectedPaymentBill?.remaining ?? 0);
+  const enteredPaymentAmount = Number(paymentData.amount || 0);
+  const exceedsBillAmount =
+    isReceivePayment &&
+    !!selectedPaymentBill &&
+    Number.isFinite(enteredPaymentAmount) &&
+    enteredPaymentAmount > selectedBillRemaining;
 
   const ledgerWithOpening = useMemo(() => {
     if (!viewingPartyId) return [];
@@ -261,7 +313,7 @@ export function PartyManagement() {
         return aCreated - bCreated;
       }
     );
-    let runningBalance = Number(party.openingBalance ?? 0);
+    let runningBalance = 0;
     const withRunning = entriesAsc.map((entry) => {
       const isCash =
         typeof entry.cash !== "undefined" ||
@@ -271,10 +323,10 @@ export function PartyManagement() {
         typeof entry.cash !== "undefined"
           ? Number(entry.cash)
           : isCash
-            ? Number(entry.debit ?? entry.credit ?? 0)
+            ? Number(entry.payable ?? entry.receivable ?? 0)
             : 0;
       if (!isCash) {
-        runningBalance += Number(entry.credit ?? 0) - Number(entry.debit ?? 0);
+        runningBalance += Number(entry.balance ?? 0);
       }
       return { ...entry, runningBalance, isCash, cash: cashAmount };
     });
@@ -324,16 +376,6 @@ export function PartyManagement() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label>Opening Balance</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={formData.openingBalance}
-                      onChange={(e) => setFormData({ ...formData, openingBalance: e.target.value })}
-                      placeholder="0"
-                    />
-                  </div>
                   <div className="flex justify-end gap-2">
                     <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
@@ -353,7 +395,6 @@ export function PartyManagement() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Type</TableHead>
-                <TableHead>Opening Balance</TableHead>
                 <TableHead>Current Balance</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -361,13 +402,13 @@ export function PartyManagement() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     Loading parties...
                   </TableCell>
                 </TableRow>
               ) : parties.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     No parties yet
                   </TableCell>
                 </TableRow>
@@ -376,9 +417,8 @@ export function PartyManagement() {
                   <TableRow key={party.id}>
                     <TableCell>{party.name}</TableCell>
                     <TableCell className="capitalize">{party.type}</TableCell>
-                    <TableCell>{formatCurrency(party.openingBalance)}</TableCell>
                     <TableCell>
-                      <span className={party.currentBalance > 0 ? 'text-red-600' : party.currentBalance < 0 ? 'text-green-600' : ''}>
+                      <span className={party.currentBalance > 0 ? 'text-green-600' : party.currentBalance < 0 ? 'text-red-600' : ''}>
                         {formatCurrency(party.currentBalance)}
                       </span>
                     </TableCell>
@@ -391,7 +431,7 @@ export function PartyManagement() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        {party.currentBalance > 0 && (
+                        {party.currentBalance !== 0 && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -400,7 +440,7 @@ export function PartyManagement() {
                               setIsPaymentDialogOpen(true);
                             }}
                           >
-                            Pay
+                            {party.currentBalance > 0 ? "Receive" : "Pay"}
                           </Button>
                         )}
                         <Button
@@ -409,13 +449,6 @@ export function PartyManagement() {
                           onClick={() => handleEdit(party)}
                         >
                           Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDelete(party.id)}
-                        >
-                          Delete
                         </Button>
                       </div>
                     </TableCell>
@@ -443,6 +476,67 @@ export function PartyManagement() {
                 required
               />
             </div>
+            {isReceivePayment && (
+              <div className="space-y-3">
+                <div>
+                  <Label>Bill</Label>
+                  <Select
+                    value={paymentData.billId}
+                    onValueChange={(value) => {
+                      const bill = paymentBills.find((item) => item.id === value);
+                      setPaymentData({
+                        ...paymentData,
+                        billId: value,
+                        amount: bill ? String(Number(bill.remaining ?? 0)) : paymentData.amount,
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          isLoadingPaymentBills
+                            ? "Loading bills..."
+                            : paymentBills.length === 0
+                              ? "No pending bills"
+                              : "Select bill"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {paymentBills.map((bill) => (
+                        <SelectItem key={bill.id} value={bill.id}>
+                          {bill.billNumber}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedPaymentBill && (
+                  <div className="rounded border p-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Bill No</span>
+                      <span>{selectedPaymentBill.billNumber}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Date</span>
+                      <span>{formatDate(selectedPaymentBill.date)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Grand Total</span>
+                      <span>{formatCurrency(Number(selectedPaymentBill.total ?? 0))}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Paid</span>
+                      <span>{formatCurrency(Number(selectedPaymentBill.totalPaid ?? 0))}</span>
+                    </div>
+                    <div className="flex justify-between font-medium">
+                      <span className="text-muted-foreground">Remaining</span>
+                      <span>{formatCurrency(Number(selectedPaymentBill.remaining ?? 0))}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <Label>Amount</Label>
               <Input
@@ -452,6 +546,11 @@ export function PartyManagement() {
                 onChange={(e) => setPaymentData({ ...paymentData, amount: e.target.value })}
                 required
               />
+              {exceedsBillAmount && (
+                <p className="mt-1 text-xs text-red-600">
+                  Amount cannot exceed {formatCurrency(selectedBillRemaining)} for this bill.
+                </p>
+              )}
             </div>
             <div>
               <Label>Description</Label>
@@ -465,7 +564,7 @@ export function PartyManagement() {
               <Button type="button" variant="outline" onClick={() => setIsPaymentDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit">Record Payment</Button>
+              <Button type="submit" disabled={exceedsBillAmount}>Record Payment</Button>
             </div>
           </form>
         </DialogContent>
@@ -473,7 +572,7 @@ export function PartyManagement() {
 
       {/* Ledger View Dialog */}
       <Dialog open={viewingPartyId !== null} onOpenChange={() => setViewingPartyId(null)}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="w-[50vw] max-w-[1400px] sm:max-w-[1400px] h-[82vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Party Ledger - {parties.find(p => p.id === viewingPartyId)?.name}</DialogTitle>
           </DialogHeader>
@@ -482,8 +581,8 @@ export function PartyManagement() {
               <TableRow>
                 <TableHead>Date</TableHead>
                 <TableHead>Reference</TableHead>
-                <TableHead>Debit</TableHead>
-                <TableHead>Credit</TableHead>
+                <TableHead>Payable</TableHead>
+                <TableHead>Receivable</TableHead>
                 <TableHead>Cash</TableHead>
                 <TableHead>Balance</TableHead>
               </TableRow>
@@ -497,15 +596,15 @@ export function PartyManagement() {
                     <TableCell>
                       {entry.isCash
                         ? "-"
-                        : Number(entry.debit) > 0
-                          ? formatCurrency(Number(entry.debit))
+                        : Number(entry.payable) > 0
+                          ? formatCurrency(Number(entry.payable))
                           : "-"}
                     </TableCell>
                     <TableCell>
                       {entry.isCash
                         ? "-"
-                        : Number(entry.credit) > 0
-                          ? formatCurrency(Number(entry.credit))
+                        : Number(entry.receivable) > 0
+                          ? formatCurrency(Number(entry.receivable))
                           : "-"}
                     </TableCell>
                     <TableCell>
@@ -517,9 +616,9 @@ export function PartyManagement() {
                       <span
                         className={
                           Number(entry.runningBalance) > 0
-                            ? "text-red-600"
+                            ? "text-green-600"
                             : Number(entry.runningBalance) < 0
-                              ? "text-green-600"
+                              ? "text-red-600"
                               : ""
                         }
                       >

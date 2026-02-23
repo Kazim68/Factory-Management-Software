@@ -13,6 +13,7 @@ import type {
   ApiPartyLedgerEntry,
   ApiPartyPayment,
   ApiBill,
+  ApiBillLedgerEntry,
   ApiBillLine,
   ApiBillStatus,
   ApiBillType,
@@ -149,8 +150,13 @@ export const partyApi = {
       date: string;
       amount: number;
       method?: ApiPartyPayment["method"];
+      direction?: "RECEIVE" | "PAY";
       reference?: string;
       description?: string;
+      billId?: string;
+      chemicalPurchaseId?: string;
+      rexinePurchaseId?: string;
+      materialPurchaseId?: string;
     }
   ): Promise<ApiPartyPayment> =>
     request({
@@ -165,22 +171,20 @@ export const expenseApi = {
     start?: string;
     end?: string;
     module?: ApiExpenseModule;
-    categoryId?: string;
   }): Promise<ApiExpenseEntry[]> => {
     const query = new URLSearchParams();
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
     if (params?.module) query.set("module", params.module);
-    if (params?.categoryId) query.set("categoryId", params.categoryId);
     const suffix = query.toString();
     return get(`/expenses${suffix ? `?${suffix}` : ""}`);
   },
   createExpense: (data: {
     date: string;
-    categoryId: string;
     partyId?: string;
     laborId?: string;
     module?: ApiExpenseModule;
+    paymentType?: ApiPaymentMethod;
     amount: number;
     description?: string;
     moduleData?: Record<string, unknown>;
@@ -190,10 +194,10 @@ export const expenseApi = {
     expenseId: string,
     data: {
       date?: string;
-      categoryId?: string;
       partyId?: string;
       laborId?: string;
       module?: ApiExpenseModule;
+      paymentType?: ApiPaymentMethod;
       amount?: number;
       description?: string;
     }
@@ -274,7 +278,7 @@ export const laborApi = {
     date: string;
     amount: number;
     reason: string;
-    categoryId: string;
+    categoryId?: string;
     partyId?: string;
   }): Promise<{ advance: ApiLaborAdvance; expense: unknown }> =>
     request({ path: "/labor/advances", method: "POST", body: data }),
@@ -333,6 +337,21 @@ export const billApi = {
     request({ path: `/bills/${billId}`, method: "PATCH", body: data }),
   deleteBill: (billId: string): Promise<void> =>
     request({ path: `/bills/${billId}`, method: "DELETE" }),
+  getLedger: (billId: string): Promise<ApiBillLedgerEntry[]> =>
+    get(`/bills/${billId}/ledger`),
+  receivePayment: (
+    billId: string,
+    data: {
+      amount: number;
+      date?: string;
+      method?: ApiPaymentMethod;
+      reference?: string;
+      description?: string;
+    }
+  ): Promise<{ payment: ApiPartyPayment; bill: ApiBill }> =>
+    request({ path: `/bills/${billId}/payments`, method: "POST", body: data }),
+  verifyBill: (billId: string): Promise<ApiBill> =>
+    request({ path: `/bills/${billId}/verify`, method: "POST" }),
 };
 
 export const purchaseApi = {
@@ -340,7 +359,7 @@ export const purchaseApi = {
   createChemical: (data: {
     date: string;
     partyId?: string;
-    categoryId: string;
+    categoryId?: string;
     quantityKg: number;
     ratePerKg: number;
     totalAmount: number;
@@ -373,7 +392,7 @@ export const purchaseApi = {
   createRexine: (data: {
     date: string;
     partyId?: string;
-    categoryId: string;
+    categoryId?: string;
     quantityMeter: number;
     ratePerMeter: number;
     totalAmount: number;
@@ -406,7 +425,7 @@ export const purchaseApi = {
   createMaterial: (data: {
     date: string;
     partyId?: string;
-    categoryId: string;
+    categoryId?: string;
     articleId?: string;
     unitId?: string;
     quantity: number;

@@ -38,6 +38,11 @@ enum ExpenseModule {
   MISC
 }
 
+enum ExpenseSource {
+  MANUAL
+  SYSTEM
+}
+
 enum LaborStatus {
   ACTIVE
   FIRED
@@ -74,8 +79,6 @@ model ExpenseCategory {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  expenses ExpenseEntry[]
 }
 
 model LaborCategory {
@@ -118,18 +121,18 @@ model Party {
 model PartyLedgerEntry {
   id             String   @id @default(cuid())
   partyId        String
+  billId         String?
   date           DateTime
   reference      String?
   description    String?
-  debit          Decimal  @default(0)
-  credit         Decimal  @default(0)
-  runningBalance Decimal?
+  balance        Decimal  @default(0)
   chemicalPurchaseId String?
   rexinePurchaseId   String?
   materialPurchaseId String?
   createdAt      DateTime @default(now())
 
   party Party @relation(fields: [partyId], references: [id])
+  bill  Bill? @relation(fields: [billId], references: [id])
   chemicalPurchase ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
   rexinePurchase   RexinePurchase?   @relation(fields: [rexinePurchaseId], references: [id])
   materialPurchase MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
@@ -140,19 +143,20 @@ model PartyLedgerEntry {
 model ExpenseEntry {
   id                 String        @id @default(cuid())
   date               DateTime
-  categoryId         String
   partyId            String?
   laborId            String?
   module             ExpenseModule @default(MISC)
+  paymentType        PaymentMethod @default(CASH)
   amount             Decimal
   description        String?
   chemicalPurchaseId String?
   rexinePurchaseId   String?
   materialPurchaseId String?
   laborAdvanceId     String?
+  source             ExpenseSource @default(MANUAL)
+  sourceSystem       String?
   createdAt          DateTime      @default(now())
 
-  category          ExpenseCategory  @relation(fields: [categoryId], references: [id])
   party             Party?           @relation(fields: [partyId], references: [id])
   labor             LaborProfile?    @relation(fields: [laborId], references: [id])
   chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
@@ -240,12 +244,14 @@ model Bill {
   type       BillType   @default(CASH)
   status     BillStatus @default(DRAFT)
   total      Decimal
+  verifiedAt DateTime?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
   party    Party?    @relation(fields: [partyId], references: [id])
   lines    BillLine[]
   payments PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
 
   @@index([date])
 }

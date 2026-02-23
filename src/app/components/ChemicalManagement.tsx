@@ -32,7 +32,7 @@ import { configApi, partyApi, purchaseApi } from "../lib/api";
 import type { ApiChemicalPurchase, ApiExpenseCategory, ApiParty } from "../types/api";
 import { toast } from "sonner";
 
-type PaymentType = "cash" | "credit";
+type PaymentType = "cash" | "payable";
 
 export function ChemicalManagement() {
   const [transactions, setTransactions] = useState<ApiChemicalPurchase[]>([]);
@@ -101,7 +101,7 @@ export function ChemicalManagement() {
           quantityKg: weight,
           ratePerKg: rate,
           totalAmount,
-          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
         });
         toast.success("Chemical purchase updated");
@@ -113,7 +113,7 @@ export function ChemicalManagement() {
           quantityKg: weight,
           ratePerKg: rate,
           totalAmount,
-          paymentType: formData.paymentType === "credit" ? "CREDIT" : "CASH",
+          paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
         });
         toast.success("Chemical purchase added");
@@ -148,7 +148,9 @@ export function ChemicalManagement() {
       categoryId: purchase.expenses?.[0]?.categoryId || "",
       weight: String(purchase.quantityKg),
       rate: String(purchase.ratePerKg),
-      paymentType: purchase.paymentType === "CREDIT" ? "credit" : "cash",
+      paymentType: ["CREDIT", "KHATA"].includes(String(purchase.paymentType))
+        ? "payable"
+        : "cash",
       detail: purchase.expenses?.[0]?.description || "",
     });
     setIsDialogOpen(true);
@@ -274,7 +276,7 @@ export function ChemicalManagement() {
                       />
                     </div>
                     <div>
-                      <Label>Payment Type</Label>
+                      <Label>Settlement Type</Label>
                       <Select
                         value={formData.paymentType}
                         onValueChange={(value: PaymentType) =>
@@ -286,7 +288,7 @@ export function ChemicalManagement() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="credit">Credit</SelectItem>
+                          <SelectItem value="payable">Payable</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -337,7 +339,7 @@ export function ChemicalManagement() {
                 <TableHead>Weight (kg)</TableHead>
                 <TableHead>Rate</TableHead>
                 <TableHead>Total</TableHead>
-                <TableHead>Payment Type</TableHead>
+                <TableHead>Settlement Type</TableHead>
                 <TableHead>Detail</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -373,7 +375,9 @@ export function ChemicalManagement() {
                               : "text-orange-600"
                           }
                       >
-                        {transaction.paymentType}
+                        {["CREDIT", "KHATA"].includes(String(transaction.paymentType))
+                          ? "PAYABLE"
+                          : "CASH"}
                       </span>
                     </TableCell>
                     <TableCell>{getDetail(transaction)}</TableCell>
