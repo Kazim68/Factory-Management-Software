@@ -192,3 +192,14 @@ export interface AppUser {
   role: UserRole;
   createdAt: string;
 }
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  actorId?: string;
+  actorName: string;
+  action: string;
+  targetUserId?: string;
+  targetUserName?: string;
+  detail?: string;
+}
