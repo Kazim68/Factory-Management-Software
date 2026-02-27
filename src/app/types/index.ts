@@ -181,3 +181,14 @@ export interface Payment {
   description: string;
   createdAt: string;
 }
+
+export type UserRole = 'admin' | 'munshi';
+
+export interface AppUser {
+  id: string;
+  name: string;
+  username: string;
+  password: string;
+  role: UserRole;
+  createdAt: string;
+}
