@@ -183,7 +183,16 @@ export function Roznamcha() {
               amount,
               description: formData.description,
             },
-            { itemLabel: formData.description || getPartyLaborLabel(editingEntry) },
+            {
+              itemLabel: formData.description || getPartyLaborLabel(editingEntry),
+              previousValues: {
+                amount: editingEntry.amount,
+                description: editingEntry.description,
+                paymentType: editingEntry.paymentType,
+                module: editingEntry.module,
+                date: editingEntry.date,
+              },
+            },
           );
         }
         toast.success("Expense updated");
@@ -331,6 +340,13 @@ export function Roznamcha() {
     try {
       await expenseApi.deleteExpense(entry.id, {
         itemLabel: entry.description || getPartyLaborLabel(entry),
+        previousValues: {
+          amount: entry.amount,
+          description: entry.description,
+          paymentType: entry.paymentType,
+          module: entry.module,
+          date: entry.date,
+        },
       });
       toast.success("Expense deleted");
       await loadData(filterDate);
