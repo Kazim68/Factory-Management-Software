@@ -240,7 +240,6 @@ const buildFriendlyDetail = (
       .trim();
   }
 
-  const isExpense = label === "expense";
   const deletedSummary = auditMeta?.previousValues
     ? Object.entries(auditMeta.previousValues)
         .filter(([_, value]) => value !== undefined)
