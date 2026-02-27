@@ -27,6 +27,7 @@ import { auth } from "./auth";
 
 type ApiAuditMeta = {
   itemLabel?: string;
+  previousValues?: Record<string, unknown>;
 };
 
 type ApiRequest = {
@@ -107,9 +108,50 @@ const stringifyDetail = (value: unknown): string | undefined => {
 };
 
 const formatValue = (value: unknown): string => {
+  if (value == null) return "-";
   if (typeof value === "number") return value.toLocaleString();
   if (typeof value === "string") return value;
-  return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.map((item) => formatValue(item)).join(", ");
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const formatFieldName = (field: string): string =>
+  toTitleCase(field.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\bId\b/g, ""));
+
+const pickComparableValue = (source: Record<string, unknown> | undefined, key: string): unknown => {
+  if (!source) return undefined;
+  if (key in source) return source[key];
+
+  if (key.endsWith("Id")) {
+    const shortKey = key.slice(0, -2);
+    if (shortKey in source) return source[shortKey];
+  }
+
+  return undefined;
+};
+
+const buildFieldChanges = (payloadBody: unknown, previousValues?: Record<string, unknown>): string[] => {
+  if (!payloadBody || typeof payloadBody !== "object") return [];
+
+  const source = payloadBody as Record<string, unknown>;
+  return Object.entries(source)
+    .filter(([key, value]) => value !== undefined && key !== "moduleData")
+    .map(([key, value]) => {
+      const previousValue = pickComparableValue(previousValues, key);
+      const field = formatFieldName(key);
+
+      if (previousValue === undefined) {
+        return `${field} set to ${formatValue(value)}`;
+      }
+
+      return `${field} changed from ${formatValue(previousValue)} to ${formatValue(value)}`;
+    });
 };
 
 const pickValue = (payload: unknown, keys: string[]): string | undefined => {
@@ -145,15 +187,31 @@ const buildFriendlyDetail = (
     pickValue(payloadBody, ["amount", "quantity", "total"])?.concat(" amount") ??
     "record";
 
+  const titledLabel = `${label[0].toUpperCase()}${label.slice(1)}`;
+  const entityName = auditMeta?.itemLabel ? `[${auditMeta.itemLabel}]` : "";
+  const fieldChanges = buildFieldChanges(payloadBody, auditMeta?.previousValues);
+  const changeSummary = fieldChanges.length > 0 ? fieldChanges.join("; ") : what;
+
   if (method === "POST") {
-    return `New ${label} added: ${what}.`;
+    return `New ${label} added${entityName ? ` ${entityName}` : ""}: ${changeSummary}.`;
   }
 
   if (method === "PATCH") {
-    return `${label[0].toUpperCase()}${label.slice(1)} updated: ${what}.`;
+    return `${titledLabel} ${entityName} updated: ${changeSummary}.`.replace(/\s+/g, " ").trim();
   }
 
-  return `${label[0].toUpperCase()}${label.slice(1)} deleted. Removed item: ${what}.`;
+  const deletedSummary = auditMeta?.previousValues
+    ? Object.entries(auditMeta.previousValues)
+        .filter(([_, value]) => value !== undefined)
+        .map(([key, value]) => `${formatFieldName(key)}: ${formatValue(value)}`)
+        .join(", ")
+    : undefined;
+
+  if (deletedSummary) {
+    return `${titledLabel} ${entityName} deleted: ${deletedSummary}.`.replace(/\s+/g, " ").trim();
+  }
+
+  return `${titledLabel} ${entityName} deleted. Removed item: ${what}.`.replace(/\s+/g, " ").trim();
 };
 
 const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
