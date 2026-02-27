@@ -46,6 +46,23 @@ const get = <T>(path: string) => request<T>({ path });
 
 const AUDITABLE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
 
+const ENTITY_LABELS: Record<string, string> = {
+  "config/units": "unit",
+  "config/articles": "article",
+  "config/labor-categories": "labor category",
+  "config/payment-types": "payment type",
+  "config/expense-categories": "expense category",
+  parties: "party",
+  expenses: "expense",
+  bills: "bill",
+  "labor/work": "labor work entry",
+  "labor/advances": "labor advance",
+  "labor/profiles": "labor profile",
+  "purchases/chemical": "chemical purchase",
+  "purchases/rexine": "rexine purchase",
+  "purchases/material": "material purchase",
+};
+
 const toTitleCase = (value: string): string =>
   value
     .replace(/[-_]/g, " ")
@@ -81,6 +98,54 @@ const stringifyDetail = (value: unknown): string | undefined => {
   }
 };
 
+const formatValue = (value: unknown): string => {
+  if (typeof value === "number") return value.toLocaleString();
+  if (typeof value === "string") return value;
+  return String(value);
+};
+
+const pickValue = (payload: unknown, keys: string[]): string | undefined => {
+  if (!payload || typeof payload !== "object") return undefined;
+  const source = payload as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return formatValue(value);
+    }
+  }
+  return undefined;
+};
+
+const getEntityLabel = (cleanPath: string, fallbackEntity: string): string => {
+  const segments = cleanPath.split("/").filter(Boolean);
+  const baseSegments = segments.filter((segment) => !/^(\d+|[0-9a-fA-F-]{8,})$/.test(segment));
+  const key = baseSegments.join("/");
+  return ENTITY_LABELS[key] ?? fallbackEntity.toLowerCase();
+};
+
+const buildFriendlyDetail = (
+  method: "POST" | "PATCH" | "DELETE",
+  cleanPath: string,
+  entity: string,
+  payloadBody: unknown,
+): string => {
+  const label = getEntityLabel(cleanPath, entity);
+  const what =
+    pickValue(payloadBody, ["name", "description", "detail", "reference", "billNumber"]) ??
+    pickValue(payloadBody, ["amount", "quantity", "total"])?.concat(" amount") ??
+    "record";
+
+  if (method === "POST") {
+    return `New ${label} added: ${what}.`;
+  }
+
+  if (method === "PATCH") {
+    return `${label[0].toUpperCase()}${label.slice(1)} updated: ${what}.`;
+  }
+
+  return `${label[0].toUpperCase()}${label.slice(1)} deleted. Removed item: ${what}.`;
+};
+
 const writeAuditLog = (payload: ApiRequest): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
@@ -96,7 +161,9 @@ const writeAuditLog = (payload: ApiRequest): void => {
     entity,
     resourceId,
     method: method as "POST" | "PATCH" | "DELETE",
-    detail: stringifyDetail({ path: cleanPath, payload: payload.body }),
+    detail:
+      buildFriendlyDetail(method as "POST" | "PATCH" | "DELETE", cleanPath, entity, payload.body) ??
+      stringifyDetail({ path: cleanPath, payload: payload.body }),
   });
 };
 
