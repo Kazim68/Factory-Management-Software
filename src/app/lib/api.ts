@@ -25,10 +25,15 @@ import type {
 } from "../types/api";
 import { auth } from "./auth";
 
+type ApiAuditMeta = {
+  itemLabel?: string;
+};
+
 type ApiRequest = {
   path: string;
   method?: string;
   body?: unknown;
+  auditMeta?: ApiAuditMeta;
 };
 
 const request = async <T>(payload: ApiRequest): Promise<T> => {
@@ -36,15 +41,32 @@ const request = async <T>(payload: ApiRequest): Promise<T> => {
     throw new Error("API bridge is unavailable.");
   }
 
-  const response = (await window.api.request(payload)) as T;
-  writeAuditLog(payload);
+  const { auditMeta, ...apiPayload } = payload;
+  const response = (await window.api.request(apiPayload)) as T;
+  writeAuditLog(apiPayload, auditMeta);
   return response;
 };
 
 const get = <T>(path: string) => request<T>({ path });
 
-
 const AUDITABLE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
+
+const ENTITY_LABELS: Record<string, string> = {
+  "config/units": "unit",
+  "config/articles": "article",
+  "config/labor-categories": "labor category",
+  "config/payment-types": "payment type",
+  "config/expense-categories": "expense category",
+  parties: "party",
+  expenses: "expense",
+  bills: "bill",
+  "labor/work": "labor work entry",
+  "labor/advances": "labor advance",
+  "labor/profiles": "labor profile",
+  "purchases/chemical": "chemical purchase",
+  "purchases/rexine": "rexine purchase",
+  "purchases/material": "material purchase",
+};
 
 const toTitleCase = (value: string): string =>
   value
@@ -54,14 +76,17 @@ const toTitleCase = (value: string): string =>
 const singularize = (value: string): string =>
   value.endsWith("s") ? value.slice(0, -1) : value;
 
-const getAuditContext = (path: string) => {
+const isIdSegment = (segment: string): boolean => /^[a-zA-Z0-9-]{8,}$/.test(segment);
+
+const getAuditContext = (path: string, method: string) => {
   const cleanPath = path.split("?")[0];
   const segments = cleanPath.split("/").filter(Boolean);
-  const isIdSegment = (segment: string): boolean => /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
 
-  const resourceId = segments.length > 0 && isIdSegment(segments[segments.length - 1])
-    ? segments[segments.length - 1]
-    : undefined;
+  const lastSegment = segments[segments.length - 1] ?? "";
+  const hasResourceId =
+    segments.length > 1 && (method === "PATCH" || method === "DELETE" || isIdSegment(lastSegment));
+
+  const resourceId = hasResourceId ? lastSegment : undefined;
 
   const entitySegments = resourceId ? segments.slice(0, -1) : segments;
   const entity = entitySegments.length
@@ -81,11 +106,91 @@ const stringifyDetail = (value: unknown): string | undefined => {
   }
 };
 
-const writeAuditLog = (payload: ApiRequest): void => {
+const formatValue = (value: unknown): string => {
+  if (typeof value === "number") return value.toLocaleString();
+  if (typeof value === "string") return value;
+  return String(value);
+};
+
+const pickValue = (payload: unknown, keys: string[]): string | undefined => {
+  if (!payload || typeof payload !== "object") return undefined;
+  const source = payload as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return formatValue(value);
+    }
+  }
+  return undefined;
+};
+
+const getEntityLabel = (cleanPath: string, fallbackEntity: string): string => {
+  const segments = cleanPath.split("/").filter(Boolean);
+  const baseSegments = segments.filter((segment) => !isIdSegment(segment));
+  const key = baseSegments.join("/");
+  return ENTITY_LABELS[key] ?? fallbackEntity.toLowerCase();
+};
+
+const getUpdatedFieldNames = (payload: unknown): string[] => {
+  if (!payload || typeof payload !== "object") return [];
+  return Object.keys(payload as Record<string, unknown>)
+    .filter((key) => !["id", "createdAt", "updatedAt"].includes(key))
+    .slice(0, 4)
+    .map((key) => key.replace(/([A-Z])/g, " $1").toLowerCase());
+};
+
+
+const buildFriendlyDetail = (
+  method: "POST" | "PATCH" | "DELETE",
+  cleanPath: string,
+  entity: string,
+  resourceId: string | undefined,
+  payloadBody: unknown,
+  auditMeta?: ApiAuditMeta,
+): string => {
+  const label = getEntityLabel(cleanPath, entity);
+  const subject =
+    auditMeta?.itemLabel ??
+    pickValue(payloadBody, ["name", "description", "detail", "reference", "billNumber"]);
+
+  if (method === "POST") {
+    const createdLabel = subject ? `${label}: ${subject}` : label;
+    return `Added new ${createdLabel}.`;
+  }
+
+  if (method === "PATCH") {
+    const changedFields = getUpdatedFieldNames(payloadBody);
+    if (subject && changedFields.length > 0) {
+      return `Updated ${label} "${subject}" (${changedFields.join(", ")}).`;
+    }
+    if (subject) {
+      return `Updated ${label} "${subject}".`;
+    }
+    if (changedFields.length > 0) {
+      return `Updated ${label} details (${changedFields.join(", ")}).`;
+    }
+    return `Updated ${label} details.`;
+  }
+
+  if (subject) {
+    return `Deleted ${label} "${subject}".`;
+  }
+
+  if (resourceId) {
+    return `Deleted ${label} entry.`;
+  }
+
+  return `Deleted ${label}.`;
+};
+
+const writeAuditLog = (
+  payload: Omit<ApiRequest, "auditMeta">,
+  auditMeta?: ApiAuditMeta,
+): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
 
-  const { cleanPath, entity, resourceId } = getAuditContext(payload.path);
+  const { cleanPath, entity, resourceId } = getAuditContext(payload.path, method);
   const actor = auth.getSessionUser();
   const verb = method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
 
@@ -96,7 +201,15 @@ const writeAuditLog = (payload: ApiRequest): void => {
     entity,
     resourceId,
     method: method as "POST" | "PATCH" | "DELETE",
-    detail: stringifyDetail({ path: cleanPath, payload: payload.body }),
+    detail:
+      buildFriendlyDetail(
+        method as "POST" | "PATCH" | "DELETE",
+        cleanPath,
+        entity,
+        resourceId,
+        payload.body,
+        auditMeta,
+      ) ?? stringifyDetail({ path: cleanPath, payload: payload.body }),
   });
 };
 
@@ -260,11 +373,12 @@ export const expenseApi = {
       paymentType?: ApiPaymentMethod;
       amount?: number;
       description?: string;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiExpenseEntry> =>
-    request({ path: `/expenses/${expenseId}`, method: "PATCH", body: data }),
-  deleteExpense: (expenseId: string): Promise<void> =>
-    request({ path: `/expenses/${expenseId}`, method: "DELETE" }),
+    request({ path: `/expenses/${expenseId}`, method: "PATCH", body: data, auditMeta }),
+  deleteExpense: (expenseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/expenses/${expenseId}`, method: "DELETE", auditMeta }),
 };
 
 export const laborApi = {
