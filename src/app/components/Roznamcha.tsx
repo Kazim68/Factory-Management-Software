@@ -172,15 +172,19 @@ export function Roznamcha() {
             reason: formData.description,
           });
         } else {
-          await expenseApi.updateExpense(editingEntry.id, {
-            date: formData.date,
-            partyId: formData.partyId === "none" ? undefined : formData.partyId,
-            laborId: formData.module === "LABOR" ? formData.laborId : undefined,
-            module: formData.module === "BILL" ? "MISC" : formData.module,
-            paymentType: formData.paymentType,
-            amount,
-            description: formData.description,
-          });
+          await expenseApi.updateExpense(
+            editingEntry.id,
+            {
+              date: formData.date,
+              partyId: formData.partyId === "none" ? undefined : formData.partyId,
+              laborId: formData.module === "LABOR" ? formData.laborId : undefined,
+              module: formData.module === "BILL" ? "MISC" : formData.module,
+              paymentType: formData.paymentType,
+              amount,
+              description: formData.description,
+            },
+            { itemLabel: formData.description || getPartyLaborLabel(editingEntry) },
+          );
         }
         toast.success("Expense updated");
       } else if (formData.module === "BILL") {
@@ -325,7 +329,9 @@ export function Roznamcha() {
   const handleDelete = async (entry: ApiExpenseEntry) => {
     if (!confirm("Delete this expense?")) return;
     try {
-      await expenseApi.deleteExpense(entry.id);
+      await expenseApi.deleteExpense(entry.id, {
+        itemLabel: entry.description || getPartyLaborLabel(entry),
+      });
       toast.success("Expense deleted");
       await loadData(filterDate);
     } catch (error) {
