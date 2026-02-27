@@ -59,6 +59,15 @@ export function MaterialManagement() {
     detail: "",
   });
 
+  const getPartyName = (partyId?: string | null) =>
+    parties.find((party) => party.id === partyId)?.name || "Unknown";
+
+  const getCategoryName = (categoryId?: string | null) =>
+    categories.find((category) => category.id === categoryId)?.name || "Unknown";
+
+  const getArticleName = (articleId?: string | null) =>
+    articles.find((article) => article.id === articleId)?.name || "Unknown";
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -108,6 +117,7 @@ export function MaterialManagement() {
 
     try {
       if (editingId) {
+        const current = transactions.find((entry) => entry.id === editingId);
         await purchaseApi.updateMaterial(editingId, {
           date: formData.date,
           partyId: formData.partyId || undefined,
@@ -118,6 +128,24 @@ export function MaterialManagement() {
           totalAmount,
           paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
+        }, {
+          itemLabel: getPartyName(formData.partyId),
+          fieldLabels: {
+            partyId: getPartyName(formData.partyId),
+            categoryId: getCategoryName(formData.categoryId),
+            articleId: getArticleName(formData.articleId),
+          },
+          previousValues: {
+            date: current?.date?.slice(0, 10),
+            partyId: getPartyName(current?.partyId),
+            categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
+            articleId: getArticleName(current?.articleId),
+            quantity: current?.quantity,
+            pricePerUnit: current?.pricePerUnit,
+            totalAmount: current?.totalAmount,
+            paymentType: current?.paymentType,
+            description: current?.expenses?.[0]?.description || undefined,
+          },
         });
         toast.success("Material purchase updated");
       } else {
@@ -131,6 +159,8 @@ export function MaterialManagement() {
           totalAmount,
           paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
+        }, {
+          itemLabel: getPartyName(formData.partyId),
         });
         toast.success("Material purchase added");
       }
@@ -180,7 +210,10 @@ export function MaterialManagement() {
   const handleDelete = async (purchaseId: string) => {
     if (!confirm("Delete this purchase?")) return;
     try {
-      await purchaseApi.deleteMaterial(purchaseId);
+      const purchase = transactions.find((entry) => entry.id === purchaseId);
+      await purchaseApi.deleteMaterial(purchaseId, {
+        itemLabel: getPartyName(purchase?.partyId),
+      });
       toast.success("Purchase deleted");
       await loadData();
     } catch (error) {
