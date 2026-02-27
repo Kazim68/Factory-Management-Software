@@ -8,11 +8,7 @@ export function AuditLogs() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
-    const loadLogs = () => setAuditLogs(auth.listAuditLogs());
-    loadLogs();
-
-    const timer = window.setInterval(loadLogs, 3000);
-    return () => window.clearInterval(timer);
+    setAuditLogs(auth.listAuditLogs());
   }, []);
 
   return (
@@ -27,15 +23,14 @@ export function AuditLogs() {
               <TableHead>When</TableHead>
               <TableHead>Action</TableHead>
               <TableHead>Done By</TableHead>
-              <TableHead>Entity</TableHead>
-              <TableHead>Record</TableHead>
+              <TableHead>Target User</TableHead>
               <TableHead>Details</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {auditLogs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   No audit logs yet.
                 </TableCell>
               </TableRow>
@@ -45,8 +40,7 @@ export function AuditLogs() {
                   <TableCell>{new Date(log.timestamp).toLocaleString()}</TableCell>
                   <TableCell>{log.action}</TableCell>
                   <TableCell>{log.actorName}</TableCell>
-                  <TableCell>{log.entity ?? '-'}</TableCell>
-                  <TableCell>{log.resourceId ?? log.targetUserName ?? '-'}</TableCell>
+                  <TableCell>{log.targetUserName ?? '-'}</TableCell>
                   <TableCell>{log.detail ?? '-'}</TableCell>
                 </TableRow>
               ))
