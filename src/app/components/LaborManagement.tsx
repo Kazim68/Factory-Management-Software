@@ -231,14 +231,10 @@ export function LaborManagement() {
             categoryId: getCategoryName(laborForm.categoryId),
             paymentTypeId: getPaymentTypeName(laborForm.paymentTypeId),
           },
-          previousFieldLabels: {
-            categoryId: getCategoryName(current?.categoryId),
-            paymentTypeId: getPaymentTypeName(current?.paymentTypeId),
-          },
           previousValues: {
             name: current?.name,
-            categoryId: current?.categoryId,
-            paymentTypeId: current?.paymentTypeId,
+            categoryId: getCategoryName(current?.categoryId),
+            paymentTypeId: getPaymentTypeName(current?.paymentTypeId),
             defaultRate: current?.defaultRate,
           },
         });
@@ -305,13 +301,9 @@ export function LaborManagement() {
             laborId: getLaborName(workForm.laborId),
             articleId: getArticleName(workForm.articleId),
           },
-          previousFieldLabels: {
+          previousValues: {
             laborId: getLaborName(current?.laborId),
             articleId: getArticleName(current?.articleId),
-          },
-          previousValues: {
-            laborId: current?.laborId,
-            articleId: current?.articleId || undefined,
             startDate: current?.startDate?.slice(0, 10),
             endDate: current?.endDate?.slice(0, 10),
             quantity: current?.quantity,
@@ -381,11 +373,8 @@ export function LaborManagement() {
             laborId: getLaborName(kharchaForm.laborId),
             categoryId: getExpenseCategoryName(kharchaForm.categoryId),
           },
-          previousFieldLabels: {
-            laborId: getLaborName(current?.laborId),
-          },
           previousValues: {
-            laborId: current?.laborId,
+            laborId: getLaborName(current?.laborId),
             date: current?.date?.slice(0, 10),
             amount: current?.amount,
             reason: current?.reason || undefined,

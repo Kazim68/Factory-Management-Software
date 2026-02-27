@@ -135,16 +135,11 @@ export function MaterialManagement() {
             categoryId: getCategoryName(formData.categoryId),
             articleId: getArticleName(formData.articleId),
           },
-          previousFieldLabels: {
+          previousValues: {
+            date: current?.date?.slice(0, 10),
             partyId: getPartyName(current?.partyId),
             categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
             articleId: getArticleName(current?.articleId),
-          },
-          previousValues: {
-            date: current?.date?.slice(0, 10),
-            partyId: current?.partyId || undefined,
-            categoryId: current?.expenses?.[0]?.categoryId || undefined,
-            articleId: current?.articleId || undefined,
             quantity: current?.quantity,
             pricePerUnit: current?.pricePerUnit,
             totalAmount: current?.totalAmount,

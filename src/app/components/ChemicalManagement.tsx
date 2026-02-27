@@ -116,14 +116,10 @@ export function ChemicalManagement() {
             partyId: getPartyName(formData.partyId),
             categoryId: getCategoryName(formData.categoryId),
           },
-          previousFieldLabels: {
-            partyId: getPartyName(current?.partyId),
-            categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
-          },
           previousValues: {
             date: current?.date?.slice(0, 10),
-            partyId: current?.partyId || undefined,
-            categoryId: current?.expenses?.[0]?.categoryId || undefined,
+            partyId: getPartyName(current?.partyId),
+            categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
             quantityKg: current?.quantityKg,
             ratePerKg: current?.ratePerKg,
             totalAmount: current?.totalAmount,

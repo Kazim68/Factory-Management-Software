@@ -29,7 +29,6 @@ type ApiAuditMeta = {
   itemLabel?: string;
   previousValues?: Record<string, unknown>;
   fieldLabels?: Record<string, string>;
-  previousFieldLabels?: Record<string, string>;
 };
 
 type ApiRequest = {
@@ -168,14 +167,6 @@ const getFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditM
   return formatValue(value);
 };
 
-const getPreviousFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditMeta): string => {
-  if (auditMeta?.previousFieldLabels?.[key]) {
-    return auditMeta.previousFieldLabels[key];
-  }
-
-  return formatValue(value);
-};
-
 const buildAuditChanges = (
   payloadBody: unknown,
   auditMeta?: ApiAuditMeta,
@@ -197,7 +188,7 @@ const buildAuditChanges = (
         return `${field} set to ${getFieldDisplayValue(key, value, auditMeta)}`;
       }
 
-      return `${field} changed from ${getPreviousFieldDisplayValue(key, previousValue, auditMeta)} to ${getFieldDisplayValue(key, value, auditMeta)}`;
+      return `${field} changed from ${formatValue(previousValue)} to ${getFieldDisplayValue(key, value, auditMeta)}`;
     });
 };
 
@@ -257,13 +248,9 @@ const buildFriendlyDetail = (
         .join(", ")
     : undefined;
 
-  if (isExpense && deletedSummary) {
-    return `${titledLabel} deleted: ${entityName || what} (${deletedSummary}).`
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  return `${titledLabel} deleted: ${entityName || what}.`.replace(/\s+/g, " ").trim();
+  return `${titledLabel} deleted: ${entityName || what}${deletedSummary ? ` (${deletedSummary})` : ""}.`
+    .replace(/\s+/g, " ")
+    .trim();
 };
 
 const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
