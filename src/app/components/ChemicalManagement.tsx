@@ -52,6 +52,12 @@ export function ChemicalManagement() {
     detail: "",
   });
 
+  const getPartyName = (partyId?: string | null) =>
+    parties.find((party) => party.id === partyId)?.name || "Unknown";
+
+  const getCategoryName = (categoryId?: string | null) =>
+    categories.find((category) => category.id === categoryId)?.name || "Unknown";
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -94,6 +100,7 @@ export function ChemicalManagement() {
 
     try {
       if (editingId) {
+        const current = transactions.find((entry) => entry.id === editingId);
         await purchaseApi.updateChemical(editingId, {
           date: formData.date,
           partyId: formData.partyId || undefined,
@@ -103,6 +110,26 @@ export function ChemicalManagement() {
           totalAmount,
           paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
+        }, {
+          itemLabel: getPartyName(formData.partyId),
+          fieldLabels: {
+            partyId: getPartyName(formData.partyId),
+            categoryId: getCategoryName(formData.categoryId),
+          },
+          previousFieldLabels: {
+            partyId: getPartyName(current?.partyId),
+            categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
+          },
+          previousValues: {
+            date: current?.date?.slice(0, 10),
+            partyId: current?.partyId || undefined,
+            categoryId: current?.expenses?.[0]?.categoryId || undefined,
+            quantityKg: current?.quantityKg,
+            ratePerKg: current?.ratePerKg,
+            totalAmount: current?.totalAmount,
+            paymentType: current?.paymentType,
+            description: current?.expenses?.[0]?.description || undefined,
+          },
         });
         toast.success("Chemical purchase updated");
       } else {
@@ -115,6 +142,8 @@ export function ChemicalManagement() {
           totalAmount,
           paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
+        }, {
+          itemLabel: getPartyName(formData.partyId),
         });
         toast.success("Chemical purchase added");
       }
@@ -159,7 +188,10 @@ export function ChemicalManagement() {
   const handleDelete = async (purchaseId: string) => {
     if (!confirm("Delete this purchase?")) return;
     try {
-      await purchaseApi.deleteChemical(purchaseId);
+      const purchase = transactions.find((entry) => entry.id === purchaseId);
+      await purchaseApi.deleteChemical(purchaseId, {
+        itemLabel: getPartyName(purchase?.partyId),
+      });
       toast.success("Purchase deleted");
       await loadData();
     } catch (error) {
