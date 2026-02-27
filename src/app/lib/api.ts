@@ -78,12 +78,13 @@ const singularize = (value: string): string =>
 
 const isIdSegment = (segment: string): boolean => /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
 
-const getAuditContext = (path: string) => {
+const getAuditContext = (path: string, method: string) => {
   const cleanPath = path.split("?")[0];
   const segments = cleanPath.split("/").filter(Boolean);
+  const shouldTreatLastSegmentAsId = method === "PATCH" || method === "DELETE";
 
   const resourceId =
-    segments.length > 0 && isIdSegment(segments[segments.length - 1])
+    segments.length > 0 && (shouldTreatLastSegmentAsId || isIdSegment(segments[segments.length - 1]))
       ? segments[segments.length - 1]
       : undefined;
 
@@ -135,9 +136,11 @@ const buildFriendlyDetail = (
   cleanPath: string,
   entity: string,
   payloadBody: unknown,
+  auditMeta?: ApiAuditMeta,
 ): string => {
   const label = getEntityLabel(cleanPath, entity);
   const what =
+    auditMeta?.itemLabel ??
     pickValue(payloadBody, ["name", "description", "detail", "reference", "billNumber"]) ??
     pickValue(payloadBody, ["amount", "quantity", "total"])?.concat(" amount") ??
     "record";
@@ -153,7 +156,7 @@ const buildFriendlyDetail = (
   return `${label[0].toUpperCase()}${label.slice(1)} deleted. Removed item: ${what}.`;
 };
 
-const writeAuditLog = (payload: ApiRequest): void => {
+const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
 
@@ -169,7 +172,7 @@ const writeAuditLog = (payload: ApiRequest): void => {
     resourceId,
     method: method as "POST" | "PATCH" | "DELETE",
     detail:
-      buildFriendlyDetail(method as "POST" | "PATCH" | "DELETE", cleanPath, entity, payload.body) ??
+      buildFriendlyDetail(method as "POST" | "PATCH" | "DELETE", cleanPath, entity, payload.body, auditMeta) ??
       stringifyDetail({ path: cleanPath, payload: payload.body }),
   });
 };
