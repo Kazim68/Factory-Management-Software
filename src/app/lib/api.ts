@@ -157,7 +157,7 @@ const writeAuditLog = (payload: ApiRequest): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
 
-  const { cleanPath, entity, resourceId } = getAuditContext(payload.path);
+  const { cleanPath, entity, resourceId } = getAuditContext(payload.path, method);
   const actor = auth.getSessionUser();
   const verb = method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
 
