@@ -23,6 +23,7 @@ import type {
   ApiRexinePurchase,
   ApiUnit,
 } from "../types/api";
+import { auth } from "./auth";
 
 type ApiRequest = {
   path: string;
@@ -35,10 +36,69 @@ const request = async <T>(payload: ApiRequest): Promise<T> => {
     throw new Error("API bridge is unavailable.");
   }
 
-  return window.api.request(payload) as Promise<T>;
+  const response = (await window.api.request(payload)) as T;
+  writeAuditLog(payload);
+  return response;
 };
 
 const get = <T>(path: string) => request<T>({ path });
+
+
+const AUDITABLE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
+
+const toTitleCase = (value: string): string =>
+  value
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const singularize = (value: string): string =>
+  value.endsWith("s") ? value.slice(0, -1) : value;
+
+const getAuditContext = (path: string) => {
+  const cleanPath = path.split("?")[0];
+  const segments = cleanPath.split("/").filter(Boolean);
+  const isIdSegment = (segment: string): boolean => /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
+
+  const resourceId = segments.length > 0 && isIdSegment(segments[segments.length - 1])
+    ? segments[segments.length - 1]
+    : undefined;
+
+  const entitySegments = resourceId ? segments.slice(0, -1) : segments;
+  const entity = entitySegments.length
+    ? entitySegments.map((segment) => toTitleCase(singularize(segment))).join(" / ")
+    : "Record";
+
+  return { cleanPath, entity, resourceId };
+};
+
+const stringifyDetail = (value: unknown): string | undefined => {
+  if (value == null) return undefined;
+  try {
+    const text = JSON.stringify(value);
+    return text.length > 220 ? `${text.slice(0, 220)}…` : text;
+  } catch {
+    return String(value);
+  }
+};
+
+const writeAuditLog = (payload: ApiRequest): void => {
+  const method = (payload.method ?? "GET").toUpperCase();
+  if (!AUDITABLE_METHODS.has(method)) return;
+
+  const { cleanPath, entity, resourceId } = getAuditContext(payload.path);
+  const actor = auth.getSessionUser();
+  const verb = method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
+
+  auth.logAction({
+    actorId: actor?.id,
+    actorName: actor?.name ?? "System",
+    action: `${entity} ${verb}`,
+    entity,
+    resourceId,
+    method: method as "POST" | "PATCH" | "DELETE",
+    detail: stringifyDetail({ path: cleanPath, payload: payload.body }),
+  });
+};
 
 export const configApi = {
   listUnits: (): Promise<ApiUnit[]> => get("/config/units"),

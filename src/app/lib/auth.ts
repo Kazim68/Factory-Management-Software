@@ -1,14 +1,32 @@
 import { storage } from './storage';
-import type { AppUser, UserRole } from '../types';
+import type { AppUser, AuditLog, UserRole } from '../types';
 
 const USERS_KEY = 'factory_users';
 const SESSION_KEY = 'factory_session';
+const AUDIT_LOGS_KEY = 'factory_audit_logs';
 
 type SessionUser = Omit<AppUser, 'password'>;
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase();
 
 export const auth = {
+  listAuditLogs(): AuditLog[] {
+    return storage
+      .get<AuditLog>(AUDIT_LOGS_KEY)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  },
+
+  logAction(entry: Omit<AuditLog, 'id' | 'timestamp'>): void {
+    const logs = storage.get<AuditLog>(AUDIT_LOGS_KEY);
+    const log: AuditLog = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      ...entry,
+    };
+    logs.push(log);
+    storage.set<AuditLog>(AUDIT_LOGS_KEY, logs);
+  },
+
   ensureSeedAdmin(): void {
     const users = storage.get<AppUser>(USERS_KEY);
     if (users.length > 0) {
@@ -45,6 +63,17 @@ export const auth = {
       username: user.username.trim(),
     };
     storage.set<AppUser>(USERS_KEY, [...users, newUser]);
+
+    const session = this.getSessionUser();
+    this.logAction({
+      actorId: session?.id,
+      actorName: session?.name ?? 'System',
+      action: 'User Created',
+      targetUserId: newUser.id,
+      targetUserName: newUser.name,
+      detail: `${newUser.username} (${newUser.role})`,
+    });
+
     return newUser;
   },
 
@@ -83,6 +112,15 @@ export const auth = {
       this.setSessionUser(updatedUser);
     }
 
+    this.logAction({
+      actorId: session?.id,
+      actorName: session?.name ?? 'System',
+      action: 'User Updated',
+      targetUserId: updatedUser.id,
+      targetUserName: updatedUser.name,
+      detail: `${updatedUser.username} (${updatedUser.role})`,
+    });
+
     return updatedUser;
   },
 
@@ -110,6 +148,15 @@ export const auth = {
     if (session?.id === id) {
       this.logout();
     }
+
+    this.logAction({
+      actorId: session?.id,
+      actorName: session?.name ?? 'System',
+      action: 'User Deleted',
+      targetUserId: toDelete.id,
+      targetUserName: toDelete.name,
+      detail: `${toDelete.username} (${toDelete.role})`,
+    });
   },
 
   login(username: string, password: string): SessionUser {
@@ -125,10 +172,29 @@ export const auth = {
     }
 
     this.setSessionUser(user);
+    this.logAction({
+      actorId: user.id,
+      actorName: user.name,
+      action: 'User Login',
+      targetUserId: user.id,
+      targetUserName: user.name,
+      detail: user.username,
+    });
     return this.toSessionUser(user);
   },
 
   logout(): void {
+    const session = this.getSessionUser();
+    if (session) {
+      this.logAction({
+        actorId: session.id,
+        actorName: session.name,
+        action: 'User Logout',
+        targetUserId: session.id,
+        targetUserName: session.name,
+        detail: session.username,
+      });
+    }
     localStorage.removeItem(SESSION_KEY);
   },
 

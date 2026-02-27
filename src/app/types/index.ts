@@ -192,3 +192,17 @@ export interface AppUser {
   role: UserRole;
   createdAt: string;
 }
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  actorId?: string;
+  actorName: string;
+  action: string;
+  entity?: string;
+  resourceId?: string;
+  method?: 'POST' | 'PATCH' | 'DELETE';
+  targetUserId?: string;
+  targetUserName?: string;
+  detail?: string;
+}

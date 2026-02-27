@@ -9,6 +9,7 @@ import { BillManagement } from './components/BillManagement';
 import { Roznamcha } from './components/Roznamcha';
 import { Configuration } from './components/Configuration';
 import { UserManagement } from './components/UserManagement';
+import { AuditLogs } from './components/AuditLogs';
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
@@ -31,6 +32,7 @@ import {
   Menu,
   X,
   ShieldCheck,
+  History,
   LogOut,
 } from 'lucide-react';
 
@@ -44,7 +46,8 @@ type Page =
   | 'bills'
   | 'roznamcha'
   | 'configuration'
-  | 'users';
+  | 'users'
+  | 'audit_logs';
 
 interface NavItem {
   name: string;
@@ -64,6 +67,7 @@ const navigation: NavItem[] = [
   { name: 'Labor', page: 'labor', icon: UserCog, roles: ['admin'] },
   { name: 'Configuration', page: 'configuration', icon: Settings, roles: ['admin'] },
   { name: 'Users', page: 'users', icon: ShieldCheck, roles: ['admin'] },
+  { name: 'Audit Logs', page: 'audit_logs', icon: History, roles: ['admin'] },
 ];
 
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
@@ -170,6 +174,8 @@ export default function App() {
         return <Configuration />;
       case 'users':
         return <UserManagement currentUserId={currentUser.id} />;
+      case 'audit_logs':
+        return <AuditLogs />;
       default:
         return <Dashboard />;
     }

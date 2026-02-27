@@ -46,12 +46,12 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
     [users],
   );
 
-  const loadUsers = () => {
+  const loadData = () => {
     setUsers(auth.listUsers());
   };
 
   useEffect(() => {
-    loadUsers();
+    loadData();
   }, []);
 
   const resetForm = () => {
@@ -91,7 +91,7 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
         toast.success('User added successfully');
       }
 
-      loadUsers();
+      loadData();
       resetForm();
       setDialogOpen(false);
     } catch (error) {
@@ -121,136 +121,139 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
     try {
       auth.deleteUser(user.id);
       toast.success('User deleted successfully');
-      loadUsers();
+      loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to delete user');
     }
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Users & Roles</CardTitle>
-        <Dialog
-          open={dialogOpen}
-          onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) resetForm();
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add User
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{editingUser ? 'Edit User' : 'Add User'}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  value={form.name}
-                  onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Enter full name"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  value={form.username}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, username: event.target.value }))
-                  }
-                  placeholder="Enter username"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">
-                  Password {editingUser ? <span className="text-muted-foreground">(optional)</span> : ''}
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={form.password}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, password: event.target.value }))
-                  }
-                  placeholder={editingUser ? 'Leave blank to keep existing' : 'Enter password'}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Role</Label>
-                <Select
-                  value={form.role}
-                  onValueChange={(value: UserRole) => setForm((prev) => ({ ...prev, role: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="munshi">Munshi</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="submit" className="w-full">
-                {editingUser ? 'Update User' : 'Create User'}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Users & Roles</CardTitle>
+          <Dialog
+            open={dialogOpen}
+            onOpenChange={(open) => {
+              setDialogOpen(open);
+              if (!open) resetForm();
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add User
               </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Username</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedUsers.length === 0 ? (
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{editingUser ? 'Edit User' : 'Add User'}</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    value={form.name}
+                    onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Enter full name"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <Input
+                    id="username"
+                    value={form.username}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, username: event.target.value }))
+                    }
+                    placeholder="Enter username"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">
+                    Password {editingUser ? <span className="text-muted-foreground">(optional)</span> : ''}
+                  </Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={form.password}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, password: event.target.value }))
+                    }
+                    placeholder={editingUser ? 'Leave blank to keep existing' : 'Enter password'}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Role</Label>
+                  <Select
+                    value={form.role}
+                    onValueChange={(value: UserRole) => setForm((prev) => ({ ...prev, role: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="munshi">Munshi</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button type="submit" className="w-full">
+                  {editingUser ? 'Update User' : 'Create User'}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  No users found.
-                </TableCell>
+                <TableHead>User</TableHead>
+                <TableHead>Username</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ) : (
-              sortedUsers.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="flex items-center gap-2">
-                    <UserRound className="h-4 w-4 text-muted-foreground" />
-                    {user.name}
-                  </TableCell>
-                  <TableCell>{user.username}</TableCell>
-                  <TableCell>
-                    <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                      {user.role}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="space-x-2 text-right">
-                    <Button variant="outline" size="sm" onClick={() => startEdit(user)}>
-                      Edit
-                    </Button>
-                    <Button variant="destructive" size="sm" onClick={() => handleDelete(user)}>
-                      Delete
-                    </Button>
+            </TableHeader>
+            <TableBody>
+              {sortedUsers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No users found.
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+              ) : (
+                sortedUsers.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="flex items-center gap-2">
+                      <UserRound className="h-4 w-4 text-muted-foreground" />
+                      {user.name}
+                    </TableCell>
+                    <TableCell>{user.username}</TableCell>
+                    <TableCell>
+                      <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                        {user.role}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="space-x-2 text-right">
+                      <Button variant="outline" size="sm" onClick={() => startEdit(user)}>
+                        Edit
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleDelete(user)}>
+                        Delete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+    </div>
   );
 }
