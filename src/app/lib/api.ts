@@ -125,67 +125,35 @@ const pickValue = (payload: unknown, keys: string[]): string | undefined => {
 
 const getEntityLabel = (cleanPath: string, fallbackEntity: string): string => {
   const segments = cleanPath.split("/").filter(Boolean);
-  const baseSegments = segments.filter((segment) => !isIdSegment(segment));
+  const baseSegments = segments.filter((segment) => !/^(\d+|[0-9a-fA-F-]{8,})$/.test(segment));
   const key = baseSegments.join("/");
   return ENTITY_LABELS[key] ?? fallbackEntity.toLowerCase();
 };
-
-const getUpdatedFieldNames = (payload: unknown): string[] => {
-  if (!payload || typeof payload !== "object") return [];
-  return Object.keys(payload as Record<string, unknown>)
-    .filter((key) => !["id", "createdAt", "updatedAt"].includes(key))
-    .slice(0, 4)
-    .map((key) => key.replace(/([A-Z])/g, " $1").toLowerCase());
-};
-
 
 const buildFriendlyDetail = (
   method: "POST" | "PATCH" | "DELETE",
   cleanPath: string,
   entity: string,
-  resourceId: string | undefined,
   payloadBody: unknown,
-  auditMeta?: ApiAuditMeta,
 ): string => {
   const label = getEntityLabel(cleanPath, entity);
-  const subject =
-    auditMeta?.itemLabel ??
-    pickValue(payloadBody, ["name", "description", "detail", "reference", "billNumber"]);
+  const what =
+    pickValue(payloadBody, ["name", "description", "detail", "reference", "billNumber"]) ??
+    pickValue(payloadBody, ["amount", "quantity", "total"])?.concat(" amount") ??
+    "record";
 
   if (method === "POST") {
-    const createdLabel = subject ? `${label}: ${subject}` : label;
-    return `Added new ${createdLabel}.`;
+    return `New ${label} added: ${what}.`;
   }
 
   if (method === "PATCH") {
-    const changedFields = getUpdatedFieldNames(payloadBody);
-    if (subject && changedFields.length > 0) {
-      return `Updated ${label} "${subject}" (${changedFields.join(", ")}).`;
-    }
-    if (subject) {
-      return `Updated ${label} "${subject}".`;
-    }
-    if (changedFields.length > 0) {
-      return `Updated ${label} details (${changedFields.join(", ")}).`;
-    }
-    return `Updated ${label} details.`;
+    return `${label[0].toUpperCase()}${label.slice(1)} updated: ${what}.`;
   }
 
-  if (subject) {
-    return `Deleted ${label} "${subject}".`;
-  }
-
-  if (resourceId) {
-    return `Deleted ${label} entry.`;
-  }
-
-  return `Deleted ${label}.`;
+  return `${label[0].toUpperCase()}${label.slice(1)} deleted. Removed item: ${what}.`;
 };
 
-const writeAuditLog = (
-  payload: Omit<ApiRequest, "auditMeta">,
-  auditMeta?: ApiAuditMeta,
-): void => {
+const writeAuditLog = (payload: ApiRequest): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
 
@@ -201,14 +169,8 @@ const writeAuditLog = (
     resourceId,
     method: method as "POST" | "PATCH" | "DELETE",
     detail:
-      buildFriendlyDetail(
-        method as "POST" | "PATCH" | "DELETE",
-        cleanPath,
-        entity,
-        resourceId,
-        payload.body,
-        auditMeta,
-      ) ?? stringifyDetail({ path: cleanPath, payload: payload.body }),
+      buildFriendlyDetail(method as "POST" | "PATCH" | "DELETE", cleanPath, entity, payload.body) ??
+      stringifyDetail({ path: cleanPath, payload: payload.body }),
   });
 };
 
