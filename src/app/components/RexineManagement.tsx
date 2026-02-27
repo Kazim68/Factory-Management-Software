@@ -116,10 +116,14 @@ export function RexineManagement() {
             partyId: getPartyName(formData.partyId),
             categoryId: getCategoryName(formData.categoryId),
           },
-          previousValues: {
-            date: current?.date?.slice(0, 10),
+          previousFieldLabels: {
             partyId: getPartyName(current?.partyId),
             categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
+          },
+          previousValues: {
+            date: current?.date?.slice(0, 10),
+            partyId: current?.partyId || undefined,
+            categoryId: current?.expenses?.[0]?.categoryId || undefined,
             quantityMeter: current?.quantityMeter,
             ratePerMeter: current?.ratePerMeter,
             totalAmount: current?.totalAmount,

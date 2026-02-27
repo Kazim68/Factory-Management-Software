@@ -29,6 +29,7 @@ type ApiAuditMeta = {
   itemLabel?: string;
   previousValues?: Record<string, unknown>;
   fieldLabels?: Record<string, string>;
+  previousFieldLabels?: Record<string, string>;
 };
 
 type ApiRequest = {
@@ -137,6 +138,35 @@ const pickComparableValue = (source: Record<string, unknown> | undefined, key: s
   return undefined;
 };
 
+
+const isNumericLike = (value: unknown): boolean => {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const numberValue = Number(trimmed);
+  return Number.isFinite(numberValue);
+};
+
+const valuesEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (left == null && right == null) return true;
+
+  if (isNumericLike(left) && isNumericLike(right)) {
+    return Number(left) === Number(right);
+  }
+
+  if (typeof left === "boolean" || typeof right === "boolean") {
+    return String(left) === String(right);
+  }
+
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return String(left) === String(right);
+  }
+};
+
 const buildFieldChanges = (payloadBody: unknown, previousValues?: Record<string, unknown>): string[] => {
   if (!payloadBody || typeof payloadBody !== "object") return [];
 
@@ -147,7 +177,7 @@ const buildFieldChanges = (payloadBody: unknown, previousValues?: Record<string,
       const previousValue = pickComparableValue(previousValues, key);
       const field = formatFieldName(key);
 
-      if (previousValue !== undefined && JSON.stringify(previousValue) === JSON.stringify(value)) {
+      if (previousValue !== undefined && valuesEqual(previousValue, value)) {
         return [];
       }
 
@@ -167,6 +197,14 @@ const getFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditM
   return formatValue(value);
 };
 
+const getPreviousFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditMeta): string => {
+  if (auditMeta?.previousFieldLabels?.[key]) {
+    return auditMeta.previousFieldLabels[key];
+  }
+
+  return formatValue(value);
+};
+
 const buildAuditChanges = (
   payloadBody: unknown,
   auditMeta?: ApiAuditMeta,
@@ -180,7 +218,7 @@ const buildAuditChanges = (
       const previousValue = pickComparableValue(auditMeta?.previousValues, key);
       const field = formatFieldName(key);
 
-      if (previousValue !== undefined && JSON.stringify(previousValue) === JSON.stringify(value)) {
+      if (previousValue !== undefined && valuesEqual(previousValue, value)) {
         return [];
       }
 
@@ -188,7 +226,7 @@ const buildAuditChanges = (
         return `${field} set to ${getFieldDisplayValue(key, value, auditMeta)}`;
       }
 
-      return `${field} changed from ${formatValue(previousValue)} to ${getFieldDisplayValue(key, value, auditMeta)}`;
+      return `${field} changed from ${getPreviousFieldDisplayValue(key, previousValue, auditMeta)} to ${getFieldDisplayValue(key, value, auditMeta)}`;
     });
 };
 
@@ -240,6 +278,7 @@ const buildFriendlyDetail = (
       .trim();
   }
 
+  const isExpense = label === "expense";
   const deletedSummary = auditMeta?.previousValues
     ? Object.entries(auditMeta.previousValues)
         .filter(([_, value]) => value !== undefined)
@@ -247,9 +286,13 @@ const buildFriendlyDetail = (
         .join(", ")
     : undefined;
 
-  return `${titledLabel} deleted: ${entityName || what}${deletedSummary ? ` (${deletedSummary})` : ""}.`
-    .replace(/\s+/g, " ")
-    .trim();
+  if (isExpense && deletedSummary) {
+    return `${titledLabel} deleted: ${entityName || what} (${deletedSummary}).`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  return `${titledLabel} deleted: ${entityName || what}.`.replace(/\s+/g, " ").trim();
 };
 
 const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
