@@ -28,6 +28,8 @@ import { auth } from "./auth";
 type ApiAuditMeta = {
   itemLabel?: string;
   previousValues?: Record<string, unknown>;
+  fieldLabels?: Record<string, string>;
+  previousFieldLabels?: Record<string, string>;
 };
 
 type ApiRequest = {
@@ -142,15 +144,60 @@ const buildFieldChanges = (payloadBody: unknown, previousValues?: Record<string,
   const source = payloadBody as Record<string, unknown>;
   return Object.entries(source)
     .filter(([key, value]) => value !== undefined && key !== "moduleData")
-    .map(([key, value]) => {
+    .flatMap(([key, value]) => {
       const previousValue = pickComparableValue(previousValues, key);
       const field = formatFieldName(key);
+
+      if (previousValue !== undefined && JSON.stringify(previousValue) === JSON.stringify(value)) {
+        return [];
+      }
 
       if (previousValue === undefined) {
         return `${field} set to ${formatValue(value)}`;
       }
 
       return `${field} changed from ${formatValue(previousValue)} to ${formatValue(value)}`;
+    });
+};
+
+const getFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditMeta): string => {
+  if (auditMeta?.fieldLabels?.[key]) {
+    return auditMeta.fieldLabels[key];
+  }
+
+  return formatValue(value);
+};
+
+const getPreviousFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditMeta): string => {
+  if (auditMeta?.previousFieldLabels?.[key]) {
+    return auditMeta.previousFieldLabels[key];
+  }
+
+  return formatValue(value);
+};
+
+const buildAuditChanges = (
+  payloadBody: unknown,
+  auditMeta?: ApiAuditMeta,
+): string[] => {
+  if (!payloadBody || typeof payloadBody !== "object") return [];
+
+  const source = payloadBody as Record<string, unknown>;
+  return Object.entries(source)
+    .filter(([key, value]) => value !== undefined && key !== "moduleData")
+    .flatMap(([key, value]) => {
+      const previousValue = pickComparableValue(auditMeta?.previousValues, key);
+      const field = formatFieldName(key);
+
+      if (previousValue !== undefined && JSON.stringify(previousValue) === JSON.stringify(value)) {
+        return [];
+      }
+
+      if (previousValue === undefined) {
+        return `${field} set to ${getFieldDisplayValue(key, value, auditMeta)}`;
+      }
+
+      return `${field} changed from ${getPreviousFieldDisplayValue(key, previousValue, auditMeta)} to ${getFieldDisplayValue(key, value, auditMeta)}`;
     });
 };
 
@@ -189,17 +236,20 @@ const buildFriendlyDetail = (
 
   const titledLabel = `${label[0].toUpperCase()}${label.slice(1)}`;
   const entityName = auditMeta?.itemLabel ? `[${auditMeta.itemLabel}]` : "";
-  const fieldChanges = buildFieldChanges(payloadBody, auditMeta?.previousValues);
+  const fieldChanges = buildAuditChanges(payloadBody, auditMeta);
   const changeSummary = fieldChanges.length > 0 ? fieldChanges.join("; ") : what;
 
   if (method === "POST") {
-    return `New ${label} added${entityName ? ` ${entityName}` : ""}: ${changeSummary}.`;
+    return `${titledLabel} created: ${entityName || what}.`.replace(/\s+/g, " ").trim();
   }
 
   if (method === "PATCH") {
-    return `${titledLabel} ${entityName} updated: ${changeSummary}.`.replace(/\s+/g, " ").trim();
+    return `${titledLabel} updated: ${entityName || what}${fieldChanges.length ? `; ${changeSummary}` : ""}.`
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
+  const isExpense = label === "expense";
   const deletedSummary = auditMeta?.previousValues
     ? Object.entries(auditMeta.previousValues)
         .filter(([_, value]) => value !== undefined)
@@ -207,11 +257,13 @@ const buildFriendlyDetail = (
         .join(", ")
     : undefined;
 
-  if (deletedSummary) {
-    return `${titledLabel} ${entityName} deleted: ${deletedSummary}.`.replace(/\s+/g, " ").trim();
+  if (isExpense && deletedSummary) {
+    return `${titledLabel} deleted: ${entityName || what} (${deletedSummary}).`
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  return `${titledLabel} ${entityName} deleted. Removed item: ${what}.`.replace(/\s+/g, " ").trim();
+  return `${titledLabel} deleted: ${entityName || what}.`.replace(/\s+/g, " ").trim();
 };
 
 const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
@@ -416,8 +468,8 @@ export const laborApi = {
     paymentTypeId: string;
     defaultRate?: number;
     status?: "ACTIVE" | "FIRED";
-  }): Promise<ApiLaborProfile> =>
-    request({ path: "/labor/profiles", method: "POST", body: data }),
+  }, auditMeta?: ApiAuditMeta): Promise<ApiLaborProfile> =>
+    request({ path: "/labor/profiles", method: "POST", body: data, auditMeta }),
   updateProfile: (
     laborId: string,
     data: {
@@ -426,15 +478,17 @@ export const laborApi = {
       paymentTypeId?: string;
       defaultRate?: number;
       status?: "ACTIVE" | "FIRED";
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborProfile> =>
     request({
       path: `/labor/profiles/${laborId}`,
       method: "PATCH",
       body: data,
+      auditMeta,
     }),
-  deleteProfile: (laborId: string): Promise<void> =>
-    request({ path: `/labor/profiles/${laborId}`, method: "DELETE" }),
+  deleteProfile: (laborId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/labor/profiles/${laborId}`, method: "DELETE", auditMeta }),
   upsertRate: (data: {
     laborId: string;
     articleId: string;
@@ -451,8 +505,8 @@ export const laborApi = {
     quantity: number;
     rate: number;
     total: number;
-  }): Promise<ApiLaborWorkEntry> =>
-    request({ path: "/labor/work", method: "POST", body: data }),
+  }, auditMeta?: ApiAuditMeta): Promise<ApiLaborWorkEntry> =>
+    request({ path: "/labor/work", method: "POST", body: data, auditMeta }),
   updateWorkEntry: (
     workId: string,
     data: {
@@ -464,11 +518,12 @@ export const laborApi = {
       quantity?: number;
       rate?: number;
       total?: number;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborWorkEntry> =>
-    request({ path: `/labor/work/${workId}`, method: "PATCH", body: data }),
-  deleteWorkEntry: (workId: string): Promise<void> =>
-    request({ path: `/labor/work/${workId}`, method: "DELETE" }),
+    request({ path: `/labor/work/${workId}`, method: "PATCH", body: data, auditMeta }),
+  deleteWorkEntry: (workId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/labor/work/${workId}`, method: "DELETE", auditMeta }),
   createAdvance: (data: {
     laborId: string;
     date: string;
@@ -476,8 +531,8 @@ export const laborApi = {
     reason: string;
     categoryId?: string;
     partyId?: string;
-  }): Promise<{ advance: ApiLaborAdvance; expense: unknown }> =>
-    request({ path: "/labor/advances", method: "POST", body: data }),
+  }, auditMeta?: ApiAuditMeta): Promise<{ advance: ApiLaborAdvance; expense: unknown }> =>
+    request({ path: "/labor/advances", method: "POST", body: data, auditMeta }),
   updateAdvance: (
     advanceId: string,
     data: {
@@ -486,15 +541,17 @@ export const laborApi = {
       amount?: number;
       reason?: string;
       categoryId?: string;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborAdvance> =>
     request({
       path: `/labor/advances/${advanceId}`,
       method: "PATCH",
       body: data,
+      auditMeta,
     }),
-  deleteAdvance: (advanceId: string): Promise<void> =>
-    request({ path: `/labor/advances/${advanceId}`, method: "DELETE" }),
+  deleteAdvance: (advanceId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/labor/advances/${advanceId}`, method: "DELETE", auditMeta }),
   getLedger: (laborId: string): Promise<ApiLaborLedger> =>
     get(`/labor/${laborId}/ledger`),
 };
@@ -561,8 +618,8 @@ export const purchaseApi = {
     totalAmount: number;
     paymentType?: ApiPaymentMethod;
     description?: string;
-  }): Promise<{ purchase: ApiChemicalPurchase }> =>
-    request({ path: "/chemicals", method: "POST", body: data }),
+  }, auditMeta?: ApiAuditMeta): Promise<{ purchase: ApiChemicalPurchase }> =>
+    request({ path: "/chemicals", method: "POST", body: data, auditMeta }),
   updateChemical: (
     purchaseId: string,
     data: {
@@ -574,15 +631,17 @@ export const purchaseApi = {
       totalAmount?: number;
       paymentType?: ApiPaymentMethod;
       description?: string;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiChemicalPurchase> =>
     request({
       path: `/chemicals/${purchaseId}`,
       method: "PATCH",
       body: data,
+      auditMeta,
     }),
-  deleteChemical: (purchaseId: string): Promise<void> =>
-    request({ path: `/chemicals/${purchaseId}`, method: "DELETE" }),
+  deleteChemical: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/chemicals/${purchaseId}`, method: "DELETE", auditMeta }),
 
   listRexine: (): Promise<ApiRexinePurchase[]> => get("/rexine"),
   createRexine: (data: {
@@ -594,8 +653,8 @@ export const purchaseApi = {
     totalAmount: number;
     paymentType?: ApiPaymentMethod;
     description?: string;
-  }): Promise<{ purchase: ApiRexinePurchase }> =>
-    request({ path: "/rexine", method: "POST", body: data }),
+  }, auditMeta?: ApiAuditMeta): Promise<{ purchase: ApiRexinePurchase }> =>
+    request({ path: "/rexine", method: "POST", body: data, auditMeta }),
   updateRexine: (
     purchaseId: string,
     data: {
@@ -607,15 +666,17 @@ export const purchaseApi = {
       totalAmount?: number;
       paymentType?: ApiPaymentMethod;
       description?: string;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiRexinePurchase> =>
     request({
       path: `/rexine/${purchaseId}`,
       method: "PATCH",
       body: data,
+      auditMeta,
     }),
-  deleteRexine: (purchaseId: string): Promise<void> =>
-    request({ path: `/rexine/${purchaseId}`, method: "DELETE" }),
+  deleteRexine: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/rexine/${purchaseId}`, method: "DELETE", auditMeta }),
 
   listMaterials: (): Promise<ApiMaterialPurchase[]> => get("/materials"),
   createMaterial: (data: {
@@ -629,8 +690,8 @@ export const purchaseApi = {
     totalAmount: number;
     paymentType?: ApiPaymentMethod;
     description?: string;
-  }): Promise<{ purchase: ApiMaterialPurchase }> =>
-    request({ path: "/materials", method: "POST", body: data }),
+  }, auditMeta?: ApiAuditMeta): Promise<{ purchase: ApiMaterialPurchase }> =>
+    request({ path: "/materials", method: "POST", body: data, auditMeta }),
   updateMaterial: (
     purchaseId: string,
     data: {
@@ -644,13 +705,15 @@ export const purchaseApi = {
       totalAmount?: number;
       paymentType?: ApiPaymentMethod;
       description?: string;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiMaterialPurchase> =>
     request({
       path: `/materials/${purchaseId}`,
       method: "PATCH",
       body: data,
+      auditMeta,
     }),
-  deleteMaterial: (purchaseId: string): Promise<void> =>
-    request({ path: `/materials/${purchaseId}`, method: "DELETE" }),
+  deleteMaterial: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/materials/${purchaseId}`, method: "DELETE", auditMeta }),
 };
