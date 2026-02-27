@@ -52,6 +52,12 @@ export function RexineManagement() {
     detail: "",
   });
 
+  const getPartyName = (partyId?: string | null) =>
+    parties.find((party) => party.id === partyId)?.name || "Unknown";
+
+  const getCategoryName = (categoryId?: string | null) =>
+    categories.find((category) => category.id === categoryId)?.name || "Unknown";
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -94,6 +100,7 @@ export function RexineManagement() {
 
     try {
       if (editingId) {
+        const current = transactions.find((entry) => entry.id === editingId);
         await purchaseApi.updateRexine(editingId, {
           date: formData.date,
           partyId: formData.partyId || undefined,
@@ -103,6 +110,22 @@ export function RexineManagement() {
           totalAmount,
           paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
+        }, {
+          itemLabel: getPartyName(formData.partyId),
+          fieldLabels: {
+            partyId: getPartyName(formData.partyId),
+            categoryId: getCategoryName(formData.categoryId),
+          },
+          previousValues: {
+            date: current?.date?.slice(0, 10),
+            partyId: getPartyName(current?.partyId),
+            categoryId: getCategoryName(current?.expenses?.[0]?.categoryId),
+            quantityMeter: current?.quantityMeter,
+            ratePerMeter: current?.ratePerMeter,
+            totalAmount: current?.totalAmount,
+            paymentType: current?.paymentType,
+            description: current?.expenses?.[0]?.description || undefined,
+          },
         });
         toast.success("Rexine purchase updated");
       } else {
@@ -115,6 +138,8 @@ export function RexineManagement() {
           totalAmount,
           paymentType: formData.paymentType === "payable" ? "KHATA" : "CASH",
           description: formData.detail || undefined,
+        }, {
+          itemLabel: getPartyName(formData.partyId),
         });
         toast.success("Rexine purchase added");
       }
@@ -162,7 +187,10 @@ export function RexineManagement() {
   const handleDelete = async (purchaseId: string) => {
     if (!confirm("Delete this purchase?")) return;
     try {
-      await purchaseApi.deleteRexine(purchaseId);
+      const purchase = transactions.find((entry) => entry.id === purchaseId);
+      await purchaseApi.deleteRexine(purchaseId, {
+        itemLabel: getPartyName(purchase?.partyId),
+      });
       toast.success("Purchase deleted");
       await loadData();
     } catch (error) {

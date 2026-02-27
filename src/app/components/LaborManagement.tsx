@@ -103,6 +103,21 @@ export function LaborManagement() {
 
   const [categoryForm, setCategoryForm] = useState({ name: "" });
 
+  const getLaborName = (laborId?: string | null) =>
+    allProfiles.find((profile) => profile.id === laborId)?.name || "Unknown";
+
+  const getCategoryName = (categoryId?: string | null) =>
+    categories.find((category) => category.id === categoryId)?.name || "Unknown";
+
+  const getPaymentTypeName = (paymentTypeId?: string | null) =>
+    paymentTypes.find((paymentType) => paymentType.id === paymentTypeId)?.name || "Unknown";
+
+  const getArticleName = (articleId?: string | null) =>
+    articles.find((article) => article.id === articleId)?.name || "Unknown";
+
+  const getExpenseCategoryName = (categoryId?: string | null) =>
+    expenseCategories.find((category) => category.id === categoryId)?.name || "Unknown";
+
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -202,6 +217,7 @@ export function LaborManagement() {
 
     try {
       if (editingLaborId) {
+        const current = allProfiles.find((profile) => profile.id === editingLaborId);
         await laborApi.updateProfile(editingLaborId, {
           name: laborForm.name.trim(),
           categoryId: laborForm.categoryId,
@@ -209,6 +225,18 @@ export function LaborManagement() {
           defaultRate: laborForm.defaultRate
             ? parseFloat(laborForm.defaultRate)
             : undefined,
+        }, {
+          itemLabel: laborForm.name.trim(),
+          fieldLabels: {
+            categoryId: getCategoryName(laborForm.categoryId),
+            paymentTypeId: getPaymentTypeName(laborForm.paymentTypeId),
+          },
+          previousValues: {
+            name: current?.name,
+            categoryId: getCategoryName(current?.categoryId),
+            paymentTypeId: getPaymentTypeName(current?.paymentTypeId),
+            defaultRate: current?.defaultRate,
+          },
         });
         toast.success("Labor updated");
       } else {
@@ -220,6 +248,8 @@ export function LaborManagement() {
             ? parseFloat(laborForm.defaultRate)
             : undefined,
           status: "ACTIVE",
+        }, {
+          itemLabel: laborForm.name.trim(),
         });
         toast.success("Labor added");
       }
@@ -256,6 +286,7 @@ export function LaborManagement() {
 
     try {
       if (editingWorkId) {
+        const current = workEntries.find((entry) => entry.id === editingWorkId);
         await laborApi.updateWorkEntry(editingWorkId, {
           laborId: workForm.laborId,
           articleId: workForm.articleId,
@@ -264,6 +295,21 @@ export function LaborManagement() {
           quantity,
           rate,
           total,
+        }, {
+          itemLabel: getLaborName(workForm.laborId),
+          fieldLabels: {
+            laborId: getLaborName(workForm.laborId),
+            articleId: getArticleName(workForm.articleId),
+          },
+          previousValues: {
+            laborId: getLaborName(current?.laborId),
+            articleId: getArticleName(current?.articleId),
+            startDate: current?.startDate?.slice(0, 10),
+            endDate: current?.endDate?.slice(0, 10),
+            quantity: current?.quantity,
+            rate: current?.rate,
+            total: current?.total,
+          },
         });
         toast.success("Work entry updated");
       } else {
@@ -275,6 +321,8 @@ export function LaborManagement() {
           quantity,
           rate,
           total,
+        }, {
+          itemLabel: getLaborName(workForm.laborId),
         });
         toast.success("Work entry added");
       }
@@ -312,12 +360,25 @@ export function LaborManagement() {
 
     try {
       if (editingAdvanceId) {
+        const current = advanceEntries.find((entry) => entry.id === editingAdvanceId);
         await laborApi.updateAdvance(editingAdvanceId, {
           laborId: kharchaForm.laborId,
           date: kharchaForm.date,
           amount,
           reason: kharchaForm.reason,
           categoryId: kharchaForm.categoryId || undefined,
+        }, {
+          itemLabel: getLaborName(kharchaForm.laborId),
+          fieldLabels: {
+            laborId: getLaborName(kharchaForm.laborId),
+            categoryId: getExpenseCategoryName(kharchaForm.categoryId),
+          },
+          previousValues: {
+            laborId: getLaborName(current?.laborId),
+            date: current?.date?.slice(0, 10),
+            amount: current?.amount,
+            reason: current?.reason || undefined,
+          },
         });
         toast.success("Kharcha updated");
       } else {
@@ -327,6 +388,8 @@ export function LaborManagement() {
           amount,
           reason: kharchaForm.reason,
           categoryId: kharchaForm.categoryId,
+        }, {
+          itemLabel: getLaborName(kharchaForm.laborId),
         });
         toast.success("Kharcha recorded");
       }
@@ -360,7 +423,9 @@ export function LaborManagement() {
   const deleteLabor = async (laborId: string) => {
     if (!confirm("Fire this labor profile?")) return;
     try {
-      await laborApi.deleteProfile(laborId);
+      await laborApi.deleteProfile(laborId, {
+        itemLabel: getLaborName(laborId),
+      });
       toast.success("Labor moved to fired status");
       await loadData();
     } catch (error) {
@@ -384,7 +449,10 @@ export function LaborManagement() {
   const deleteWork = async (workId: string) => {
     if (!confirm("Delete this work entry?")) return;
     try {
-      await laborApi.deleteWorkEntry(workId);
+      const work = workEntries.find((entry) => entry.id === workId);
+      await laborApi.deleteWorkEntry(workId, {
+        itemLabel: getLaborName(work?.laborId),
+      });
       toast.success("Work entry deleted");
       await loadData();
     } catch (error) {
@@ -408,7 +476,10 @@ export function LaborManagement() {
   const deleteAdvance = async (advanceId: string) => {
     if (!confirm("Delete this advance?")) return;
     try {
-      await laborApi.deleteAdvance(advanceId);
+      const advance = advanceEntries.find((entry) => entry.id === advanceId);
+      await laborApi.deleteAdvance(advanceId, {
+        itemLabel: getLaborName(advance?.laborId),
+      });
       toast.success("Advance deleted");
       await loadData();
     } catch (error) {
