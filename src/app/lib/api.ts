@@ -25,10 +25,15 @@ import type {
 } from "../types/api";
 import { auth } from "./auth";
 
+type ApiAuditMeta = {
+  itemLabel?: string;
+};
+
 type ApiRequest = {
   path: string;
   method?: string;
   body?: unknown;
+  auditMeta?: ApiAuditMeta;
 };
 
 const request = async <T>(payload: ApiRequest): Promise<T> => {
@@ -36,13 +41,13 @@ const request = async <T>(payload: ApiRequest): Promise<T> => {
     throw new Error("API bridge is unavailable.");
   }
 
-  const response = (await window.api.request(payload)) as T;
-  writeAuditLog(payload);
+  const { auditMeta, ...apiPayload } = payload;
+  const response = (await window.api.request(apiPayload)) as T;
+  writeAuditLog(apiPayload, auditMeta);
   return response;
 };
 
 const get = <T>(path: string) => request<T>({ path });
-
 
 const AUDITABLE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
 
@@ -71,14 +76,16 @@ const toTitleCase = (value: string): string =>
 const singularize = (value: string): string =>
   value.endsWith("s") ? value.slice(0, -1) : value;
 
+const isIdSegment = (segment: string): boolean => /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
+
 const getAuditContext = (path: string) => {
   const cleanPath = path.split("?")[0];
   const segments = cleanPath.split("/").filter(Boolean);
-  const isIdSegment = (segment: string): boolean => /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
 
-  const resourceId = segments.length > 0 && isIdSegment(segments[segments.length - 1])
-    ? segments[segments.length - 1]
-    : undefined;
+  const resourceId =
+    segments.length > 0 && isIdSegment(segments[segments.length - 1])
+      ? segments[segments.length - 1]
+      : undefined;
 
   const entitySegments = resourceId ? segments.slice(0, -1) : segments;
   const entity = entitySegments.length
@@ -327,11 +334,12 @@ export const expenseApi = {
       paymentType?: ApiPaymentMethod;
       amount?: number;
       description?: string;
-    }
+    },
+    auditMeta?: ApiAuditMeta,
   ): Promise<ApiExpenseEntry> =>
-    request({ path: `/expenses/${expenseId}`, method: "PATCH", body: data }),
-  deleteExpense: (expenseId: string): Promise<void> =>
-    request({ path: `/expenses/${expenseId}`, method: "DELETE" }),
+    request({ path: `/expenses/${expenseId}`, method: "PATCH", body: data, auditMeta }),
+  deleteExpense: (expenseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/expenses/${expenseId}`, method: "DELETE", auditMeta }),
 };
 
 export const laborApi = {
