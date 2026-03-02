@@ -4,6 +4,14 @@ interface ReportRow {
   value: string | number;
 }
 
+function isVisible(element: Element) {
+  const htmlElement = element as HTMLElement;
+  if (htmlElement.hidden) return false;
+  if (element.closest('[hidden], [aria-hidden="true"], [data-state="inactive"]')) return false;
+  if (htmlElement.getAttribute('data-state') === 'inactive') return false;
+  return true;
+}
+
 function downloadBlob(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -103,7 +111,7 @@ export function collectPageRows(pageName: string, container: HTMLElement | null)
   }
 
   const rows: ReportRow[] = [];
-  const cards = container.querySelectorAll('[class*="Card"], [data-slot="card"]');
+  const cards = Array.from(container.querySelectorAll('[class*="Card"], [data-slot="card"]')).filter(isVisible);
 
   if (cards.length > 0) {
     cards.forEach((card, index) => {
@@ -113,26 +121,28 @@ export function collectPageRows(pageName: string, container: HTMLElement | null)
         rows.push({
           section: title || `${pageName} Card ${index + 1}`,
           metric: 'Summary',
-          value: text.slice(0, 160),
+          value: text,
         });
       }
     });
   }
 
-  const tables = Array.from(container.querySelectorAll('table'));
+  const tables = Array.from(container.querySelectorAll('table')).filter(isVisible);
   tables.forEach((table, tableIndex) => {
     const headers = Array.from(table.querySelectorAll('thead th')).map((th) =>
       th.textContent?.trim() || ''
     );
     const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
 
-    bodyRows.forEach((tr, rowIndex) => {
+    bodyRows.filter(isVisible).forEach((tr, rowIndex) => {
       const cells = Array.from(tr.querySelectorAll('td')).map((td) => td.textContent?.trim() || '');
       if (cells.length > 0) {
-        rows.push({
-          section: `${pageName} Table ${tableIndex + 1}`,
-          metric: headers.length > 0 ? headers.join(' | ') : `Row ${rowIndex + 1}`,
-          value: cells.join(' | '),
+        cells.forEach((cellValue, cellIndex) => {
+          rows.push({
+            section: `${pageName} Table ${tableIndex + 1} Row ${rowIndex + 1}`,
+            metric: headers[cellIndex] || `Column ${cellIndex + 1}`,
+            value: cellValue,
+          });
         });
       }
     });
@@ -148,6 +158,11 @@ export function collectPageRows(pageName: string, container: HTMLElement | null)
   }
 
   return rows;
+}
+
+export function collectRowsFromSelector(pageName: string, selector: string): ReportRow[] {
+  const scope = document.querySelector(selector) as HTMLElement | null;
+  return collectPageRows(pageName, scope);
 }
 
 export type { ReportRow };

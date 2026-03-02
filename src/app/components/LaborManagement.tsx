@@ -30,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Plus, Eye, Wallet } from "lucide-react";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
 import { configApi, expenseApi, laborApi } from "../lib/api";
+import { TabReportActions } from "./TabReportActions";
 import type {
   ApiArticle,
   ApiExpenseCategory,
@@ -77,6 +78,7 @@ export function LaborManagement() {
   const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
   const [editingAdvanceId, setEditingAdvanceId] = useState<string | null>(null);
   const [editingCategory, setEditingCategory] = useState<ApiLaborCategory | null>(null);
+  const [activeTab, setActiveTab] = useState("labors");
 
   const [laborForm, setLaborForm] = useState({
     name: "",
@@ -571,16 +573,22 @@ export function LaborManagement() {
           <CardTitle>Labor Management</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="labors">
-            <TabsList className="grid w-full grid-cols-5">
+          <Tabs defaultValue="labors" value={activeTab} onValueChange={setActiveTab}>
+            <div className="flex items-center justify-between gap-3">
+              <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
               <TabsTrigger value="work">Work Entries</TabsTrigger>
               <TabsTrigger value="labor-paid-today">Labor Paid Today</TabsTrigger>
               <TabsTrigger value="kharcha">Kharcha (Advances)</TabsTrigger>
               <TabsTrigger value="labor-categories">Labor Categories</TabsTrigger>
-            </TabsList>
+              </TabsList>
+              <TabReportActions
+                title={`Labor ${activeTab} report`}
+                selector={`[data-report-tab="${activeTab}"]`}
+              />
+            </div>
 
-            <TabsContent value="labors" className="space-y-4">
+            <TabsContent value="labors" className="space-y-4" data-report-tab="labors">
               <div className="flex justify-end">
                 <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
                   <DialogTrigger asChild>
@@ -770,7 +778,7 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="work" className="space-y-4">
+            <TabsContent value="work" className="space-y-4" data-report-tab="work">
               <div className="flex justify-end">
                 <Dialog open={workDialog} onOpenChange={setWorkDialog}>
                   <DialogTrigger asChild>
@@ -970,7 +978,7 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="labor-paid-today" className="space-y-4">
+            <TabsContent value="labor-paid-today" className="space-y-4" data-report-tab="labor-paid-today">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Labor Paid Today</h3>
                 <span className="text-sm text-muted-foreground">
@@ -1019,7 +1027,7 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="kharcha" className="space-y-4">
+            <TabsContent value="kharcha" className="space-y-4" data-report-tab="kharcha">
               <div className="flex justify-end">
                 <Dialog open={kharchaDialog} onOpenChange={setKharchaDialog}>
                   <DialogTrigger asChild>
@@ -1197,7 +1205,7 @@ export function LaborManagement() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="labor-categories" className="space-y-4">
+            <TabsContent value="labor-categories" className="space-y-4" data-report-tab="labor-categories">
               <div className="flex justify-end">
                 <Dialog
                   open={categoryDialog}
