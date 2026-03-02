@@ -10,14 +10,22 @@ import { Roznamcha } from './components/Roznamcha';
 import { Configuration } from './components/Configuration';
 import { UserManagement } from './components/UserManagement';
 import { AuditLogs } from './components/AuditLogs';
+import { CustomReportBuilder } from './components/CustomReportBuilder';
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
 import { Badge } from './components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 import { auth, type SessionUser } from './lib/auth';
+import { collectPageRows, exportRowsToExcel, exportRowsToPdf, printRows } from './lib/report';
 import type { UserRole } from './types';
 import {
   LayoutDashboard,
@@ -34,6 +42,7 @@ import {
   ShieldCheck,
   History,
   LogOut,
+  FileOutput,
 } from 'lucide-react';
 
 type Page =
@@ -47,7 +56,8 @@ type Page =
   | 'roznamcha'
   | 'configuration'
   | 'users'
-  | 'audit_logs';
+  | 'audit_logs'
+  | 'custom_reports';
 
 interface NavItem {
   name: string;
@@ -68,6 +78,7 @@ const navigation: NavItem[] = [
   { name: 'Configuration', page: 'configuration', icon: Settings, roles: ['admin'] },
   { name: 'Users', page: 'users', icon: ShieldCheck, roles: ['admin'] },
   { name: 'Audit Logs', page: 'audit_logs', icon: History, roles: ['admin'] },
+  { name: 'Custom Reports', page: 'custom_reports', icon: FileOutput, roles: ['admin', 'munshi'] },
 ];
 
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
@@ -176,9 +187,31 @@ export default function App() {
         return <UserManagement currentUserId={currentUser.id} />;
       case 'audit_logs':
         return <AuditLogs />;
+      case 'custom_reports':
+        return <CustomReportBuilder />;
       default:
         return <Dashboard />;
     }
+  };
+
+  const runReportAction = (type: 'excel' | 'pdf' | 'print') => {
+    const reportTitle = `${currentPage.replace('_', ' ')} report`;
+    const rows = collectPageRows(currentPage, document.querySelector('main'));
+
+    if (type === 'excel') {
+      exportRowsToExcel(reportTitle, rows);
+      toast.success('Excel report generated');
+      return;
+    }
+
+    if (type === 'pdf') {
+      exportRowsToPdf(reportTitle, rows);
+      toast.success('PDF print dialog opened');
+      return;
+    }
+
+    printRows(reportTitle, rows);
+    toast.success('Print dialog opened');
   };
 
   const handleLogout = () => {
@@ -241,6 +274,25 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <FileOutput className="h-4 w-4 mr-2" />
+                  Generate Report
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => runReportAction('excel')}>
+                  Export to Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => runReportAction('pdf')}>
+                  Export to PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => runReportAction('print')}>
+                  Direct Print
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Badge variant="secondary">{currentUser.name}</Badge>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" />
