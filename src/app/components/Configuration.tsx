@@ -29,6 +29,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { configApi } from "../lib/api";
+import { TabReportActions } from "./TabReportActions";
 import type {
   ApiArticle,
   ApiExpenseCategory,
@@ -64,6 +65,7 @@ export function Configuration() {
     unitId: "none",
   });
   const [expenseForm, setExpenseForm] = useState({ name: "" });
+  const [activeTab, setActiveTab] = useState("units");
 
   const loadConfig = async () => {
     setStatus("loading");
@@ -286,15 +288,21 @@ export function Configuration() {
           <CardTitle>System Configuration</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="units">
-            <TabsList className="grid w-full grid-cols-4">
+          <Tabs defaultValue="units" value={activeTab} onValueChange={setActiveTab}>
+            <div className="flex items-center justify-between gap-3">
+              <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="units">Units</TabsTrigger>
               <TabsTrigger value="articles">Articles</TabsTrigger>
               <TabsTrigger value="payment">Payment Types</TabsTrigger>
               <TabsTrigger value="expenses">Expense Categories</TabsTrigger>
-            </TabsList>
+              </TabsList>
+              <TabReportActions
+                title={`Configuration ${activeTab} report`}
+                selector={`[data-report-tab="${activeTab}"]`}
+              />
+            </div>
 
-            <TabsContent value="units" className="space-y-4">
+            <TabsContent value="units" className="space-y-4" data-report-tab="units">
               <div className="flex justify-end">
                 <Dialog
                   open={unitDialog}
@@ -398,7 +406,7 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="articles" className="space-y-4">
+            <TabsContent value="articles" className="space-y-4" data-report-tab="articles">
               <div className="flex justify-end">
                 <Dialog
                   open={articleDialog}
@@ -509,7 +517,7 @@ export function Configuration() {
             </TabsContent>
 
 
-            <TabsContent value="payment" className="space-y-4">
+            <TabsContent value="payment" className="space-y-4" data-report-tab="payment">
               <div className="flex justify-end">
                 <Dialog
                   open={paymentDialog}
@@ -628,7 +636,7 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="expenses" className="space-y-4">
+            <TabsContent value="expenses" className="space-y-4" data-report-tab="expenses">
               <div className="flex justify-end">
                 <Dialog
                   open={expenseDialog}
