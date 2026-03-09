@@ -11,6 +11,8 @@ import { Configuration } from './components/Configuration';
 import { UserManagement } from './components/UserManagement';
 import { AuditLogs } from './components/AuditLogs';
 import { CustomReportBuilder } from './components/CustomReportBuilder';
+import { ProductionControl } from './components/ProductionControl';
+import { StockControl } from './components/StockControl';
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Label } from './components/ui/label';
@@ -43,6 +45,7 @@ import {
   History,
   LogOut,
   FileOutput,
+  Factory,
 } from 'lucide-react';
 
 type Page =
@@ -52,6 +55,8 @@ type Page =
   | 'rexine'
   | 'materials'
   | 'labor'
+  | 'stock_control'
+  | 'production_control'
   | 'bills'
   | 'roznamcha'
   | 'configuration'
@@ -75,6 +80,8 @@ const navigation: NavItem[] = [
   { name: 'Rexine', page: 'rexine', icon: Shirt, roles: ['admin'] },
   { name: 'Materials', page: 'materials', icon: Package, roles: ['admin'] },
   { name: 'Labor', page: 'labor', icon: UserCog, roles: ['admin'] },
+  { name: 'Stock Control', page: 'stock_control', icon: Package, roles: ['admin', 'munshi'] },
+  { name: 'Production Control', page: 'production_control', icon: Factory, roles: ['admin', 'munshi'] },
   { name: 'Configuration', page: 'configuration', icon: Settings, roles: ['admin'] },
   { name: 'Users', page: 'users', icon: ShieldCheck, roles: ['admin'] },
   { name: 'Audit Logs', page: 'audit_logs', icon: History, roles: ['admin'] },
@@ -177,6 +184,10 @@ export default function App() {
         return <MaterialManagement />;
       case 'labor':
         return <LaborManagement />;
+      case 'stock_control':
+        return <StockControl />;
+      case 'production_control':
+        return <ProductionControl />;
       case 'bills':
         return <BillManagement />;
       case 'roznamcha':

@@ -48,6 +48,31 @@ enum LaborStatus {
   FIRED
 }
 
+enum LaborDepartment {
+  PRESSMAN
+  UPPERMAN
+  PRINTING
+  DC
+  MACHINEMAN
+  PACKING
+}
+
+enum ProductionStage {
+  STAGE_PRESSMAN
+  STAGE_UPPERMAN
+  STAGE_PRINTING
+  STAGE_DC
+  STAGE_MACHINEMAN
+  STAGE_PACKING
+}
+
+enum ProductionOrderSource {
+  MANUAL
+  PRESSMAN_FLOW
+  UPPER_PRINT_PARALLEL
+  STAGE_FLOW
+}
+
 model Unit {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -72,6 +97,7 @@ model Article {
   laborWork  LaborWorkEntry[]
   billLines  BillLine[]
   materials  MaterialPurchase[]
+  productionOrders ProductionOrder[]
 }
 
 model ExpenseCategory {
@@ -79,15 +105,6 @@ model ExpenseCategory {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-}
-
-model LaborCategory {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  labors LaborProfile[]
 }
 
 model PaymentCalculationType {
@@ -170,21 +187,21 @@ model ExpenseEntry {
 model LaborProfile {
   id               String                   @id @default(cuid())
   name             String
-  categoryId       String
+  department       LaborDepartment          @default(PRESSMAN)
   paymentTypeId    String
   defaultRate      Decimal?
   status           LaborStatus              @default(ACTIVE)
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
-  category     LaborCategory           @relation(fields: [categoryId], references: [id])
   paymentType  PaymentCalculationType  @relation(fields: [paymentTypeId], references: [id])
   rates        LaborRate[]
   workEntries  LaborWorkEntry[]
   advances     LaborAdvance[]
   expenses     ExpenseEntry[]
+  productionOrders ProductionOrder[]
 
-  @@index([categoryId])
+  @@index([department])
 }
 
 model LaborRate {
@@ -347,4 +364,27 @@ model PartyPayment {
   materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
 
   @@index([partyId, date])
+}
+
+model ProductionOrder {
+  id            String                @id @default(cuid())
+  department    LaborDepartment
+  stage         ProductionStage
+  articleId     String
+  laborId       String?
+  quantityDozen Decimal
+  pricePerDozen Decimal               @default(0)
+  completedDozen Decimal              @default(0)
+  forwardedDozen Decimal              @default(0)
+  source        ProductionOrderSource @default(MANUAL)
+  isClosed      Boolean               @default(false)
+  closedAt      DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  article Article      @relation(fields: [articleId], references: [id])
+  labor   LaborProfile? @relation(fields: [laborId], references: [id])
+
+  @@index([department, isClosed, updatedAt])
+  @@index([articleId, department])
 }

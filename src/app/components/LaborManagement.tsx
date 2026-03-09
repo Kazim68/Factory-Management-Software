@@ -27,7 +27,7 @@ import {
 } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Plus, Eye, Wallet } from "lucide-react";
+import { Plus, Eye, Wallet, Banknote, X } from "lucide-react";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
 import { configApi, expenseApi, laborApi } from "../lib/api";
 import { TabReportActions } from "./TabReportActions";
@@ -68,31 +68,23 @@ export function LaborManagement() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [laborDialog, setLaborDialog] = useState(false);
-  const [workDialog, setWorkDialog] = useState(false);
   const [kharchaDialog, setKharchaDialog] = useState(false);
   const [ledgerDialog, setLedgerDialog] = useState(false);
-  const [categoryDialog, setCategoryDialog] = useState(false);
+  const [payDialog, setPayDialog] = useState(false);
 
   const [viewingLaborId, setViewingLaborId] = useState<string | null>(null);
   const [editingLaborId, setEditingLaborId] = useState<string | null>(null);
-  const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
   const [editingAdvanceId, setEditingAdvanceId] = useState<string | null>(null);
-  const [editingCategory, setEditingCategory] = useState<ApiLaborCategory | null>(null);
   const [activeTab, setActiveTab] = useState("labors");
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
+  const [laborSearchQuery, setLaborSearchQuery] = useState("");
+  const [payingLaborId, setPayingLaborId] = useState<string | null>(null);
 
   const [laborForm, setLaborForm] = useState({
     name: "",
     categoryId: "",
     paymentTypeId: "",
     defaultRate: "",
-  });
-
-  const [workForm, setWorkForm] = useState({
-    laborId: "",
-    date: getCurrentDate(),
-    articleId: "",
-    quantity: "",
-    rate: "",
   });
 
   const [kharchaForm, setKharchaForm] = useState({
@@ -102,8 +94,13 @@ export function LaborManagement() {
     amount: "",
     reason: "",
   });
+  const [payForm, setPayForm] = useState({
+    date: getCurrentDate(),
+    amount: "",
+    mode: "CASH" as "CASH" | "KHARCHA_ADVANCE",
+    description: "",
+  });
 
-  const [categoryForm, setCategoryForm] = useState({ name: "" });
 
   const getLaborName = (laborId?: string | null) =>
     allProfiles.find((profile) => profile.id === laborId)?.name || "Unknown";
@@ -113,9 +110,6 @@ export function LaborManagement() {
 
   const getPaymentTypeName = (paymentTypeId?: string | null) =>
     paymentTypes.find((paymentType) => paymentType.id === paymentTypeId)?.name || "Unknown";
-
-  const getArticleName = (articleId?: string | null) =>
-    articles.find((article) => article.id === articleId)?.name || "Unknown";
 
   const getExpenseCategoryName = (categoryId?: string | null) =>
     expenseCategories.find((category) => category.id === categoryId)?.name || "Unknown";
@@ -274,84 +268,6 @@ export function LaborManagement() {
     }
   };
 
-  const handleWorkSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!workForm.laborId || !workForm.articleId) {
-      toast.error("Please select labor and article");
-      return;
-    }
-
-    const quantity = parseFloat(workForm.quantity);
-    const rate = parseFloat(workForm.rate);
-    if (!Number.isFinite(quantity) || !Number.isFinite(rate)) {
-      toast.error("Enter valid quantity and rate");
-      return;
-    }
-
-    const total = quantity * rate;
-
-    try {
-      if (editingWorkId) {
-        const current = workEntries.find((entry) => entry.id === editingWorkId);
-        await laborApi.updateWorkEntry(editingWorkId, {
-          laborId: workForm.laborId,
-          articleId: workForm.articleId,
-          startDate: workForm.date,
-          endDate: workForm.date,
-          quantity,
-          rate,
-          total,
-        }, {
-          itemLabel: getLaborName(workForm.laborId),
-          fieldLabels: {
-            laborId: getLaborName(workForm.laborId),
-            articleId: getArticleName(workForm.articleId),
-          },
-          previousFieldLabels: {
-            laborId: getLaborName(current?.laborId),
-            articleId: getArticleName(current?.articleId),
-          },
-          previousValues: {
-            laborId: current?.laborId,
-            articleId: current?.articleId || undefined,
-            startDate: current?.startDate?.slice(0, 10),
-            endDate: current?.endDate?.slice(0, 10),
-            quantity: current?.quantity,
-            rate: current?.rate,
-            total: current?.total,
-          },
-        });
-        toast.success("Work entry updated");
-      } else {
-        await laborApi.createWorkEntry({
-          laborId: workForm.laborId,
-          articleId: workForm.articleId,
-          startDate: workForm.date,
-          endDate: workForm.date,
-          quantity,
-          rate,
-          total,
-        }, {
-          itemLabel: getLaborName(workForm.laborId),
-        });
-        toast.success("Work entry added");
-      }
-      await loadData();
-      setWorkForm({
-        laborId: "",
-        date: getCurrentDate(),
-        articleId: "",
-        quantity: "",
-        rate: "",
-      });
-      setEditingWorkId(null);
-      setWorkDialog(false);
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to add work entry.");
-    }
-  };
-
   const handleKharchaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!kharchaForm.laborId) {
@@ -436,7 +352,7 @@ export function LaborManagement() {
   const deleteLabor = async (laborId: string) => {
     if (!confirm("Fire this labor profile?")) return;
     try {
-      await laborApi.deleteProfile(laborId, {
+      await laborApi.fireProfile(laborId, {
         itemLabel: getLaborName(laborId),
       });
       toast.success("Labor moved to fired status");
@@ -447,30 +363,63 @@ export function LaborManagement() {
     }
   };
 
-  const startEditWork = (work: UiWorkEntry) => {
-    setEditingWorkId(work.id);
-    setWorkForm({
-      laborId: work.laborId,
-      date: work.startDate.slice(0, 10),
-      articleId: work.articleId,
-      quantity: String(work.quantity),
-      rate: String(work.rate),
+  const openPayDialog = (labor: ApiLaborProfile) => {
+    const summary = getLaborSummary(labor.id);
+    const totalPaid = paidByLabor[labor.id] ?? 0;
+    const pendingPay = Math.max(summary.netPayable - totalPaid, 0);
+    setPayingLaborId(labor.id);
+    setPayForm({
+      date: getCurrentDate(),
+      amount: pendingPay > 0 ? String(Number(pendingPay.toFixed(2))) : "",
+      mode: "CASH",
+      description: "",
     });
-    setWorkDialog(true);
+    setPayDialog(true);
   };
 
-  const deleteWork = async (workId: string) => {
-    if (!confirm("Delete this work entry?")) return;
+  const handleLaborPaySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!payingLaborId) return;
+
+    const amount = Number(payForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a valid amount.");
+      return;
+    }
+
+    const summary = getLaborSummary(payingLaborId);
+    const totalPaid = paidByLabor[payingLaborId] ?? 0;
+    const pendingPay = Math.max(summary.netPayable - totalPaid, 0);
+    if (payForm.mode === "CASH" && amount > pendingPay) {
+      toast.error(`Amount cannot exceed pending pay ${formatCurrency(pendingPay)}.`);
+      return;
+    }
+
     try {
-      const work = workEntries.find((entry) => entry.id === workId);
-      await laborApi.deleteWorkEntry(workId, {
-        itemLabel: getLaborName(work?.laborId),
-      });
-      toast.success("Work entry deleted");
+      if (payForm.mode === "KHARCHA_ADVANCE") {
+        await laborApi.createAdvance({
+          laborId: payingLaborId,
+          date: payForm.date,
+          amount,
+          reason: payForm.description || "Labor advance",
+        });
+      } else {
+        await expenseApi.createExpense({
+          date: payForm.date,
+          laborId: payingLaborId,
+          module: "LABOR",
+          paymentType: "CASH",
+          amount,
+          description: payForm.description || "Labor cash payment",
+        });
+      }
+      toast.success("Labor payment recorded.");
+      setPayDialog(false);
+      setPayingLaborId(null);
       await loadData();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to delete work entry.");
+      toast.error("Failed to record labor payment.");
     }
   };
 
@@ -501,46 +450,15 @@ export function LaborManagement() {
     }
   };
 
-
-
-  const handleCategorySubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    try {
-      if (editingCategory) {
-        await configApi.updateLaborCategory(editingCategory.id, {
-          name: categoryForm.name.trim(),
-        });
-        toast.success("Labor category updated");
-      } else {
-        await configApi.createLaborCategory({ name: categoryForm.name.trim() });
-        toast.success("Labor category added");
-      }
-      setCategoryForm({ name: "" });
-      setEditingCategory(null);
-      setCategoryDialog(false);
-      await loadData();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to save labor category.");
-    }
-  };
-
-  const startCategoryEdit = (category: ApiLaborCategory) => {
-    setEditingCategory(category);
-    setCategoryForm({ name: category.name });
-    setCategoryDialog(true);
-  };
-
-  const handleCategoryDelete = async (category: ApiLaborCategory) => {
-    if (!confirm(`Delete labor category "${category.name}"?`)) return;
-    try {
-      await configApi.deleteLaborCategory(category.id);
-      toast.success("Labor category deleted");
-      await loadData();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to delete labor category.");
-    }
+  const openFilteredLaborTabFromLedger = (
+    laborId: string,
+    tab: "work" | "kharcha" | "labor-paid-today"
+  ) => {
+    const laborName = allProfiles.find((item) => item.id === laborId)?.name ?? "";
+    setLaborSearchQuery(laborName);
+    setActiveTab(tab);
+    setViewingLaborId(null);
+    setLedgerDialog(false);
   };
 
   const getLaborSummary = (laborId: string) =>
@@ -565,6 +483,30 @@ export function LaborManagement() {
   const paidTodayEntries = laborPaymentsToday.filter(
     (entry) => !entry.laborAdvanceId
   );
+  const normalizedLaborQuery = laborSearchQuery.trim().toLowerCase();
+  const laborMatchesFilters = (labor: ApiLaborProfile) => {
+    const matchesDepartment =
+      departmentFilter === "ALL" ||
+      labor.categoryId === departmentFilter ||
+      labor.department === departmentFilter;
+    const matchesSearch =
+      !normalizedLaborQuery ||
+      labor.name.toLowerCase().includes(normalizedLaborQuery);
+    return matchesDepartment && matchesSearch;
+  };
+  const filteredLaborIds = new Set(
+    allProfiles.filter(laborMatchesFilters).map((labor) => labor.id)
+  );
+  const filteredProfiles = profiles.filter((labor) => filteredLaborIds.has(labor.id));
+  const filteredWorkEntries = workEntries.filter((entry) =>
+    filteredLaborIds.has(entry.laborId)
+  );
+  const filteredPaidTodayEntries = paidTodayEntries.filter(
+    (entry) => entry.laborId && filteredLaborIds.has(entry.laborId)
+  );
+  const filteredAdvanceEntries = advanceEntries.filter((entry) =>
+    filteredLaborIds.has(entry.laborId)
+  );
 
   return (
     <div className="space-y-6">
@@ -575,32 +517,79 @@ export function LaborManagement() {
         <CardContent>
           <Tabs defaultValue="labors" value={activeTab} onValueChange={setActiveTab}>
             <div className="flex items-center justify-between gap-3">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
               <TabsTrigger value="work">Work Entries</TabsTrigger>
               <TabsTrigger value="labor-paid-today">Labor Paid Today</TabsTrigger>
               <TabsTrigger value="kharcha">Kharcha (Advances)</TabsTrigger>
-              <TabsTrigger value="labor-categories">Labor Categories</TabsTrigger>
               </TabsList>
               <TabReportActions
                 title={`Labor ${activeTab} report`}
                 selector={`[data-report-tab="${activeTab}"]`}
               />
             </div>
-
-            <TabsContent value="labors" className="space-y-4" data-report-tab="labors">
-              <div className="flex justify-end">
-                <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Labor
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+                <Label
+                  htmlFor="labor-search-filter"
+                  className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground"
+                >
+                  Search Labor
+                </Label>
+                <div className="relative">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute left-1 top-1/2 h-7 w-7 -translate-y-1/2"
+                    onClick={() => setLaborSearchQuery("")}
+                    disabled={!laborSearchQuery}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                  <Input
+                    id="labor-search-filter"
+                    value={laborSearchQuery}
+                    onChange={(e) => setLaborSearchQuery(e.target.value)}
+                    placeholder="Search by labor name..."
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+              <div className="min-w-[220px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Department Filter
+                </Label>
+                <Select
+                  value={departmentFilter}
+                  onValueChange={setDepartmentFilter}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Departments</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                {activeTab === "labors" && (
+                  <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Labor
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
                     <DialogHeader>
-                  <DialogTitle>{editingLaborId ? "Edit" : "Add"} Labor</DialogTitle>
-                </DialogHeader>
+                      <DialogTitle>{editingLaborId ? "Edit" : "Add"} Labor</DialogTitle>
+                    </DialogHeader>
                     <form onSubmit={handleLaborSubmit} className="space-y-4">
                       <div>
                         <Label>Labor Name</Label>
@@ -613,7 +602,7 @@ export function LaborManagement() {
                         />
                       </div>
                       <div>
-                        <Label>Category</Label>
+                        <Label>Department</Label>
                         <Select
                           value={laborForm.categoryId}
                           onValueChange={(value) =>
@@ -621,7 +610,7 @@ export function LaborManagement() {
                           }
                         >
                           <SelectTrigger>
-                            <SelectValue placeholder="Select category" />
+                            <SelectValue placeholder="Select department" />
                           </SelectTrigger>
                           <SelectContent>
                             {categories.map((cat) => (
@@ -674,374 +663,28 @@ export function LaborManagement() {
                         >
                           Cancel
                         </Button>
-                      <Button type="submit">
-                        {editingLaborId ? "Update" : "Save"}
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Payment Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Total Earned</TableHead>
-                    <TableHead>Total Paid</TableHead>
-                    <TableHead>Kharcha</TableHead>
-                    <TableHead>Net Payable</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={9}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading labor profiles...
-                      </TableCell>
-                    </TableRow>
-                  ) : profiles.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={9}
-                        className="text-center text-muted-foreground"
-                      >
-                        No labors yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    profiles.map((labor) => {
-                      const summary = getLaborSummary(labor.id);
-                      const totalPaid = paidByLabor[labor.id] ?? 0;
-                      const adjustedNetPayable = summary.netPayable - totalPaid;
-                      return (
-                        <TableRow key={labor.id}>
-                          <TableCell>{labor.name}</TableCell>
-                          <TableCell>{labor.category?.name || "-"}</TableCell>
-                          <TableCell>{labor.paymentType?.name || "-"}</TableCell>
-                          <TableCell>{labor.status}</TableCell>
-                          <TableCell>
-                            {formatCurrency(summary.totalEarnings)}
-                          </TableCell>
-                          <TableCell>{formatCurrency(totalPaid)}</TableCell>
-                          <TableCell>
-                            {formatCurrency(summary.totalAdvances)}
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={
-                                adjustedNetPayable > 0 ? "text-green-600" : ""
-                              }
-                            >
-                              {formatCurrency(adjustedNetPayable)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setViewingLaborId(labor.id);
-                                  setLedgerDialog(true);
-                                }}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => startEditLabor(labor)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => deleteLabor(labor.id)}
-                              >
-                                Delete
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="work" className="space-y-4" data-report-tab="work">
-              <div className="flex justify-end">
-                <Dialog open={workDialog} onOpenChange={setWorkDialog}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Work Entry
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                  <DialogTitle>
-                    {editingWorkId ? "Edit" : "Add"} Work Entry
-                  </DialogTitle>
-                </DialogHeader>
-                    <form onSubmit={handleWorkSubmit} className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>Date</Label>
-                          <Input
-                            type="date"
-                            value={workForm.date}
-                            onChange={(e) =>
-                              setWorkForm({
-                                ...workForm,
-                                date: e.target.value,
-                              })
-                            }
-                            required
-                          />
-                        </div>
-                        <div>
-                          <Label>Labor</Label>
-                          <Select
-                            value={workForm.laborId}
-                            onValueChange={(value) =>
-                              setWorkForm({
-                                ...workForm,
-                                laborId: value,
-                              })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select labor" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {profiles.map((labor) => (
-                                <SelectItem key={labor.id} value={labor.id}>
-                                  {labor.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Article</Label>
-                          <Select
-                            value={workForm.articleId}
-                            onValueChange={(value) =>
-                              setWorkForm({
-                                ...workForm,
-                                articleId: value,
-                              })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select article" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {articles.map((article) => (
-                                <SelectItem key={article.id} value={article.id}>
-                                  {article.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Quantity</Label>
-                          <Input
-                            type="number"
-                            step="1"
-                            value={workForm.quantity}
-                            onChange={(e) =>
-                              setWorkForm({
-                                ...workForm,
-                                quantity: e.target.value,
-                              })
-                            }
-                            required
-                          />
-                        </div>
-                        <div>
-                          <Label>Rate</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={workForm.rate}
-                            onChange={(e) =>
-                              setWorkForm({
-                                ...workForm,
-                                rate: e.target.value,
-                              })
-                            }
-                            required
-                          />
-                        </div>
-                      </div>
-                      {workForm.quantity && workForm.rate && (
-                        <div className="p-3 bg-muted rounded">
-                          <p>
-                            Total: {" "}
-                            {formatCurrency(
-                              parseFloat(workForm.quantity) *
-                                parseFloat(workForm.rate)
-                            )}
-                          </p>
-                        </div>
-                      )}
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setWorkDialog(false)}
-                        >
-                          Cancel
-                        </Button>
                         <Button type="submit">
-                          {editingWorkId ? "Update" : "Add"} Work
+                          {editingLaborId ? "Update" : "Save"}
                         </Button>
                       </div>
                     </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Labor</TableHead>
-                    <TableHead>Article</TableHead>
-                    <TableHead>Quantity</TableHead>
-                    <TableHead>Rate</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading work entries...
-                      </TableCell>
-                    </TableRow>
-                  ) : workEntries.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center text-muted-foreground"
-                      >
-                        No work entries yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    workEntries.map((work) => (
-                      <TableRow key={work.id}>
-                        <TableCell>{formatDate(work.startDate)}</TableCell>
-                        <TableCell>{work.laborName}</TableCell>
-                        <TableCell>{work.articleName}</TableCell>
-                        <TableCell>{Number(work.quantity)}</TableCell>
-                        <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
-                        <TableCell>{formatCurrency(Number(work.total))}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => startEditWork(work)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => deleteWork(work.id)}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="labor-paid-today" className="space-y-4" data-report-tab="labor-paid-today">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Labor Paid Today</h3>
-                <span className="text-sm text-muted-foreground">
-                  {formatDate(getCurrentDate())}
-                </span>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Labor</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Description</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading labor payments...
-                      </TableCell>
-                    </TableRow>
-                  ) : paidTodayEntries.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        No labor payments today
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    paidTodayEntries.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell>{formatDate(entry.date)}</TableCell>
-                        <TableCell>{entry.labor?.name || "-"}</TableCell>
-                        <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
-                        <TableCell>{entry.description || "-"}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="kharcha" className="space-y-4" data-report-tab="kharcha">
-              <div className="flex justify-end">
-                <Dialog open={kharchaDialog} onOpenChange={setKharchaDialog}>
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Wallet className="mr-2 h-4 w-4" />
-                      Add Kharcha
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
+                    </DialogContent>
+                  </Dialog>
+                )}
+                {activeTab === "kharcha" && (
+                  <Dialog open={kharchaDialog} onOpenChange={setKharchaDialog}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Wallet className="mr-2 h-4 w-4" />
+                        Add Kharcha
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
                     <DialogHeader>
-                  <DialogTitle>
-                    {editingAdvanceId ? "Edit" : "Record"} Kharcha (Advance)
-                  </DialogTitle>
-                </DialogHeader>
+                      <DialogTitle>
+                        {editingAdvanceId ? "Edit" : "Record"} Kharcha (Advance)
+                      </DialogTitle>
+                    </DialogHeader>
                     <form onSubmit={handleKharchaSubmit} className="space-y-4">
                       <div>
                         <Label>Date</Label>
@@ -1139,9 +782,209 @@ export function LaborManagement() {
                         </Button>
                       </div>
                     </form>
-                  </DialogContent>
-                </Dialog>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </div>
+            </div>
+
+            <TabsContent value="labors" className="space-y-4" data-report-tab="labors">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Payment Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Total Earned</TableHead>
+                    <TableHead>Total Paid</TableHead>
+                    <TableHead>Kharcha</TableHead>
+                    <TableHead>Net Payable</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={9}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading labor profiles...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredProfiles.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={9}
+                        className="text-center text-muted-foreground"
+                      >
+                        No labors yet
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredProfiles.map((labor) => {
+                      const summary = getLaborSummary(labor.id);
+                      const totalPaid = paidByLabor[labor.id] ?? 0;
+                      const adjustedNetPayable = summary.netPayable - totalPaid;
+                      return (
+                        <TableRow key={labor.id}>
+                          <TableCell>{labor.name}</TableCell>
+                          <TableCell>{labor.category?.name || "-"}</TableCell>
+                          <TableCell>{labor.paymentType?.name || "-"}</TableCell>
+                          <TableCell>{labor.status}</TableCell>
+                          <TableCell>
+                            {formatCurrency(summary.totalEarnings)}
+                          </TableCell>
+                          <TableCell>{formatCurrency(totalPaid)}</TableCell>
+                          <TableCell>
+                            {formatCurrency(summary.totalAdvances)}
+                          </TableCell>
+                          <TableCell>
+                            <span
+                              className={
+                                adjustedNetPayable > 0 ? "text-green-600" : ""
+                              }
+                            >
+                              {formatCurrency(adjustedNetPayable)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setViewingLaborId(labor.id);
+                                  setLedgerDialog(true);
+                                }}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openPayDialog(labor)}
+                              >
+                                <Banknote className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startEditLabor(labor)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => deleteLabor(labor.id)}
+                              >
+                                Fire
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </TabsContent>
+
+            <TabsContent value="work" className="space-y-4" data-report-tab="work">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Labor</TableHead>
+                    <TableHead>Article</TableHead>
+                    <TableHead>Quantity</TableHead>
+                    <TableHead>Rate</TableHead>
+                    <TableHead>Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading work entries...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredWorkEntries.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="text-center text-muted-foreground"
+                      >
+                        No work entries yet
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredWorkEntries.map((work) => (
+                      <TableRow key={work.id}>
+                        <TableCell>{formatDate(work.startDate)}</TableCell>
+                        <TableCell>{work.laborName}</TableCell>
+                        <TableCell>{work.articleName}</TableCell>
+                        <TableCell>{Number(work.quantity)}</TableCell>
+                        <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
+                        <TableCell>{formatCurrency(Number(work.total))}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TabsContent>
+
+            <TabsContent value="labor-paid-today" className="space-y-4" data-report-tab="labor-paid-today">
+              <div className="flex items-center justify-between">
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Labor</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Description</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground"
+                      >
+                        Loading labor payments...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredPaidTodayEntries.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-muted-foreground"
+                      >
+                        No labor payments today
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredPaidTodayEntries.map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell>{formatDate(entry.date)}</TableCell>
+                        <TableCell>{entry.labor?.name || "-"}</TableCell>
+                        <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
+                        <TableCell>{entry.description || "-"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TabsContent>
+
+            <TabsContent value="kharcha" className="space-y-4" data-report-tab="kharcha">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1162,7 +1005,7 @@ export function LaborManagement() {
                         Loading advances...
                       </TableCell>
                     </TableRow>
-                  ) : advanceEntries.length === 0 ? (
+                  ) : filteredAdvanceEntries.length === 0 ? (
                     <TableRow>
                       <TableCell
                         colSpan={4}
@@ -1172,7 +1015,7 @@ export function LaborManagement() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    advanceEntries.map((kharcha) => (
+                    filteredAdvanceEntries.map((kharcha) => (
                       <TableRow key={kharcha.id}>
                         <TableCell>{formatDate(kharcha.date)}</TableCell>
                         <TableCell>{kharcha.laborName}</TableCell>
@@ -1194,101 +1037,6 @@ export function LaborManagement() {
                               variant="ghost"
                               onClick={() => deleteAdvance(kharcha.id)}
                             >
-                              Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="labor-categories" className="space-y-4" data-report-tab="labor-categories">
-              <div className="flex justify-end">
-                <Dialog
-                  open={categoryDialog}
-                  onOpenChange={(open) => {
-                    setCategoryDialog(open);
-                    if (!open) {
-                      setEditingCategory(null);
-                      setCategoryForm({ name: "" });
-                    }
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button
-                      onClick={() => {
-                        setEditingCategory(null);
-                        setCategoryForm({ name: "" });
-                      }}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Labor Category
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingCategory ? "Edit Labor Category" : "Add Labor Category"}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleCategorySubmit} className="space-y-4">
-                      <div>
-                        <Label>Category Name</Label>
-                        <Input
-                          value={categoryForm.name}
-                          onChange={(event) =>
-                            setCategoryForm({ name: event.target.value })
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setCategoryDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">Save</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[140px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={2} className="text-center text-muted-foreground">
-                        Loading labor categories...
-                      </TableCell>
-                    </TableRow>
-                  ) : categories.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={2} className="text-center text-muted-foreground">
-                        No labor categories yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    categories.map((category) => (
-                      <TableRow key={category.id}>
-                        <TableCell>{category.name}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="ghost" onClick={() => startCategoryEdit(category)}>
-                              Edit
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => handleCategoryDelete(category)}>
                               Delete
                             </Button>
                           </div>
@@ -1324,6 +1072,19 @@ export function LaborManagement() {
             const paymentRows = paidEntries.filter(
               (entry) => entry.laborId === viewingLaborId
             );
+            const sortedWorkRows = [...workRows].sort(
+              (a, b) =>
+                new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
+            );
+            const sortedKharchaRows = [...summary.advances].sort(
+              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+            );
+            const sortedPaymentRows = [...paymentRows].sort(
+              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+            );
+            const latestWorkRows = sortedWorkRows.slice(0, 5);
+            const latestKharchaRows = sortedKharchaRows.slice(0, 5);
+            const latestPaymentRows = sortedPaymentRows.slice(0, 5);
             return (
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
@@ -1359,7 +1120,20 @@ export function LaborManagement() {
                   </Card>
                 </div>
                 <div>
-                  <h3 className="mb-2">Work History</h3>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3>Work History</h3>
+                    {sortedWorkRows.length > 5 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          openFilteredLaborTabFromLedger(viewingLaborId, "work")
+                        }
+                      >
+                        See More
+                      </Button>
+                    )}
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1371,20 +1145,44 @@ export function LaborManagement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {workRows.map((work) => (
-                        <TableRow key={work.id}>
-                          <TableCell>{formatDate(work.startDate)}</TableCell>
-                          <TableCell>{work.articleName}</TableCell>
-                          <TableCell>{Number(work.quantity)}</TableCell>
-                          <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
-                          <TableCell>{formatCurrency(Number(work.total))}</TableCell>
+                      {latestWorkRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={5}
+                            className="text-center text-muted-foreground"
+                          >
+                            No work history yet
+                          </TableCell>
                         </TableRow>
-                      ))}
+                      ) : (
+                        latestWorkRows.map((work) => (
+                          <TableRow key={work.id}>
+                            <TableCell>{formatDate(work.startDate)}</TableCell>
+                            <TableCell>{work.articleName}</TableCell>
+                            <TableCell>{Number(work.quantity)}</TableCell>
+                            <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
+                            <TableCell>{formatCurrency(Number(work.total))}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>
                 <div>
-                  <h3 className="mb-2">Kharcha History</h3>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3>Kharcha History</h3>
+                    {sortedKharchaRows.length > 5 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          openFilteredLaborTabFromLedger(viewingLaborId, "kharcha")
+                        }
+                      >
+                        See More
+                      </Button>
+                    )}
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1394,18 +1192,45 @@ export function LaborManagement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {summary.advances.map((kharcha) => (
-                        <TableRow key={kharcha.id}>
-                          <TableCell>{formatDate(kharcha.date)}</TableCell>
-                          <TableCell>{formatCurrency(Number(kharcha.amount))}</TableCell>
-                          <TableCell>{kharcha.reason || "-"}</TableCell>
+                      {latestKharchaRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={3}
+                            className="text-center text-muted-foreground"
+                          >
+                            No kharcha history yet
+                          </TableCell>
                         </TableRow>
-                      ))}
+                      ) : (
+                        latestKharchaRows.map((kharcha) => (
+                          <TableRow key={kharcha.id}>
+                            <TableCell>{formatDate(kharcha.date)}</TableCell>
+                            <TableCell>{formatCurrency(Number(kharcha.amount))}</TableCell>
+                            <TableCell>{kharcha.reason || "-"}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>
                 <div>
-                  <h3 className="mb-2">Labor Payments</h3>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3>Labor Payments</h3>
+                    {sortedPaymentRows.length > 5 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          openFilteredLaborTabFromLedger(
+                            viewingLaborId,
+                            "labor-paid-today"
+                          )
+                        }
+                      >
+                        See More
+                      </Button>
+                    )}
+                  </div>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1415,7 +1240,7 @@ export function LaborManagement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {paymentRows.length === 0 ? (
+                      {latestPaymentRows.length === 0 ? (
                         <TableRow>
                           <TableCell
                             colSpan={3}
@@ -1425,7 +1250,7 @@ export function LaborManagement() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        paymentRows.map((payment) => (
+                        latestPaymentRows.map((payment) => (
                           <TableRow key={payment.id}>
                             <TableCell>{formatDate(payment.date)}</TableCell>
                             <TableCell>{formatCurrency(Number(payment.amount))}</TableCell>
@@ -1439,6 +1264,78 @@ export function LaborManagement() {
               </div>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={payDialog}
+        onOpenChange={(open) => {
+          setPayDialog(open);
+          if (!open) setPayingLaborId(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Pay Labor - {allProfiles.find((item) => item.id === payingLaborId)?.name || "-"}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleLaborPaySubmit} className="space-y-4">
+            <div>
+              <Label>Date</Label>
+              <Input
+                type="date"
+                value={payForm.date}
+                onChange={(e) => setPayForm({ ...payForm, date: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <Label>Payment Type</Label>
+              <Select
+                value={payForm.mode}
+                onValueChange={(value) =>
+                  setPayForm({
+                    ...payForm,
+                    mode: value as "CASH" | "KHARCHA_ADVANCE",
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Cash</SelectItem>
+                  <SelectItem value="KHARCHA_ADVANCE">Kharcha (Advance)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Amount</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={payForm.amount}
+                onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Input
+                value={payForm.description}
+                onChange={(e) => setPayForm({ ...payForm, description: e.target.value })}
+                placeholder="Optional note"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setPayDialog(false)}>
+                Cancel
+              </Button>
+              <Button type="submit">Save Payment</Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

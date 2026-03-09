@@ -21,6 +21,14 @@ export interface ApiLaborCategory {
   updatedAt: string;
 }
 
+export type ApiLaborDepartment =
+  | "PRESSMAN"
+  | "UPPERMAN"
+  | "PRINTING"
+  | "DC"
+  | "MACHINEMAN"
+  | "PACKING";
+
 export interface ApiPaymentType {
   id: string;
   name: string;
@@ -36,6 +44,7 @@ export interface ApiLaborProfile {
   id: string;
   name: string;
   categoryId: string;
+  department?: ApiLaborDepartment;
   paymentTypeId: string;
   defaultRate?: number | string | null;
   status: ApiLaborStatus;
@@ -244,4 +253,60 @@ export interface ApiPartyPayment {
   rexinePurchaseId?: string | null;
   materialPurchaseId?: string | null;
   createdAt: string;
+}
+
+export type ApiProductionStage =
+  | "STAGE_PRESSMAN"
+  | "STAGE_UPPERMAN"
+  | "STAGE_PRINTING"
+  | "STAGE_DC"
+  | "STAGE_MACHINEMAN"
+  | "STAGE_PACKING";
+
+export type ApiProductionOrderSource =
+  | "MANUAL"
+  | "PRESSMAN_FLOW"
+  | "UPPER_PRINT_PARALLEL"
+  | "STAGE_FLOW";
+
+export type ApiProductionOrderStatus =
+  | "INCOMPLETE"
+  | "PARTIALLY_COMPLETE"
+  | "COMPLETE";
+
+export interface ApiProductionOrder {
+  id: string;
+  department: ApiLaborDepartment;
+  departmentLabel: string;
+  stage: ApiProductionStage;
+  articleId: string;
+  laborId?: string | null;
+  quantityDozen: number;
+  pricePerDozen: number;
+  completedDozen: number;
+  forwardedDozen: number;
+  source: ApiProductionOrderSource;
+  isClosed: boolean;
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string | null;
+  status: ApiProductionOrderStatus;
+  article?: ApiArticle | null;
+  labor?: ApiLaborProfile | null;
+}
+
+export type ApiStockMode = "IN_STOCK" | "PACKED";
+
+export interface ApiStockSummary {
+  activeOrders: number;
+  wipDozen: number;
+  readyStockDozen: number;
+  packedStockDozen: number;
+}
+
+export interface ApiStockArticleRow {
+  articleId: string;
+  articleName: string;
+  articleCode?: string | null;
+  quantityDozen: number;
 }

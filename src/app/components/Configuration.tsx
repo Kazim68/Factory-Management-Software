@@ -33,6 +33,7 @@ import { TabReportActions } from "./TabReportActions";
 import type {
   ApiArticle,
   ApiExpenseCategory,
+  ApiLaborCategory,
   ApiPaymentType,
   ApiUnit,
 } from "../types/api";
@@ -44,6 +45,7 @@ export function Configuration() {
   const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ApiExpenseCategory[]>([]);
+  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>([]);
   const [status, setStatus] = useState<LoadState>("idle");
 
   const [unitDialog, setUnitDialog] = useState(false);
@@ -70,18 +72,20 @@ export function Configuration() {
   const loadConfig = async () => {
     setStatus("loading");
     try {
-      const [unitsData, articlesData, paymentData, expenseData] =
+      const [unitsData, articlesData, paymentData, expenseData, laborCategoryData] =
         await Promise.all([
           configApi.listUnits(),
           configApi.listArticles(),
           configApi.listPaymentTypes(),
           configApi.listExpenseCategories(),
+          configApi.listLaborCategories(),
         ]);
 
       setUnits(unitsData);
       setArticles(articlesData);
       setPaymentTypes(paymentData);
       setExpenseCategories(expenseData);
+      setLaborCategories(laborCategoryData);
       setStatus("idle");
     } catch (error) {
       console.error(error);
@@ -290,11 +294,12 @@ export function Configuration() {
         <CardContent>
           <Tabs defaultValue="units" value={activeTab} onValueChange={setActiveTab}>
             <div className="flex items-center justify-between gap-3">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="units">Units</TabsTrigger>
               <TabsTrigger value="articles">Articles</TabsTrigger>
               <TabsTrigger value="payment">Payment Types</TabsTrigger>
               <TabsTrigger value="expenses">Expense Categories</TabsTrigger>
+              <TabsTrigger value="labor-categories">Labor Categories</TabsTrigger>
               </TabsList>
               <TabReportActions
                 title={`Configuration ${activeTab} report`}
@@ -725,6 +730,30 @@ export function Configuration() {
                                 </Button>
                               </div>
                             </TableCell>
+                          </TableRow>
+                        ))}
+                </TableBody>
+              </Table>
+            </TabsContent>
+
+            <TabsContent value="labor-categories" className="space-y-4" data-report-tab="labor-categories">
+              <p className="text-sm text-muted-foreground">
+                Departments are fixed by system and used as labor categories.
+              </p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading
+                    ? renderEmpty(1, "Loading labor categories...")
+                    : laborCategories.length === 0
+                      ? renderEmpty(1, "No labor categories yet")
+                      : laborCategories.map((category) => (
+                          <TableRow key={category.id}>
+                            <TableCell>{category.name}</TableCell>
                           </TableRow>
                         ))}
                 </TableBody>

@@ -1,5 +1,18 @@
 import prisma from "../prisma.js";
 import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
+import {
+  getLaborDepartmentLabel,
+  normalizeLaborDepartment,
+} from "../constants/laborDepartments.js";
+
+const withCategory = (profile) => ({
+  ...profile,
+  categoryId: profile.department,
+  category: {
+    id: profile.department,
+    name: getLaborDepartmentLabel(profile.department),
+  },
+});
 
 export const listLaborProfiles = async (req, res) => {
   const { status = "ACTIVE" } = req.query;
@@ -12,46 +25,57 @@ export const listLaborProfiles = async (req, res) => {
 
   const profiles = await prisma.laborProfile.findMany({
     where,
-    include: { category: true, paymentType: true },
+    include: { paymentType: true },
     orderBy: { name: "asc" },
   });
-  res.json(profiles);
+  res.json(profiles.map(withCategory));
 };
 
 export const createLaborProfile = async (req, res) => {
+  const department = normalizeLaborDepartment(
+    req.body.department ?? req.body.categoryId
+  );
   const profile = await prisma.laborProfile.create({
     data: {
       name: req.body.name,
-      categoryId: req.body.categoryId,
+      department,
       paymentTypeId: req.body.paymentTypeId,
       defaultRate: req.body.defaultRate,
       status: req.body.status,
     },
+    include: { paymentType: true },
   });
-  res.status(201).json(profile);
+  res.status(201).json(withCategory(profile));
 };
 
 export const updateLaborProfile = async (req, res) => {
+  const departmentValue = req.body.department ?? req.body.categoryId;
   const profile = await prisma.laborProfile.update({
     where: { id: req.params.laborId },
     data: {
       name: req.body.name,
-      categoryId: req.body.categoryId,
+      department:
+        departmentValue === undefined
+          ? undefined
+          : normalizeLaborDepartment(departmentValue),
       paymentTypeId: req.body.paymentTypeId,
       defaultRate: req.body.defaultRate,
       status: req.body.status,
     },
+    include: { paymentType: true },
   });
-  res.json(profile);
+  res.json(withCategory(profile));
 };
 
-export const deleteLaborProfile = async (req, res) => {
+export const fireLaborProfile = async (req, res) => {
   await prisma.laborProfile.update({
     where: { id: req.params.laborId },
     data: { status: "FIRED" },
   });
   res.status(204).end();
 };
+
+export const deleteLaborProfile = fireLaborProfile;
 
 export const upsertLaborRate = async (req, res) => {
   const rate = await prisma.laborRate.upsert({

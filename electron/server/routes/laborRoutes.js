@@ -4,6 +4,7 @@ import {
   createLaborAdvance,
   createLaborProfile,
   createLaborWorkEntry,
+  fireLaborProfile,
   deleteLaborAdvance,
   deleteLaborProfile,
   deleteLaborWorkEntry,
@@ -22,6 +23,7 @@ const router = Router();
 router.get("/profiles", asyncHandler(listLaborProfiles));
 router.post("/profiles", asyncHandler(createLaborProfile));
 router.patch("/profiles/:laborId", asyncHandler(updateLaborProfile));
+router.post("/profiles/:laborId/fire", asyncHandler(fireLaborProfile));
 router.delete("/profiles/:laborId", asyncHandler(deleteLaborProfile));
 router.post("/rates", asyncHandler(upsertLaborRate));
 router.post("/work", asyncHandler(createLaborWorkEntry));
