@@ -13,7 +13,11 @@ export function Dashboard() {
     totalExpenses: 0,
     totalReceivables: 0,
     totalPayables: 0,
+    laborPendingPayable: 0,
+    laborPaid: 0,
     laborCost: 0,
+    materialPaid: 0,
+    materialPendingPayable: 0,
     materialCost: 0,
   });
 
@@ -60,7 +64,7 @@ export function Dashboard() {
         const totalReceivables = balances
           .filter((balance) => balance > 0)
           .reduce((sum, balance) => sum + balance, 0);
-        const totalPayables = balances
+        const partyPayables = balances
           .filter((balance) => balance < 0)
           .reduce((sum, balance) => sum + Math.abs(balance), 0);
 
@@ -81,10 +85,39 @@ export function Dashboard() {
           0
         );
 
+        const paidByLabor = expenses
+          .filter((entry) => entry.module === "LABOR" && entry.laborId && !entry.laborAdvanceId)
+          .reduce<Record<string, number>>((acc, entry) => {
+            if (!entry.laborId) return acc;
+            acc[entry.laborId] = (acc[entry.laborId] ?? 0) + Number(entry.amount ?? 0);
+            return acc;
+          }, {});
+        const laborPaid = Object.values(paidByLabor).reduce((sum, value) => sum + value, 0);
+
+        const laborPendingPayable = laborLedgers.reduce((sum, ledger, index) => {
+          const laborId = labors[index]?.id;
+          if (!laborId) return sum;
+          const pending = Number(ledger.netPayable ?? 0) - (paidByLabor[laborId] ?? 0);
+          return sum + Math.max(pending, 0);
+        }, 0);
+
+        const totalPayables = partyPayables + laborPendingPayable;
+
         const materialCost =
           chemicals.reduce((sum, item) => sum + Number(item.totalAmount), 0) +
           rexine.reduce((sum, item) => sum + Number(item.totalAmount), 0) +
           materials.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+        const materialPaid =
+          chemicals
+            .filter((item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH")
+            .reduce((sum, item) => sum + Number(item.totalAmount), 0) +
+          rexine
+            .filter((item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH")
+            .reduce((sum, item) => sum + Number(item.totalAmount), 0) +
+          materials
+            .filter((item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH")
+            .reduce((sum, item) => sum + Number(item.totalAmount), 0);
+        const materialPendingPayable = Math.max(materialCost - materialPaid, 0);
 
         setStats({
           totalParties: parties.length,
@@ -93,7 +126,11 @@ export function Dashboard() {
           totalExpenses: miscExpenses,
           totalReceivables,
           totalPayables,
+          laborPendingPayable,
+          laborPaid,
           laborCost,
+          materialPaid,
+          materialPendingPayable,
           materialCost,
         });
       } catch (error) {
@@ -159,7 +196,9 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl text-red-600">{formatCurrency(stats.totalPayables)}</div>
-            <p className="text-xs text-muted-foreground">Amount to pay</p>
+            <p className="text-xs text-muted-foreground">
+              Parties + Labor pending ({formatCurrency(stats.laborPendingPayable)} labor)
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -183,7 +222,9 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl">{formatCurrency(stats.laborCost)}</div>
-            <p className="text-xs text-muted-foreground">Total labor expenses</p>
+            <p className="text-xs text-muted-foreground">
+              Paid {formatCurrency(stats.laborPaid)} • Pending {formatCurrency(stats.laborPendingPayable)}
+            </p>
           </CardContent>
         </Card>
 
@@ -194,7 +235,9 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl">{formatCurrency(stats.materialCost)}</div>
-            <p className="text-xs text-muted-foreground">Chemical + Rexine + Materials</p>
+            <p className="text-xs text-muted-foreground">
+              Paid {formatCurrency(stats.materialPaid)} • Pending {formatCurrency(stats.materialPendingPayable)}
+            </p>
           </CardContent>
         </Card>
       </div>

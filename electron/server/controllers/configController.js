@@ -1,4 +1,9 @@
 import prisma from "../prisma.js";
+import {
+  LABOR_DEPARTMENTS,
+  getLaborDepartmentLabel,
+  normalizeLaborDepartment,
+} from "../constants/laborDepartments.js";
 
 export const listUnits = async (req, res) => {
   const units = await prisma.unit.findMany({ orderBy: { name: "asc" } });
@@ -63,30 +68,42 @@ export const deleteArticle = async (req, res) => {
 };
 
 export const listLaborCategories = async (req, res) => {
-  const categories = await prisma.laborCategory.findMany({
-    orderBy: { name: "asc" },
-  });
-  res.json(categories);
+  const now = new Date().toISOString();
+  res.json(
+    LABOR_DEPARTMENTS.map((department) => ({
+      id: department.id,
+      name: department.name,
+      createdAt: now,
+      updatedAt: now,
+    }))
+  );
 };
 
 export const createLaborCategory = async (req, res) => {
-  const category = await prisma.laborCategory.create({
-    data: { name: req.body.name },
+  const department = normalizeLaborDepartment(req.body.name, "");
+  if (!department) {
+    res.status(400).json({ error: "Invalid department." });
+    return;
+  }
+  const now = new Date().toISOString();
+  res.status(201).json({
+    id: department,
+    name: getLaborDepartmentLabel(department),
+    createdAt: now,
+    updatedAt: now,
   });
-  res.status(201).json(category);
 };
 
 export const updateLaborCategory = async (req, res) => {
-  const category = await prisma.laborCategory.update({
-    where: { id: req.params.categoryId },
-    data: { name: req.body.name },
+  res.status(405).json({
+    error: "Labor departments are fixed and cannot be edited.",
   });
-  res.json(category);
 };
 
 export const deleteLaborCategory = async (req, res) => {
-  await prisma.laborCategory.delete({ where: { id: req.params.categoryId } });
-  res.status(204).end();
+  res.status(405).json({
+    error: "Labor departments are fixed and cannot be deleted.",
+  });
 };
 
 export const listPaymentTypes = async (req, res) => {

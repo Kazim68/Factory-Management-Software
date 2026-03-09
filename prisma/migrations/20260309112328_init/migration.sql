@@ -7,8 +7,6 @@ CREATE TABLE "Unit" (
     "updatedAt" DATETIME NOT NULL
 );
 
-CREATE UNIQUE INDEX "Unit_name_key" ON "Unit"("name");
-
 -- CreateTable
 CREATE TABLE "Article" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -18,8 +16,6 @@ CREATE TABLE "Article" (
     "updatedAt" DATETIME NOT NULL
 );
 
-CREATE UNIQUE INDEX "Article_name_key" ON "Article"("name");
-
 -- CreateTable
 CREATE TABLE "ExpenseCategory" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -27,18 +23,6 @@ CREATE TABLE "ExpenseCategory" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
-
-CREATE UNIQUE INDEX "ExpenseCategory_name_key" ON "ExpenseCategory"("name");
-
--- CreateTable
-CREATE TABLE "LaborCategory" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
-);
-
-CREATE UNIQUE INDEX "LaborCategory_name_key" ON "LaborCategory"("name");
 
 -- CreateTable
 CREATE TABLE "PaymentCalculationType" (
@@ -50,8 +34,6 @@ CREATE TABLE "PaymentCalculationType" (
     CONSTRAINT "PaymentCalculationType_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE UNIQUE INDEX "PaymentCalculationType_name_key" ON "PaymentCalculationType"("name");
-
 -- CreateTable
 CREATE TABLE "Party" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -62,62 +44,63 @@ CREATE TABLE "Party" (
     "updatedAt" DATETIME NOT NULL
 );
 
-CREATE UNIQUE INDEX "Party_name_key" ON "Party"("name");
-
 -- CreateTable
 CREATE TABLE "PartyLedgerEntry" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "partyId" TEXT NOT NULL,
+    "billId" TEXT,
     "date" DATETIME NOT NULL,
     "reference" TEXT,
     "description" TEXT,
-    "debit" DECIMAL NOT NULL DEFAULT 0,
-    "credit" DECIMAL NOT NULL DEFAULT 0,
-    "runningBalance" DECIMAL,
+    "balance" DECIMAL NOT NULL DEFAULT 0,
+    "chemicalPurchaseId" TEXT,
+    "rexinePurchaseId" TEXT,
+    "materialPurchaseId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "PartyLedgerEntry_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    CONSTRAINT "PartyLedgerEntry_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "PartyLedgerEntry_billId_fkey" FOREIGN KEY ("billId") REFERENCES "Bill" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "PartyLedgerEntry_chemicalPurchaseId_fkey" FOREIGN KEY ("chemicalPurchaseId") REFERENCES "ChemicalPurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "PartyLedgerEntry_rexinePurchaseId_fkey" FOREIGN KEY ("rexinePurchaseId") REFERENCES "RexinePurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "PartyLedgerEntry_materialPurchaseId_fkey" FOREIGN KEY ("materialPurchaseId") REFERENCES "MaterialPurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-
-CREATE INDEX "PartyLedgerEntry_partyId_date_idx" ON "PartyLedgerEntry"("partyId", "date");
 
 -- CreateTable
 CREATE TABLE "ExpenseEntry" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "date" DATETIME NOT NULL,
-    "categoryId" TEXT NOT NULL,
     "partyId" TEXT,
+    "laborId" TEXT,
     "module" TEXT NOT NULL DEFAULT 'MISC',
+    "paymentType" TEXT NOT NULL DEFAULT 'CASH',
     "amount" DECIMAL NOT NULL,
     "description" TEXT,
     "chemicalPurchaseId" TEXT,
     "rexinePurchaseId" TEXT,
     "materialPurchaseId" TEXT,
     "laborAdvanceId" TEXT,
+    "source" TEXT NOT NULL DEFAULT 'MANUAL',
+    "sourceSystem" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "ExpenseEntry_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "ExpenseCategory" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "ExpenseEntry_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "ExpenseEntry_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "ExpenseEntry_chemicalPurchaseId_fkey" FOREIGN KEY ("chemicalPurchaseId") REFERENCES "ChemicalPurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "ExpenseEntry_rexinePurchaseId_fkey" FOREIGN KEY ("rexinePurchaseId") REFERENCES "RexinePurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "ExpenseEntry_materialPurchaseId_fkey" FOREIGN KEY ("materialPurchaseId") REFERENCES "MaterialPurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "ExpenseEntry_laborAdvanceId_fkey" FOREIGN KEY ("laborAdvanceId") REFERENCES "LaborAdvance" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE INDEX "ExpenseEntry_date_idx" ON "ExpenseEntry"("date");
-
 -- CreateTable
 CREATE TABLE "LaborProfile" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
-    "categoryId" TEXT NOT NULL,
+    "department" TEXT NOT NULL DEFAULT 'PRESSMAN',
     "paymentTypeId" TEXT NOT NULL,
     "defaultRate" DECIMAL,
+    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "LaborProfile_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "LaborCategory" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "LaborProfile_paymentTypeId_fkey" FOREIGN KEY ("paymentTypeId") REFERENCES "PaymentCalculationType" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
-
-CREATE INDEX "LaborProfile_categoryId_idx" ON "LaborProfile"("categoryId");
 
 -- CreateTable
 CREATE TABLE "LaborRate" (
@@ -132,8 +115,6 @@ CREATE TABLE "LaborRate" (
     CONSTRAINT "LaborRate_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "LaborRate_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-
-CREATE UNIQUE INDEX "LaborRate_laborId_articleId_unitId_key" ON "LaborRate"("laborId", "articleId", "unitId");
 
 -- CreateTable
 CREATE TABLE "LaborWorkEntry" (
@@ -152,8 +133,6 @@ CREATE TABLE "LaborWorkEntry" (
     CONSTRAINT "LaborWorkEntry_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE INDEX "LaborWorkEntry_laborId_startDate_endDate_idx" ON "LaborWorkEntry"("laborId", "startDate", "endDate");
-
 -- CreateTable
 CREATE TABLE "LaborAdvance" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -161,13 +140,9 @@ CREATE TABLE "LaborAdvance" (
     "date" DATETIME NOT NULL,
     "amount" DECIMAL NOT NULL,
     "reason" TEXT,
-    "expenseEntryId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "LaborAdvance_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT "LaborAdvance_expenseEntryId_fkey" FOREIGN KEY ("expenseEntryId") REFERENCES "ExpenseEntry" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    CONSTRAINT "LaborAdvance_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
-
-CREATE INDEX "LaborAdvance_laborId_date_idx" ON "LaborAdvance"("laborId", "date");
 
 -- CreateTable
 CREATE TABLE "Bill" (
@@ -178,13 +153,11 @@ CREATE TABLE "Bill" (
     "type" TEXT NOT NULL DEFAULT 'CASH',
     "status" TEXT NOT NULL DEFAULT 'DRAFT',
     "total" DECIMAL NOT NULL,
+    "verifiedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Bill_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-
-CREATE UNIQUE INDEX "Bill_billNumber_key" ON "Bill"("billNumber");
-CREATE INDEX "Bill_date_idx" ON "Bill"("date");
 
 -- CreateTable
 CREATE TABLE "BillLine" (
@@ -211,8 +184,6 @@ CREATE TABLE "ChemicalPurchase" (
     CONSTRAINT "ChemicalPurchase_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
-CREATE INDEX "ChemicalPurchase_date_idx" ON "ChemicalPurchase"("date");
-
 -- CreateTable
 CREATE TABLE "RexinePurchase" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -225,8 +196,6 @@ CREATE TABLE "RexinePurchase" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "RexinePurchase_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-
-CREATE INDEX "RexinePurchase_date_idx" ON "RexinePurchase"("date");
 
 -- CreateTable
 CREATE TABLE "MaterialPurchase" (
@@ -244,8 +213,6 @@ CREATE TABLE "MaterialPurchase" (
     CONSTRAINT "MaterialPurchase_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "MaterialPurchase_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-
-CREATE INDEX "MaterialPurchase_date_idx" ON "MaterialPurchase"("date");
 
 -- CreateTable
 CREATE TABLE "PartyPayment" (
@@ -268,4 +235,79 @@ CREATE TABLE "PartyPayment" (
     CONSTRAINT "PartyPayment_materialPurchaseId_fkey" FOREIGN KEY ("materialPurchaseId") REFERENCES "MaterialPurchase" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
+-- CreateTable
+CREATE TABLE "ProductionOrder" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "department" TEXT NOT NULL,
+    "stage" TEXT NOT NULL,
+    "articleId" TEXT NOT NULL,
+    "laborId" TEXT,
+    "quantityDozen" DECIMAL NOT NULL,
+    "pricePerDozen" DECIMAL NOT NULL DEFAULT 0,
+    "completedDozen" DECIMAL NOT NULL DEFAULT 0,
+    "forwardedDozen" DECIMAL NOT NULL DEFAULT 0,
+    "source" TEXT NOT NULL DEFAULT 'MANUAL',
+    "isClosed" BOOLEAN NOT NULL DEFAULT false,
+    "closedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ProductionOrder_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT "ProductionOrder_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Unit_name_key" ON "Unit"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Article_name_key" ON "Article"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ExpenseCategory_name_key" ON "ExpenseCategory"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentCalculationType_name_key" ON "PaymentCalculationType"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Party_name_key" ON "Party"("name");
+
+-- CreateIndex
+CREATE INDEX "PartyLedgerEntry_partyId_date_idx" ON "PartyLedgerEntry"("partyId", "date");
+
+-- CreateIndex
+CREATE INDEX "ExpenseEntry_date_idx" ON "ExpenseEntry"("date");
+
+-- CreateIndex
+CREATE INDEX "LaborProfile_department_idx" ON "LaborProfile"("department");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "LaborRate_laborId_articleId_unitId_key" ON "LaborRate"("laborId", "articleId", "unitId");
+
+-- CreateIndex
+CREATE INDEX "LaborWorkEntry_laborId_startDate_endDate_idx" ON "LaborWorkEntry"("laborId", "startDate", "endDate");
+
+-- CreateIndex
+CREATE INDEX "LaborAdvance_laborId_date_idx" ON "LaborAdvance"("laborId", "date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Bill_billNumber_key" ON "Bill"("billNumber");
+
+-- CreateIndex
+CREATE INDEX "Bill_date_idx" ON "Bill"("date");
+
+-- CreateIndex
+CREATE INDEX "ChemicalPurchase_date_idx" ON "ChemicalPurchase"("date");
+
+-- CreateIndex
+CREATE INDEX "RexinePurchase_date_idx" ON "RexinePurchase"("date");
+
+-- CreateIndex
+CREATE INDEX "MaterialPurchase_date_idx" ON "MaterialPurchase"("date");
+
+-- CreateIndex
 CREATE INDEX "PartyPayment_partyId_date_idx" ON "PartyPayment"("partyId", "date");
+
+-- CreateIndex
+CREATE INDEX "ProductionOrder_department_isClosed_updatedAt_idx" ON "ProductionOrder"("department", "isClosed", "updatedAt");
+
+-- CreateIndex
+CREATE INDEX "ProductionOrder_articleId_department_idx" ON "ProductionOrder"("articleId", "department");

@@ -5,6 +5,7 @@ import expenseRoutes from "./expenseRoutes.js";
 import laborRoutes from "./laborRoutes.js";
 import partyRoutes from "./partyRoutes.js";
 import purchaseRoutes from "./purchaseRoutes.js";
+import productionRoutes from "./productionRoutes.js";
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.use("/expenses", expenseRoutes);
 router.use("/labor", laborRoutes);
 router.use("/bills", billRoutes);
 router.use("/", purchaseRoutes);
+router.use("/production", productionRoutes);
 
 export default router;

@@ -31,6 +31,7 @@ import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api
 import type {
   ApiBill,
   ApiExpenseEntry,
+  ApiLaborLedger,
   ApiExpenseModule,
   ApiLaborProfile,
   ApiParty,
@@ -56,6 +57,16 @@ export function Roznamcha() {
   const [editingEntry, setEditingEntry] = useState<ApiExpenseEntry | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [entryFilter, setEntryFilter] = useState<EntryViewFilter>("ALL");
+  const [laborSearch, setLaborSearch] = useState("");
+  const [showLaborSuggestions, setShowLaborSuggestions] = useState(false);
+  const [selectedLaborSummary, setSelectedLaborSummary] = useState<{
+    totalEarnings: number;
+    totalKharcha: number;
+    totalPaid: number;
+    netPayable: number;
+    pendingPayable: number;
+  } | null>(null);
+  const [isLoadingLaborSummary, setIsLoadingLaborSummary] = useState(false);
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -70,6 +81,12 @@ export function Roznamcha() {
     amount: "",
     description: "",
   });
+
+  const filteredLaborOptions = labors
+    .filter((labor) =>
+      labor.name.toLowerCase().includes(laborSearch.trim().toLowerCase())
+    )
+    .slice(0, 8);
 
   const [filterDate, setFilterDate] = useState(getCurrentDate());
   const computedPurchaseAmount =
@@ -150,6 +167,67 @@ export function Roznamcha() {
       active = false;
     };
   }, [isDialogOpen, formData.module, formData.partyId]);
+
+  useEffect(() => {
+    if (!isDialogOpen) {
+      setLaborSearch("");
+      setShowLaborSuggestions(false);
+      return;
+    }
+    const selectedLabor = labors.find((labor) => labor.id === formData.laborId);
+    setLaborSearch(selectedLabor?.name ?? "");
+  }, [isDialogOpen, formData.laborId, labors]);
+
+  useEffect(() => {
+    if (!isDialogOpen || formData.module !== "LABOR" || !formData.laborId) {
+      setSelectedLaborSummary(null);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingLaborSummary(true);
+    Promise.all([
+      laborApi.getLedger(formData.laborId),
+      expenseApi.listExpenses({ module: "LABOR" }),
+    ])
+      .then(([ledger, laborExpenses]: [ApiLaborLedger, ApiExpenseEntry[]]) => {
+        if (!active) return;
+        const totalPaid = laborExpenses
+          .filter(
+            (entry) => entry.laborId === formData.laborId && !entry.laborAdvanceId
+          )
+          .reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
+        const netPayable = Number(ledger.netPayable ?? 0);
+        const pendingPayable = Math.max(netPayable - totalPaid, 0);
+        setSelectedLaborSummary({
+          totalEarnings: Number(ledger.totalEarnings ?? 0),
+          totalKharcha: Number(ledger.totalAdvances ?? 0),
+          totalPaid,
+          netPayable,
+          pendingPayable,
+        });
+        if (!editingEntry) {
+          setFormData((prev) => ({
+            ...prev,
+            amount: String(Number(pendingPayable.toFixed(2))),
+          }));
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) {
+          setSelectedLaborSummary(null);
+          toast.error("Failed to load labor payable summary.");
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingLaborSummary(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isDialogOpen, formData.module, formData.laborId, editingEntry]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -260,7 +338,7 @@ export function Roznamcha() {
           return;
         }
         if (!formData.laborId) {
-          toast.error("Select a labor profile.");
+          toast.error("Select a labor from suggestions.");
           return;
         }
         await expenseApi.createExpense({
@@ -311,6 +389,9 @@ export function Roznamcha() {
       amount: "",
       description: "",
     });
+    setLaborSearch("");
+    setShowLaborSuggestions(false);
+    setSelectedLaborSummary(null);
     setEditingEntry(null);
   };
 
@@ -727,25 +808,88 @@ export function Roznamcha() {
                   )}
 
                   {formData.module === "LABOR" && (
-                    <div>
+                    <div className="relative">
                       <Label>Labor</Label>
-                      <Select
-                        value={formData.laborId}
-                        onValueChange={(value) =>
-                          setFormData({ ...formData, laborId: value })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select labor" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {labors.map((labor) => (
-                            <SelectItem key={labor.id} value={labor.id}>
-                              {labor.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        value={laborSearch}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setLaborSearch(value);
+                          const exact = labors.find(
+                            (labor) =>
+                              labor.name.toLowerCase() === value.trim().toLowerCase()
+                          );
+                          setFormData({
+                            ...formData,
+                            laborId: exact?.id ?? "",
+                          });
+                          setShowLaborSuggestions(true);
+                        }}
+                        onFocus={() => setShowLaborSuggestions(true)}
+                        onBlur={() => {
+                          setTimeout(() => {
+                            setShowLaborSuggestions(false);
+                            const exact = labors.find(
+                              (labor) =>
+                                labor.name.toLowerCase() === laborSearch.trim().toLowerCase()
+                            );
+                            if (!exact) {
+                              setFormData((prev) => ({ ...prev, laborId: "" }));
+                            }
+                          }, 120);
+                        }}
+                        placeholder="Type labor name..."
+                      />
+                      {showLaborSuggestions && laborSearch.trim() && (
+                        <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-background p-1 shadow-md">
+                          {filteredLaborOptions.length === 0 ? (
+                            <div className="px-2 py-2 text-xs text-muted-foreground">
+                              No labor found
+                            </div>
+                          ) : (
+                            filteredLaborOptions.map((labor) => (
+                              <button
+                                type="button"
+                                key={labor.id}
+                                className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  setFormData({ ...formData, laborId: labor.id });
+                                  setLaborSearch(labor.name);
+                                  setShowLaborSuggestions(false);
+                                }}
+                              >
+                                {labor.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {formData.module === "LABOR" && formData.laborId && (
+                    <div className="rounded border p-3 text-sm">
+                      {isLoadingLaborSummary ? (
+                        <p className="text-muted-foreground">Loading labor summary...</p>
+                      ) : selectedLaborSummary ? (
+                        <div className="space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Net Payable</span>
+                            <span>{formatCurrency(selectedLaborSummary.netPayable)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Already Paid</span>
+                            <span>{formatCurrency(selectedLaborSummary.totalPaid)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Pending to Pay</span>
+                            <span>{formatCurrency(selectedLaborSummary.pendingPayable)}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground">No summary available.</p>
+                      )}
                     </div>
                   )}
 

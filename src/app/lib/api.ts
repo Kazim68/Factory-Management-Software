@@ -21,6 +21,11 @@ import type {
   ApiMaterialPurchase,
   ApiPaymentMethod,
   ApiRexinePurchase,
+  ApiProductionOrder,
+  ApiLaborDepartment,
+  ApiStockSummary,
+  ApiStockArticleRow,
+  ApiStockMode,
   ApiUnit,
 } from "../types/api";
 import { auth } from "./auth";
@@ -69,6 +74,7 @@ const ENTITY_LABELS: Record<string, string> = {
   "purchases/chemical": "chemical purchase",
   "purchases/rexine": "rexine purchase",
   "purchases/material": "material purchase",
+  "production/orders": "production order",
 };
 
 const toTitleCase = (value: string): string =>
@@ -516,8 +522,10 @@ export const laborApi = {
       body: data,
       auditMeta,
     }),
+  fireProfile: (laborId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+    request({ path: `/labor/profiles/${laborId}/fire`, method: "POST", auditMeta }),
   deleteProfile: (laborId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
-    request({ path: `/labor/profiles/${laborId}`, method: "DELETE", auditMeta }),
+    request({ path: `/labor/profiles/${laborId}/fire`, method: "POST", auditMeta }),
   upsertRate: (data: {
     laborId: string;
     articleId: string;
@@ -745,4 +753,70 @@ export const purchaseApi = {
     }),
   deleteMaterial: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({ path: `/materials/${purchaseId}`, method: "DELETE", auditMeta }),
+};
+
+export const productionApi = {
+  listOrders: (department?: ApiLaborDepartment): Promise<ApiProductionOrder[]> => {
+    const query = new URLSearchParams();
+    if (department) query.set("department", department);
+    const suffix = query.toString();
+    return get(`/production/orders${suffix ? `?${suffix}` : ""}`);
+  },
+  createOrder: (data: {
+    department: ApiLaborDepartment;
+    articleId: string;
+    laborId?: string;
+    quantityDozen: number;
+    pricePerDozen: number;
+  }): Promise<ApiProductionOrder> =>
+    request({ path: "/production/orders", method: "POST", body: data }),
+  updateOrder: (
+    orderId: string,
+    data: {
+      articleId?: string;
+      quantityDozen?: number;
+      pricePerDozen?: number;
+    }
+  ): Promise<ApiProductionOrder> =>
+    request({
+      path: `/production/orders/${orderId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  assignLabor: (
+    orderId: string,
+    payload: { laborId?: string; pricePerDozen?: number }
+  ): Promise<ApiProductionOrder> =>
+    request({
+      path: `/production/orders/${orderId}/assign-labor`,
+      method: "PATCH",
+      body: {
+        laborId: payload.laborId ?? null,
+        pricePerDozen: payload.pricePerDozen,
+      },
+    }),
+  updateCompletion: (
+    orderId: string,
+    completedDozen: number
+  ): Promise<ApiProductionOrder> =>
+    request({
+      path: `/production/orders/${orderId}/completion`,
+      method: "PATCH",
+      body: { completedDozen },
+    }),
+  listDepartmentLabors: (): Promise<
+    Array<{ id: string; name: string; department: ApiLaborDepartment }>
+  > => get("/production/labors"),
+  getStockSummary: (): Promise<ApiStockSummary> =>
+    get("/production/stock/summary"),
+  listStockByArticle: (params?: {
+    mode?: ApiStockMode;
+    q?: string;
+  }): Promise<ApiStockArticleRow[]> => {
+    const query = new URLSearchParams();
+    if (params?.mode) query.set("mode", params.mode);
+    if (params?.q) query.set("q", params.q);
+    const suffix = query.toString();
+    return get(`/production/stock/articles${suffix ? `?${suffix}` : ""}`);
+  },
 };
