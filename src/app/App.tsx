@@ -1,4 +1,4 @@
-import { type ElementType, type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type ElementType, type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { PartyManagement } from './components/PartyManagement';
 import { ChemicalManagement } from './components/ChemicalManagement';
@@ -27,7 +27,7 @@ import {
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 import { auth, type SessionUser } from './lib/auth';
-import { collectPageRows, exportRowsToExcel, exportRowsToPdf, printRows } from './lib/report';
+import { collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable, saveModuleReportTables } from './lib/report';
 import type { UserRole } from './types';
 import {
   LayoutDashboard,
@@ -149,6 +149,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     auth.ensureSeedAdmin();
@@ -206,24 +207,63 @@ export default function App() {
   };
 
   const runReportAction = (type: 'excel' | 'pdf' | 'print') => {
+    const main = mainRef.current;
     const reportTitle = `${currentPage.replace('_', ' ')} report`;
-    const rows = collectPageRows(currentPage, document.querySelector('main'));
+    const tables = collectTablesFromContainer(currentPage, currentPage.replace('_', ' '), main);
+
+    if (tables.length === 0) {
+      toast.error('No table data found for this view');
+      return;
+    }
+
+    const table = tables[0];
+    const payload = {
+      title: `${reportTitle} - ${table.title}`,
+      table: {
+        columns: table.columns,
+        rows: table.rows,
+      },
+      metadata: {
+        generatedAt: table.generatedAt,
+        filters: table.filters,
+        sort: table.sort,
+      },
+    };
 
     if (type === 'excel') {
-      exportRowsToExcel(reportTitle, rows);
+      exportTableToExcel(payload);
       toast.success('Excel report generated');
       return;
     }
 
     if (type === 'pdf') {
-      exportRowsToPdf(reportTitle, rows);
+      exportTableToPdf(payload);
       toast.success('PDF print dialog opened');
       return;
     }
 
-    printRows(reportTitle, rows);
+    printTable(payload);
     toast.success('Print dialog opened');
   };
+
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main || !currentUser) return;
+
+    const syncTables = () => {
+      const tables = collectTablesFromContainer(currentPage, currentPage.replace('_', ' '), main);
+      if (tables.length > 0) {
+        saveModuleReportTables(currentPage, currentPage.replace('_', ' '), tables);
+      }
+    };
+
+    syncTables();
+    const observer = new MutationObserver(() => syncTables());
+    observer.observe(main, { childList: true, subtree: true, attributes: true, characterData: true });
+
+    return () => observer.disconnect();
+  }, [currentPage, currentUser]);
 
   const handleLogout = () => {
     auth.logout();
@@ -312,7 +352,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6">{renderPage()}</main>
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-6">{renderPage()}</main>
       </div>
 
       <Toaster />
