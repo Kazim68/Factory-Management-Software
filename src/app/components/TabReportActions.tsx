@@ -2,7 +2,7 @@ import { FileOutput } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
-import { collectRowsFromSelector, exportRowsToExcel, exportRowsToPdf, printRows } from '../lib/report';
+import { collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable } from '../lib/report';
 
 interface TabReportActionsProps {
   title: string;
@@ -11,21 +11,41 @@ interface TabReportActionsProps {
 
 export function TabReportActions({ title, selector }: TabReportActionsProps) {
   const runReportAction = (type: 'excel' | 'pdf' | 'print') => {
-    const rows = collectRowsFromSelector(title, selector);
+    const scope = document.querySelector(selector) as HTMLElement | null;
+    const tables = collectTablesFromContainer('tab-report', title, scope);
+
+    if (tables.length === 0) {
+      toast.error('No table found in this tab');
+      return;
+    }
+
+    const table = tables[0];
+    const payload = {
+      title: `${title} - ${table.title}`,
+      table: {
+        columns: table.columns,
+        rows: table.rows,
+      },
+      metadata: {
+        generatedAt: table.generatedAt,
+        filters: table.filters,
+        sort: table.sort,
+      },
+    };
 
     if (type === 'excel') {
-      exportRowsToExcel(title, rows);
+      exportTableToExcel(payload);
       toast.success('Excel report generated');
       return;
     }
 
     if (type === 'pdf') {
-      exportRowsToPdf(title, rows);
+      exportTableToPdf(payload);
       toast.success('PDF print dialog opened');
       return;
     }
 
-    printRows(title, rows);
+    printTable(payload);
     toast.success('Print dialog opened');
   };
 
