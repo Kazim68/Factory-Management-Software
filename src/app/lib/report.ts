@@ -29,6 +29,8 @@ export interface ReportExportPayload {
   };
 }
 
+const ACTION_COLUMN_MATCHERS = ['action', 'actions', 'operation', 'operations'];
+
 const REPORT_STORAGE_KEY = 'factory.report.tables';
 
 function isVisible(element: Element) {
@@ -215,6 +217,11 @@ function getCellText(cell: Element) {
   return cell.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
+function isActionColumn(columnName: string) {
+  const normalized = columnName.toLowerCase().trim();
+  return ACTION_COLUMN_MATCHERS.some((matcher) => normalized === matcher || normalized.includes(matcher));
+}
+
 function isColumnVisible(table: HTMLTableElement, index: number) {
   const header = table.querySelector(`thead th:nth-child(${index + 1})`);
   if (header && !isVisible(header)) return false;
@@ -246,21 +253,24 @@ export function collectTablesFromContainer(
         0
       );
 
-      const columns = (headers.length > 0
+      const allColumns = headers.length > 0
         ? headers.map(getCellText)
         : Array.from({ length: fallbackColumnCount }).map((_, index) => `Column ${index + 1}`)
-      ).filter((_, index) => isColumnVisible(htmlTable, index));
+      ;
 
       const visibleIndices = (headers.length > 0
         ? headers.map((_, index) => index)
         : Array.from({ length: fallbackColumnCount }).map((_, index) => index)
       ).filter((index) => isColumnVisible(htmlTable, index));
 
+      const exportIndices = visibleIndices.filter((index) => !isActionColumn(allColumns[index] ?? ''));
+      const columns = exportIndices.map((index) => allColumns[index]);
+
       const rows = Array.from(table.querySelectorAll('tbody tr'))
         .filter((row) => isVisible(row))
         .map((row) => {
           const cells = Array.from(row.querySelectorAll('td'));
-          return visibleIndices.map((cellIndex) => getCellText(cells[cellIndex] ?? document.createElement('td')));
+          return exportIndices.map((cellIndex) => getCellText(cells[cellIndex] ?? document.createElement('td')));
         })
         .filter((row) => row.some((value) => value.length > 0));
 
@@ -269,7 +279,8 @@ export function collectTablesFromContainer(
           const sortValue = header.getAttribute('aria-sort');
           if (!sortValue || sortValue === 'none') return null;
           const direction = sortValue === 'ascending' ? 'ASC' : 'DESC';
-          return `${columns[headerIndex] || getCellText(header)} ${direction}`;
+          if (!exportIndices.includes(headerIndex)) return null;
+          return `${allColumns[headerIndex] || getCellText(header)} ${direction}`;
         })
         .filter((value): value is string => Boolean(value));
 
@@ -328,4 +339,47 @@ export function collectPageRows(pageName: string, container: HTMLElement | null)
 export function collectRowsFromSelector(pageName: string, selector: string): ReportRow[] {
   const scope = document.querySelector(selector) as HTMLElement | null;
   return collectPageRows(pageName, scope);
+}
+
+export function buildCombinedTablePayload(title: string, tables: ReportTable[]): ReportExportPayload {
+  const rows = tables.flatMap((table) =>
+    table.rows.map((row) => {
+      const rowAsRecord = table.columns.reduce<Record<string, string>>((acc, column, index) => {
+        acc[column] = row[index] ?? '';
+        return acc;
+      }, {});
+
+      return [table.title, ...table.columns.map((column) => rowAsRecord[column] ?? '')];
+    })
+  );
+
+  const allColumns = Array.from(
+    new Set(
+      tables.flatMap((table) => table.columns)
+    )
+  );
+
+  const normalizedRows = tables.flatMap((table) =>
+    table.rows.map((row) => {
+      const rowAsRecord = table.columns.reduce<Record<string, string>>((acc, column, index) => {
+        acc[column] = row[index] ?? '';
+        return acc;
+      }, {});
+
+      return [table.title, ...allColumns.map((column) => rowAsRecord[column] ?? '')];
+    })
+  );
+
+  return {
+    title,
+    table: {
+      columns: ['Table', ...allColumns],
+      rows: normalizedRows.length > 0 ? normalizedRows : rows,
+    },
+    metadata: {
+      generatedAt: new Date().toLocaleString(),
+      filters: Array.from(new Set(tables.flatMap((table) => table.filters))),
+      sort: Array.from(new Set(tables.flatMap((table) => table.sort))),
+    },
+  };
 }
