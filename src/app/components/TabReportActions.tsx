@@ -2,7 +2,7 @@ import { FileOutput } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
-import { collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable } from '../lib/report';
+import { buildCombinedTablePayload, collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable } from '../lib/report';
 
 interface TabReportActionsProps {
   title: string;
@@ -19,19 +19,7 @@ export function TabReportActions({ title, selector }: TabReportActionsProps) {
       return;
     }
 
-    const table = tables[0];
-    const payload = {
-      title: `${title} - ${table.title}`,
-      table: {
-        columns: table.columns,
-        rows: table.rows,
-      },
-      metadata: {
-        generatedAt: table.generatedAt,
-        filters: table.filters,
-        sort: table.sort,
-      },
-    };
+    const payload = buildCombinedTablePayload(title, tables);
 
     if (type === 'excel') {
       exportTableToExcel(payload);

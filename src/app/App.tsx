@@ -27,7 +27,7 @@ import {
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 import { auth, type SessionUser } from './lib/auth';
-import { collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable, saveModuleReportTables } from './lib/report';
+import { buildCombinedTablePayload, collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable, saveModuleReportTables } from './lib/report';
 import type { UserRole } from './types';
 import {
   LayoutDashboard,
@@ -216,19 +216,7 @@ export default function App() {
       return;
     }
 
-    const table = tables[0];
-    const payload = {
-      title: `${reportTitle} - ${table.title}`,
-      table: {
-        columns: table.columns,
-        rows: table.rows,
-      },
-      metadata: {
-        generatedAt: table.generatedAt,
-        filters: table.filters,
-        sort: table.sort,
-      },
-    };
+    const payload = buildCombinedTablePayload(reportTitle, tables);
 
     if (type === 'excel') {
       exportTableToExcel(payload);
