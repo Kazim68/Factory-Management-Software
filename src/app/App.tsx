@@ -1,4 +1,4 @@
-import { type ElementType, type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type ElementType, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dashboard } from './components/Dashboard';
 import { PartyManagement } from './components/PartyManagement';
 import { ChemicalManagement } from './components/ChemicalManagement';
@@ -22,12 +22,25 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 import { auth, type SessionUser } from './lib/auth';
-import { buildCombinedTablePayload, collectTablesFromContainer, exportTableToExcel, exportTableToPdf, printTable, saveModuleReportTables } from './lib/report';
+import {
+  buildCombinedTablePayload,
+  collectTablesFromContainer,
+  exportTableToExcel,
+  exportTableToPdf,
+  printTable,
+  saveModuleReportTables,
+  type ReportTable,
+} from './lib/report';
 import type { UserRole } from './types';
 import {
   LayoutDashboard,
@@ -149,6 +162,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
+  const [reportTables, setReportTables] = useState<ReportTable[]>([]);
   const mainRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -206,11 +220,7 @@ export default function App() {
     }
   };
 
-  const runReportAction = (type: 'excel' | 'pdf' | 'print') => {
-    const main = mainRef.current;
-    const reportTitle = `${currentPage.replace('_', ' ')} report`;
-    const tables = collectTablesFromContainer(currentPage, currentPage.replace('_', ' '), main);
-
+  const runReportAction = (type: 'excel' | 'pdf' | 'print', tables: ReportTable[], reportTitle: string) => {
     if (tables.length === 0) {
       toast.error('No table data found for this view');
       return;
@@ -234,24 +244,26 @@ export default function App() {
     toast.success('Print dialog opened');
   };
 
+  const syncTables = useCallback(() => {
+    const main = mainRef.current;
+    if (!main || !currentUser) return;
+
+    const tables = collectTablesFromContainer(currentPage, currentPage.replace('_', ' '), main);
+    setReportTables(tables);
+    saveModuleReportTables(currentPage, currentPage.replace('_', ' '), tables);
+  }, [currentPage, currentUser]);
+
 
   useEffect(() => {
     const main = mainRef.current;
     if (!main || !currentUser) return;
-
-    const syncTables = () => {
-      const tables = collectTablesFromContainer(currentPage, currentPage.replace('_', ' '), main);
-      if (tables.length > 0) {
-        saveModuleReportTables(currentPage, currentPage.replace('_', ' '), tables);
-      }
-    };
 
     syncTables();
     const observer = new MutationObserver(() => syncTables());
     observer.observe(main, { childList: true, subtree: true, attributes: true, characterData: true });
 
     return () => observer.disconnect();
-  }, [currentPage, currentUser]);
+  }, [currentPage, currentUser, syncTables]);
 
   const handleLogout = () => {
     auth.logout();
@@ -321,15 +333,44 @@ export default function App() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => runReportAction('excel')}>
-                  Export to Excel
+                <DropdownMenuLabel>Current View</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => runReportAction('print', reportTables, `${currentPage.replace('_', ' ')} full report`)}
+                >
+                  Print All Sections
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => runReportAction('pdf')}>
-                  Export to PDF
+                <DropdownMenuItem
+                  onClick={() => runReportAction('excel', reportTables, `${currentPage.replace('_', ' ')} full report`)}
+                >
+                  Export All Sections (Excel)
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => runReportAction('print')}>
-                  Direct Print
+                <DropdownMenuItem
+                  onClick={() => runReportAction('pdf', reportTables, `${currentPage.replace('_', ' ')} full report`)}
+                >
+                  Export All Sections (PDF)
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Sections / Tabs</DropdownMenuLabel>
+                {reportTables.length === 0 ? (
+                  <DropdownMenuItem disabled>No tables found in this view</DropdownMenuItem>
+                ) : (
+                  reportTables.map((table) => (
+                    <DropdownMenuSub key={table.id}>
+                      <DropdownMenuSubTrigger>{table.title}</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem onClick={() => runReportAction('print', [table], `${table.title} report`)}>
+                          Print
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => runReportAction('excel', [table], `${table.title} report`)}>
+                          Excel
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => runReportAction('pdf', [table], `${table.title} report`)}>
+                          PDF
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ))
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <Badge variant="secondary">{currentUser.name}</Badge>
