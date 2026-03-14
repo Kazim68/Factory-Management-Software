@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -29,8 +28,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Plus, Eye, Wallet, Banknote, X } from "lucide-react";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
-import { configApi, expenseApi, laborApi } from "../lib/api";
-import { TabReportActions } from "./TabReportActions";
+import { configApi, expenseApi, laborApi, reportsApi } from "../lib/api";
+import {
+  exportTableToExcel,
+  exportTableToPdf,
+  type ReportExportPayload,
+} from "../lib/report";
 import type {
   ApiArticle,
   ApiExpenseCategory,
@@ -38,6 +41,7 @@ import type {
   ApiLaborCategory,
   ApiLaborLedger,
   ApiLaborProfile,
+  ApiLaborSummaryReport,
   ApiLaborWorkEntry,
   ApiLaborAdvance,
   ApiPaymentType,
@@ -59,12 +63,18 @@ export function LaborManagement() {
   const [categories, setCategories] = useState<ApiLaborCategory[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<ApiExpenseCategory[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<
+    ApiExpenseCategory[]
+  >([]);
   const [workEntries, setWorkEntries] = useState<UiWorkEntry[]>([]);
   const [advanceEntries, setAdvanceEntries] = useState<UiAdvance[]>([]);
-  const [ledgerMap, setLedgerMap] = useState<Record<string, ApiLaborLedger>>({});
+  const [ledgerMap, setLedgerMap] = useState<Record<string, ApiLaborLedger>>(
+    {},
+  );
   const [laborPayments, setLaborPayments] = useState<ApiExpenseEntry[]>([]);
-  const [laborPaymentsToday, setLaborPaymentsToday] = useState<ApiExpenseEntry[]>([]);
+  const [laborPaymentsToday, setLaborPaymentsToday] = useState<
+    ApiExpenseEntry[]
+  >([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const [laborDialog, setLaborDialog] = useState(false);
@@ -79,6 +89,19 @@ export function LaborManagement() {
   const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [laborSearchQuery, setLaborSearchQuery] = useState("");
   const [payingLaborId, setPayingLaborId] = useState<string | null>(null);
+  const [laborReportPeriod, setLaborReportPeriod] = useState<
+    "weekly" | "monthly"
+  >("weekly");
+  const [laborReportStart, setLaborReportStart] = useState("");
+  const [laborReportEnd, setLaborReportEnd] = useState(getCurrentDate());
+  const [laborReport, setLaborReport] = useState<ApiLaborSummaryReport | null>(
+    null,
+  );
+  const [isLoadingLaborReport, setIsLoadingLaborReport] = useState(false);
+  const [activeSection, setActiveSection] = useState(() => {
+    if (typeof window === "undefined") return "entries";
+    return localStorage.getItem("labor.activeSection") || "entries";
+  });
 
   const [laborForm, setLaborForm] = useState({
     name: "",
@@ -101,18 +124,20 @@ export function LaborManagement() {
     description: "",
   });
 
-
   const getLaborName = (laborId?: string | null) =>
     allProfiles.find((profile) => profile.id === laborId)?.name || "Unknown";
 
   const getCategoryName = (categoryId?: string | null) =>
-    categories.find((category) => category.id === categoryId)?.name || "Unknown";
+    categories.find((category) => category.id === categoryId)?.name ||
+    "Unknown";
 
   const getPaymentTypeName = (paymentTypeId?: string | null) =>
-    paymentTypes.find((paymentType) => paymentType.id === paymentTypeId)?.name || "Unknown";
+    paymentTypes.find((paymentType) => paymentType.id === paymentTypeId)
+      ?.name || "Unknown";
 
   const getExpenseCategoryName = (categoryId?: string | null) =>
-    expenseCategories.find((category) => category.id === categoryId)?.name || "Unknown";
+    expenseCategories.find((category) => category.id === categoryId)?.name ||
+    "Unknown";
 
   const loadData = async () => {
     setIsLoading(true);
@@ -155,8 +180,8 @@ export function LaborManagement() {
             totalEarnings: 0,
             totalAdvances: 0,
             netPayable: 0,
-          }))
-        )
+          })),
+        ),
       );
 
       const nextLedgerMap: Record<string, ApiLaborLedger> = {};
@@ -166,10 +191,10 @@ export function LaborManagement() {
       setLedgerMap(nextLedgerMap);
 
       const articleNameById = Object.fromEntries(
-        articleData.map((article) => [article.id, article.name])
+        articleData.map((article) => [article.id, article.name]),
       );
       const laborNameById = Object.fromEntries(
-        profileData.map((profile) => [profile.id, profile.name])
+        profileData.map((profile) => [profile.id, profile.name]),
       );
 
       const flattenedWork = ledgerEntries.flatMap((ledger) =>
@@ -177,13 +202,13 @@ export function LaborManagement() {
           ...entry,
           laborName: laborNameById[entry.laborId] ?? "Unknown",
           articleName: articleNameById[entry.articleId] ?? "Unknown",
-        }))
+        })),
       );
       const flattenedAdvances = ledgerEntries.flatMap((ledger) =>
         ledger.advances.map((advance) => ({
           ...advance,
           laborName: laborNameById[advance.laborId] ?? "Unknown",
-        }))
+        })),
       );
 
       setWorkEntries(flattenedWork);
@@ -200,6 +225,96 @@ export function LaborManagement() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    setIsLoadingLaborReport(true);
+
+    const timer = window.setTimeout(() => {
+      reportsApi
+        .getLaborSummary({
+          period: laborReportPeriod,
+          start: laborReportStart || undefined,
+          end: laborReportEnd || undefined,
+        })
+        .then((report) => {
+          if (active) {
+            setLaborReport(report);
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+          if (active) {
+            toast.error("Failed to load labor report.");
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setIsLoadingLaborReport(false);
+          }
+        });
+    }, 150);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [laborReportPeriod, laborReportStart, laborReportEnd]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("labor.activeSection", activeSection);
+  }, [activeSection]);
+
+  const buildLaborReportPayload = (
+    report: ApiLaborSummaryReport,
+  ): ReportExportPayload => ({
+    title: `Labor ${report.period} summary`,
+    table: {
+      columns: [
+        "Period",
+        "Labor",
+        "Total Earnings",
+        "Total Advances",
+        "Total Paid Cash",
+        "Net Payable",
+      ],
+      rows: report.buckets.flatMap((bucket) =>
+        bucket.labors.map((labor) => [
+          bucket.key,
+          labor.laborName,
+          labor.totalEarnings.toFixed(2),
+          labor.totalAdvances.toFixed(2),
+          labor.totalPaidCash.toFixed(2),
+          labor.netPayable.toFixed(2),
+        ]),
+      ),
+    },
+    metadata: {
+      generatedAt: new Date().toLocaleString(),
+      filters: [
+        `Period: ${report.period}`,
+        `Range: ${new Date(report.range.start).toLocaleDateString()} - ${new Date(report.range.end).toLocaleDateString()}`,
+      ],
+    },
+  });
+
+  const exportLaborReport = (type: "excel" | "pdf") => {
+    if (!laborReport) {
+      toast.error("Load a labor report first.");
+      return;
+    }
+    const payload = buildLaborReportPayload(laborReport);
+    const ok =
+      type === "excel"
+        ? exportTableToExcel(payload)
+        : exportTableToPdf(payload);
+    if (!ok) {
+      toast.error(`Failed to export ${type.toUpperCase()} report.`);
+      return;
+    }
+    toast.success(`${type.toUpperCase()} report generated.`);
+  };
+
   const handleLaborSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!laborForm.categoryId) {
@@ -213,44 +328,53 @@ export function LaborManagement() {
 
     try {
       if (editingLaborId) {
-        const current = allProfiles.find((profile) => profile.id === editingLaborId);
-        await laborApi.updateProfile(editingLaborId, {
-          name: laborForm.name.trim(),
-          categoryId: laborForm.categoryId,
-          paymentTypeId: laborForm.paymentTypeId,
-          defaultRate: laborForm.defaultRate
-            ? parseFloat(laborForm.defaultRate)
-            : undefined,
-        }, {
-          itemLabel: laborForm.name.trim(),
-          fieldLabels: {
-            categoryId: getCategoryName(laborForm.categoryId),
-            paymentTypeId: getPaymentTypeName(laborForm.paymentTypeId),
+        const current = allProfiles.find(
+          (profile) => profile.id === editingLaborId,
+        );
+        await laborApi.updateProfile(
+          editingLaborId,
+          {
+            name: laborForm.name.trim(),
+            categoryId: laborForm.categoryId,
+            paymentTypeId: laborForm.paymentTypeId,
+            defaultRate: laborForm.defaultRate
+              ? parseFloat(laborForm.defaultRate)
+              : undefined,
           },
-          previousFieldLabels: {
-            categoryId: getCategoryName(current?.categoryId),
-            paymentTypeId: getPaymentTypeName(current?.paymentTypeId),
+          {
+            itemLabel: laborForm.name.trim(),
+            fieldLabels: {
+              categoryId: getCategoryName(laborForm.categoryId),
+              paymentTypeId: getPaymentTypeName(laborForm.paymentTypeId),
+            },
+            previousFieldLabels: {
+              categoryId: getCategoryName(current?.categoryId),
+              paymentTypeId: getPaymentTypeName(current?.paymentTypeId),
+            },
+            previousValues: {
+              name: current?.name,
+              categoryId: current?.categoryId,
+              paymentTypeId: current?.paymentTypeId,
+              defaultRate: current?.defaultRate,
+            },
           },
-          previousValues: {
-            name: current?.name,
-            categoryId: current?.categoryId,
-            paymentTypeId: current?.paymentTypeId,
-            defaultRate: current?.defaultRate,
-          },
-        });
+        );
         toast.success("Labor updated");
       } else {
-        await laborApi.createProfile({
-          name: laborForm.name.trim(),
-          categoryId: laborForm.categoryId,
-          paymentTypeId: laborForm.paymentTypeId,
-          defaultRate: laborForm.defaultRate
-            ? parseFloat(laborForm.defaultRate)
-            : undefined,
-          status: "ACTIVE",
-        }, {
-          itemLabel: laborForm.name.trim(),
-        });
+        await laborApi.createProfile(
+          {
+            name: laborForm.name.trim(),
+            categoryId: laborForm.categoryId,
+            paymentTypeId: laborForm.paymentTypeId,
+            defaultRate: laborForm.defaultRate
+              ? parseFloat(laborForm.defaultRate)
+              : undefined,
+            status: "ACTIVE",
+          },
+          {
+            itemLabel: laborForm.name.trim(),
+          },
+        );
         toast.success("Labor added");
       }
       await loadData();
@@ -286,40 +410,49 @@ export function LaborManagement() {
 
     try {
       if (editingAdvanceId) {
-        const current = advanceEntries.find((entry) => entry.id === editingAdvanceId);
-        await laborApi.updateAdvance(editingAdvanceId, {
-          laborId: kharchaForm.laborId,
-          date: kharchaForm.date,
-          amount,
-          reason: kharchaForm.reason,
-          categoryId: kharchaForm.categoryId || undefined,
-        }, {
-          itemLabel: getLaborName(kharchaForm.laborId),
-          fieldLabels: {
-            laborId: getLaborName(kharchaForm.laborId),
-            categoryId: getExpenseCategoryName(kharchaForm.categoryId),
+        const current = advanceEntries.find(
+          (entry) => entry.id === editingAdvanceId,
+        );
+        await laborApi.updateAdvance(
+          editingAdvanceId,
+          {
+            laborId: kharchaForm.laborId,
+            date: kharchaForm.date,
+            amount,
+            reason: kharchaForm.reason,
+            categoryId: kharchaForm.categoryId || undefined,
           },
-          previousFieldLabels: {
-            laborId: getLaborName(current?.laborId),
+          {
+            itemLabel: getLaborName(kharchaForm.laborId),
+            fieldLabels: {
+              laborId: getLaborName(kharchaForm.laborId),
+              categoryId: getExpenseCategoryName(kharchaForm.categoryId),
+            },
+            previousFieldLabels: {
+              laborId: getLaborName(current?.laborId),
+            },
+            previousValues: {
+              laborId: current?.laborId,
+              date: current?.date?.slice(0, 10),
+              amount: current?.amount,
+              reason: current?.reason || undefined,
+            },
           },
-          previousValues: {
-            laborId: current?.laborId,
-            date: current?.date?.slice(0, 10),
-            amount: current?.amount,
-            reason: current?.reason || undefined,
-          },
-        });
+        );
         toast.success("Kharcha updated");
       } else {
-        await laborApi.createAdvance({
-          laborId: kharchaForm.laborId,
-          date: kharchaForm.date,
-          amount,
-          reason: kharchaForm.reason,
-          categoryId: kharchaForm.categoryId,
-        }, {
-          itemLabel: getLaborName(kharchaForm.laborId),
-        });
+        await laborApi.createAdvance(
+          {
+            laborId: kharchaForm.laborId,
+            date: kharchaForm.date,
+            amount,
+            reason: kharchaForm.reason,
+            categoryId: kharchaForm.categoryId,
+          },
+          {
+            itemLabel: getLaborName(kharchaForm.laborId),
+          },
+        );
         toast.success("Kharcha recorded");
       }
       await loadData();
@@ -391,7 +524,9 @@ export function LaborManagement() {
     const totalPaid = paidByLabor[payingLaborId] ?? 0;
     const pendingPay = Math.max(summary.netPayable - totalPaid, 0);
     if (payForm.mode === "CASH" && amount > pendingPay) {
-      toast.error(`Amount cannot exceed pending pay ${formatCurrency(pendingPay)}.`);
+      toast.error(
+        `Amount cannot exceed pending pay ${formatCurrency(pendingPay)}.`,
+      );
       return;
     }
 
@@ -452,9 +587,10 @@ export function LaborManagement() {
 
   const openFilteredLaborTabFromLedger = (
     laborId: string,
-    tab: "work" | "kharcha" | "labor-paid-today"
+    tab: "work" | "kharcha" | "labor-paid-today",
   ) => {
-    const laborName = allProfiles.find((item) => item.id === laborId)?.name ?? "";
+    const laborName =
+      allProfiles.find((item) => item.id === laborId)?.name ?? "";
     setLaborSearchQuery(laborName);
     setActiveTab(tab);
     setViewingLaborId(null);
@@ -474,14 +610,15 @@ export function LaborManagement() {
   const paidByLabor = paidEntries.reduce<Record<string, number>>(
     (acc, entry) => {
       if (entry.laborId) {
-        acc[entry.laborId] = (acc[entry.laborId] ?? 0) + Number(entry.amount ?? 0);
+        acc[entry.laborId] =
+          (acc[entry.laborId] ?? 0) + Number(entry.amount ?? 0);
       }
       return acc;
     },
-    {}
+    {},
   );
   const paidTodayEntries = laborPaymentsToday.filter(
-    (entry) => !entry.laborAdvanceId
+    (entry) => !entry.laborAdvanceId,
   );
   const normalizedLaborQuery = laborSearchQuery.trim().toLowerCase();
   const laborMatchesFilters = (labor: ApiLaborProfile) => {
@@ -495,649 +632,622 @@ export function LaborManagement() {
     return matchesDepartment && matchesSearch;
   };
   const filteredLaborIds = new Set(
-    allProfiles.filter(laborMatchesFilters).map((labor) => labor.id)
+    allProfiles.filter(laborMatchesFilters).map((labor) => labor.id),
   );
-  const filteredProfiles = profiles.filter((labor) => filteredLaborIds.has(labor.id));
+  const filteredProfiles = profiles.filter((labor) =>
+    filteredLaborIds.has(labor.id),
+  );
   const filteredWorkEntries = workEntries.filter((entry) =>
-    filteredLaborIds.has(entry.laborId)
+    filteredLaborIds.has(entry.laborId),
   );
   const filteredPaidTodayEntries = paidTodayEntries.filter(
-    (entry) => entry.laborId && filteredLaborIds.has(entry.laborId)
+    (entry) => entry.laborId && filteredLaborIds.has(entry.laborId),
   );
   const filteredAdvanceEntries = advanceEntries.filter((entry) =>
-    filteredLaborIds.has(entry.laborId)
+    filteredLaborIds.has(entry.laborId),
   );
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Labor Management</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="labors" value={activeTab} onValueChange={setActiveTab}>
-            <div className="flex items-center justify-between gap-3">
-              <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
-              <TabsTrigger value="work">Work Entries</TabsTrigger>
-              <TabsTrigger value="labor-paid-today">Labor Paid Today</TabsTrigger>
-              <TabsTrigger value="kharcha">Kharcha (Advances)</TabsTrigger>
-              </TabsList>
-              <TabReportActions
-                title={`Labor ${activeTab} report`}
-                selector={`[data-report-tab="${activeTab}"]`}
-              />
-            </div>
-            <div className="mt-3 flex flex-wrap items-end gap-3">
-              <div className="min-w-[240px] flex-1 md:max-w-[360px]">
-                <Label
-                  htmlFor="labor-search-filter"
-                  className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground"
-                >
-                  Search Labor
-                </Label>
-                <div className="relative">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute left-1 top-1/2 h-7 w-7 -translate-y-1/2"
-                    onClick={() => setLaborSearchQuery("")}
-                    disabled={!laborSearchQuery}
+      <Tabs value={activeSection} onValueChange={setActiveSection}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <TabsList className="grid w-full max-w-[320px] grid-cols-2">
+            <TabsTrigger value="entries">Labor Work</TabsTrigger>
+            <TabsTrigger value="reports">Reports</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="reports" className="space-y-0">
+          <Card>
+            <CardHeader>
+              <CardTitle>Labor Reports</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <div>
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    Report Period
+                  </Label>
+                  <Select
+                    value={laborReportPeriod}
+                    onValueChange={(value) =>
+                      setLaborReportPeriod(value as "weekly" | "monthly")
+                    }
                   >
-                    <X className="h-4 w-4" />
-                  </Button>
-                  <Input
-                    id="labor-search-filter"
-                    value={laborSearchQuery}
-                    onChange={(e) => setLaborSearchQuery(e.target.value)}
-                    placeholder="Search by labor name..."
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-              <div className="min-w-[220px]">
-                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
-                  Department Filter
-                </Label>
-                <Select
-                  value={departmentFilter}
-                  onValueChange={setDepartmentFilter}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Departments</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="ml-auto flex items-center gap-2">
-                {activeTab === "labors" && (
-                  <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add Labor
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>{editingLaborId ? "Edit" : "Add"} Labor</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleLaborSubmit} className="space-y-4">
-                      <div>
-                        <Label>Labor Name</Label>
-                        <Input
-                          defaultValue={laborForm.name}
-                          onChange={(e) =>
-                            setLaborForm({ ...laborForm, name: e.target.value })
-                          }
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label>Department</Label>
-                        <Select
-                          value={laborForm.categoryId}
-                          onValueChange={(value) =>
-                            setLaborForm({ ...laborForm, categoryId: value })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select department" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {categories.map((cat) => (
-                              <SelectItem key={cat.id} value={cat.id}>
-                                {cat.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label>Payment Type</Label>
-                        <Select
-                          value={laborForm.paymentTypeId}
-                          onValueChange={(value) =>
-                            setLaborForm({ ...laborForm, paymentTypeId: value })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select payment type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {paymentTypes.map((type) => (
-                              <SelectItem key={type.id} value={type.id}>
-                                {type.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label>Default Rate (optional)</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={laborForm.defaultRate}
-                          onChange={(e) =>
-                            setLaborForm({
-                              ...laborForm,
-                              defaultRate: e.target.value,
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setLaborDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">
-                          {editingLaborId ? "Update" : "Save"}
-                        </Button>
-                      </div>
-                    </form>
-                    </DialogContent>
-                  </Dialog>
-                )}
-                {activeTab === "kharcha" && (
-                  <Dialog open={kharchaDialog} onOpenChange={setKharchaDialog}>
-                    <DialogTrigger asChild>
-                      <Button>
-                        <Wallet className="mr-2 h-4 w-4" />
-                        Add Kharcha
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingAdvanceId ? "Edit" : "Record"} Kharcha (Advance)
-                      </DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleKharchaSubmit} className="space-y-4">
-                      <div>
-                        <Label>Date</Label>
-                        <Input
-                          type="date"
-                          value={kharchaForm.date}
-                          onChange={(e) =>
-                            setKharchaForm({
-                              ...kharchaForm,
-                              date: e.target.value,
-                            })
-                          }
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label>Labor</Label>
-                        <Select
-                          value={kharchaForm.laborId}
-                          onValueChange={(value) =>
-                            setKharchaForm({ ...kharchaForm, laborId: value })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select labor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {profiles.map((labor) => (
-                              <SelectItem key={labor.id} value={labor.id}>
-                                {labor.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label>Expense Category</Label>
-                        <Select
-                          value={kharchaForm.categoryId}
-                          onValueChange={(value) =>
-                            setKharchaForm({ ...kharchaForm, categoryId: value })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {expenseCategories.map((category) => (
-                              <SelectItem key={category.id} value={category.id}>
-                                {category.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label>Amount</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={kharchaForm.amount}
-                          onChange={(e) =>
-                            setKharchaForm({
-                              ...kharchaForm,
-                              amount: e.target.value,
-                            })
-                          }
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label>Reason</Label>
-                        <Input
-                          value={kharchaForm.reason}
-                          onChange={(e) =>
-                            setKharchaForm({
-                              ...kharchaForm,
-                              reason: e.target.value,
-                            })
-                          }
-                          placeholder="Reason for advance..."
-                          required
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setKharchaDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">
-                          {editingAdvanceId ? "Update" : "Record"} Kharcha
-                        </Button>
-                      </div>
-                    </form>
-                    </DialogContent>
-                  </Dialog>
-                )}
-              </div>
-            </div>
-
-            <TabsContent value="labors" className="space-y-4" data-report-tab="labors">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Payment Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Total Earned</TableHead>
-                    <TableHead>Total Paid</TableHead>
-                    <TableHead>Kharcha</TableHead>
-                    <TableHead>Net Payable</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={9}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading labor profiles...
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredProfiles.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={9}
-                        className="text-center text-muted-foreground"
-                      >
-                        No labors yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredProfiles.map((labor) => {
-                      const summary = getLaborSummary(labor.id);
-                      const totalPaid = paidByLabor[labor.id] ?? 0;
-                      const adjustedNetPayable = summary.netPayable - totalPaid;
-                      return (
-                        <TableRow key={labor.id}>
-                          <TableCell>{labor.name}</TableCell>
-                          <TableCell>{labor.category?.name || "-"}</TableCell>
-                          <TableCell>{labor.paymentType?.name || "-"}</TableCell>
-                          <TableCell>{labor.status}</TableCell>
-                          <TableCell>
-                            {formatCurrency(summary.totalEarnings)}
-                          </TableCell>
-                          <TableCell>{formatCurrency(totalPaid)}</TableCell>
-                          <TableCell>
-                            {formatCurrency(summary.totalAdvances)}
-                          </TableCell>
-                          <TableCell>
-                            <span
-                              className={
-                                adjustedNetPayable > 0 ? "text-green-600" : ""
-                              }
-                            >
-                              {formatCurrency(adjustedNetPayable)}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setViewingLaborId(labor.id);
-                                  setLedgerDialog(true);
-                                }}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openPayDialog(labor)}
-                              >
-                                <Banknote className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => startEditLabor(labor)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => deleteLabor(labor.id)}
-                              >
-                                Fire
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="work" className="space-y-4" data-report-tab="work">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Labor</TableHead>
-                    <TableHead>Article</TableHead>
-                    <TableHead>Quantity</TableHead>
-                    <TableHead>Rate</TableHead>
-                    <TableHead>Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading work entries...
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredWorkEntries.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center text-muted-foreground"
-                      >
-                        No work entries yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredWorkEntries.map((work) => (
-                      <TableRow key={work.id}>
-                        <TableCell>{formatDate(work.startDate)}</TableCell>
-                        <TableCell>{work.laborName}</TableCell>
-                        <TableCell>{work.articleName}</TableCell>
-                        <TableCell>{Number(work.quantity)}</TableCell>
-                        <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
-                        <TableCell>{formatCurrency(Number(work.total))}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="labor-paid-today" className="space-y-4" data-report-tab="labor-paid-today">
-              <div className="flex items-center justify-between">
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Labor</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Description</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading labor payments...
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredPaidTodayEntries.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        No labor payments today
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredPaidTodayEntries.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell>{formatDate(entry.date)}</TableCell>
-                        <TableCell>{entry.labor?.name || "-"}</TableCell>
-                        <TableCell>{formatCurrency(Number(entry.amount))}</TableCell>
-                        <TableCell>{entry.description || "-"}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent value="kharcha" className="space-y-4" data-report-tab="kharcha">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Labor</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading advances...
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredAdvanceEntries.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        No kharcha entries yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredAdvanceEntries.map((kharcha) => (
-                      <TableRow key={kharcha.id}>
-                        <TableCell>{formatDate(kharcha.date)}</TableCell>
-                        <TableCell>{kharcha.laborName}</TableCell>
-                        <TableCell>
-                          {formatCurrency(Number(kharcha.amount))}
-                        </TableCell>
-                        <TableCell>{kharcha.reason || "-"}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => startEditAdvance(kharcha)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => deleteAdvance(kharcha.id)}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-          </Tabs>
-        </CardContent>
-      </Card>
-
-      <Dialog open={ledgerDialog} onOpenChange={setLedgerDialog}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              Labor Ledger - {allProfiles.find((l) => l.id === viewingLaborId)?.name}
-            </DialogTitle>
-          </DialogHeader>
-          {viewingLaborId && (() => {
-            const summary = getLaborSummary(viewingLaborId);
-            const totalPaid = paidByLabor[viewingLaborId] ?? 0;
-            const adjustedNetPayable = summary.netPayable - totalPaid;
-            const workRows = summary.workEntries.map((work) => ({
-              ...work,
-              articleName:
-                articles.find((article) => article.id === work.articleId)?.name ??
-                "Unknown",
-            }));
-            const paymentRows = paidEntries.filter(
-              (entry) => entry.laborId === viewingLaborId
-            );
-            const sortedWorkRows = [...workRows].sort(
-              (a, b) =>
-                new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
-            );
-            const sortedKharchaRows = [...summary.advances].sort(
-              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-            );
-            const sortedPaymentRows = [...paymentRows].sort(
-              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-            );
-            const latestWorkRows = sortedWorkRows.slice(0, 5);
-            const latestKharchaRows = sortedKharchaRows.slice(0, 5);
-            const latestPaymentRows = sortedPaymentRows.slice(0, 5);
-            return (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm">Total Earned</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl">
-                        {formatCurrency(summary.totalEarnings)}
-                      </p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm">Total Kharcha</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl">
-                        {formatCurrency(summary.totalAdvances)}
-                      </p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm">Net Payable</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl text-green-600">
-                        {formatCurrency(adjustedNetPayable)}
-                      </p>
-                    </CardContent>
-                  </Card>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <h3>Work History</h3>
-                    {sortedWorkRows.length > 5 && (
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    Start Date (optional)
+                  </Label>
+                  <Input
+                    type="date"
+                    value={laborReportStart}
+                    onChange={(e) => setLaborReportStart(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    End Date
+                  </Label>
+                  <Input
+                    type="date"
+                    value={laborReportEnd}
+                    onChange={(e) => setLaborReportEnd(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  {isLoadingLaborReport && (
+                    <p className="text-xs text-muted-foreground">Loading...</p>
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={() => exportLaborReport("excel")}
+                    disabled={!laborReport || laborReport.buckets.length === 0}
+                  >
+                    Excel
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => exportLaborReport("pdf")}
+                    disabled={!laborReport || laborReport.buckets.length === 0}
+                  >
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              {laborReport && (
+                <div className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div className="rounded border p-3">
+                      <p className="text-xs text-muted-foreground">
+                        Total Earnings
+                      </p>
+                      <p className="text-lg">
+                        {formatCurrency(laborReport.totals.totalEarnings)}
+                      </p>
+                    </div>
+                    <div className="rounded border p-3">
+                      <p className="text-xs text-muted-foreground">
+                        Total Advances
+                      </p>
+                      <p className="text-lg">
+                        {formatCurrency(laborReport.totals.totalAdvances)}
+                      </p>
+                    </div>
+                    <div className="rounded border p-3">
+                      <p className="text-xs text-muted-foreground">
+                        Total Paid Cash
+                      </p>
+                      <p className="text-lg">
+                        {formatCurrency(laborReport.totals.totalPaidCash)}
+                      </p>
+                    </div>
+                    <div className="rounded border p-3">
+                      <p className="text-xs text-muted-foreground">
+                        Net Payable
+                      </p>
+                      <p className="text-lg">
+                        {formatCurrency(laborReport.totals.netPayable)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Period</TableHead>
+                        <TableHead>Total Earnings</TableHead>
+                        <TableHead>Total Advances</TableHead>
+                        <TableHead>Total Paid Cash</TableHead>
+                        <TableHead>Net Payable</TableHead>
+                        <TableHead>Labors</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {laborReport.buckets.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={6}
+                            className="text-center text-muted-foreground"
+                          >
+                            No data found for selected period.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        laborReport.buckets.map((bucket) => (
+                          <TableRow key={bucket.key}>
+                            <TableCell>{bucket.key}</TableCell>
+                            <TableCell>
+                              {formatCurrency(bucket.totalEarnings)}
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(bucket.totalAdvances)}
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(bucket.totalPaidCash)}
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(bucket.netPayable)}
+                            </TableCell>
+                            <TableCell>{bucket.laborCount}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="entries" className="space-y-0">
+          <Card>
+            <CardHeader>
+              <CardTitle>Labor Management</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs
+                defaultValue="labors"
+                value={activeTab}
+                onValueChange={setActiveTab}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
+                    <TabsTrigger value="work">Work Entries</TabsTrigger>
+                    <TabsTrigger value="labor-paid-today">
+                      Labor Paid Today
+                    </TabsTrigger>
+                    <TabsTrigger value="kharcha">
+                      Kharcha (Advances)
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+                    <Label
+                      htmlFor="labor-search-filter"
+                      className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      Search Labor
+                    </Label>
+                    <div className="relative">
                       <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          openFilteredLaborTabFromLedger(viewingLaborId, "work")
-                        }
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute left-1 top-1/2 h-7 w-7 -translate-y-1/2"
+                        onClick={() => setLaborSearchQuery("")}
+                        disabled={!laborSearchQuery}
                       >
-                        See More
+                        <X className="h-4 w-4" />
                       </Button>
+                      <Input
+                        id="labor-search-filter"
+                        value={laborSearchQuery}
+                        onChange={(e) => setLaborSearchQuery(e.target.value)}
+                        placeholder="Search by labor name..."
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="min-w-[220px]">
+                    <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                      Department Filter
+                    </Label>
+                    <Select
+                      value={departmentFilter}
+                      onValueChange={setDepartmentFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Departments</SelectItem>
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="ml-auto flex items-center gap-2">
+                    {activeTab === "labors" && (
+                      <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
+                        <DialogTrigger asChild>
+                          <Button>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add Labor
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>
+                              {editingLaborId ? "Edit" : "Add"} Labor
+                            </DialogTitle>
+                          </DialogHeader>
+                          <form
+                            onSubmit={handleLaborSubmit}
+                            className="space-y-4"
+                          >
+                            <div>
+                              <Label>Labor Name</Label>
+                              <Input
+                                defaultValue={laborForm.name}
+                                onChange={(e) =>
+                                  setLaborForm({
+                                    ...laborForm,
+                                    name: e.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label>Department</Label>
+                              <Select
+                                value={laborForm.categoryId}
+                                onValueChange={(value) =>
+                                  setLaborForm({
+                                    ...laborForm,
+                                    categoryId: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select department" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {categories.map((cat) => (
+                                    <SelectItem key={cat.id} value={cat.id}>
+                                      {cat.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label>Payment Type</Label>
+                              <Select
+                                value={laborForm.paymentTypeId}
+                                onValueChange={(value) =>
+                                  setLaborForm({
+                                    ...laborForm,
+                                    paymentTypeId: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select payment type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {paymentTypes.map((type) => (
+                                    <SelectItem key={type.id} value={type.id}>
+                                      {type.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label>Default Rate (optional)</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={laborForm.defaultRate}
+                                onChange={(e) =>
+                                  setLaborForm({
+                                    ...laborForm,
+                                    defaultRate: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setLaborDialog(false)}
+                              >
+                                Cancel
+                              </Button>
+                              <Button type="submit">
+                                {editingLaborId ? "Update" : "Save"}
+                              </Button>
+                            </div>
+                          </form>
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                    {activeTab === "kharcha" && (
+                      <Dialog
+                        open={kharchaDialog}
+                        onOpenChange={setKharchaDialog}
+                      >
+                        <DialogTrigger asChild>
+                          <Button>
+                            <Wallet className="mr-2 h-4 w-4" />
+                            Add Kharcha
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>
+                              {editingAdvanceId ? "Edit" : "Record"} Kharcha
+                              (Advance)
+                            </DialogTitle>
+                          </DialogHeader>
+                          <form
+                            onSubmit={handleKharchaSubmit}
+                            className="space-y-4"
+                          >
+                            <div>
+                              <Label>Date</Label>
+                              <Input
+                                type="date"
+                                value={kharchaForm.date}
+                                onChange={(e) =>
+                                  setKharchaForm({
+                                    ...kharchaForm,
+                                    date: e.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label>Labor</Label>
+                              <Select
+                                value={kharchaForm.laborId}
+                                onValueChange={(value) =>
+                                  setKharchaForm({
+                                    ...kharchaForm,
+                                    laborId: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select labor" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {profiles.map((labor) => (
+                                    <SelectItem key={labor.id} value={labor.id}>
+                                      {labor.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label>Expense Category</Label>
+                              <Select
+                                value={kharchaForm.categoryId}
+                                onValueChange={(value) =>
+                                  setKharchaForm({
+                                    ...kharchaForm,
+                                    categoryId: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {expenseCategories.map((category) => (
+                                    <SelectItem
+                                      key={category.id}
+                                      value={category.id}
+                                    >
+                                      {category.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label>Amount</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={kharchaForm.amount}
+                                onChange={(e) =>
+                                  setKharchaForm({
+                                    ...kharchaForm,
+                                    amount: e.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label>Reason</Label>
+                              <Input
+                                value={kharchaForm.reason}
+                                onChange={(e) =>
+                                  setKharchaForm({
+                                    ...kharchaForm,
+                                    reason: e.target.value,
+                                  })
+                                }
+                                placeholder="Reason for advance..."
+                                required
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setKharchaDialog(false)}
+                              >
+                                Cancel
+                              </Button>
+                              <Button type="submit">
+                                {editingAdvanceId ? "Update" : "Record"} Kharcha
+                              </Button>
+                            </div>
+                          </form>
+                        </DialogContent>
+                      </Dialog>
                     )}
                   </div>
+                </div>
+
+                <TabsContent
+                  value="labors"
+                  className="space-y-4"
+                  data-report-tab="labors"
+                >
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Payment Type</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Total Earned</TableHead>
+                        <TableHead>Total Paid</TableHead>
+                        <TableHead>Kharcha</TableHead>
+                        <TableHead>Net Payable</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoading ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={9}
+                            className="text-center text-muted-foreground"
+                          >
+                            Loading labor profiles...
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredProfiles.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={9}
+                            className="text-center text-muted-foreground"
+                          >
+                            No labors yet
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredProfiles.map((labor) => {
+                          const summary = getLaborSummary(labor.id);
+                          const totalPaid = paidByLabor[labor.id] ?? 0;
+                          const adjustedNetPayable =
+                            summary.netPayable - totalPaid;
+                          return (
+                            <TableRow key={labor.id}>
+                              <TableCell>{labor.name}</TableCell>
+                              <TableCell>
+                                {labor.category?.name || "-"}
+                              </TableCell>
+                              <TableCell>
+                                {labor.paymentType?.name || "-"}
+                              </TableCell>
+                              <TableCell>{labor.status}</TableCell>
+                              <TableCell>
+                                {formatCurrency(summary.totalEarnings)}
+                              </TableCell>
+                              <TableCell>{formatCurrency(totalPaid)}</TableCell>
+                              <TableCell>
+                                {formatCurrency(summary.totalAdvances)}
+                              </TableCell>
+                              <TableCell>
+                                <span
+                                  className={
+                                    adjustedNetPayable > 0
+                                      ? "text-green-600"
+                                      : ""
+                                  }
+                                >
+                                  {formatCurrency(adjustedNetPayable)}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setViewingLaborId(labor.id);
+                                      setLedgerDialog(true);
+                                    }}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openPayDialog(labor)}
+                                  >
+                                    <Banknote className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => startEditLabor(labor)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => deleteLabor(labor.id)}
+                                  >
+                                    Fire
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </TabsContent>
+
+                <TabsContent
+                  value="work"
+                  className="space-y-4"
+                  data-report-tab="work"
+                >
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
+                        <TableHead>Labor</TableHead>
                         <TableHead>Article</TableHead>
                         <TableHead>Quantity</TableHead>
                         <TableHead>Rate</TableHead>
@@ -1145,125 +1255,402 @@ export function LaborManagement() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {latestWorkRows.length === 0 ? (
+                      {isLoading ? (
                         <TableRow>
                           <TableCell
-                            colSpan={5}
+                            colSpan={6}
                             className="text-center text-muted-foreground"
                           >
-                            No work history yet
+                            Loading work entries...
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredWorkEntries.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={6}
+                            className="text-center text-muted-foreground"
+                          >
+                            No work entries yet
                           </TableCell>
                         </TableRow>
                       ) : (
-                        latestWorkRows.map((work) => (
+                        filteredWorkEntries.map((work) => (
                           <TableRow key={work.id}>
                             <TableCell>{formatDate(work.startDate)}</TableCell>
+                            <TableCell>{work.laborName}</TableCell>
                             <TableCell>{work.articleName}</TableCell>
                             <TableCell>{Number(work.quantity)}</TableCell>
-                            <TableCell>{formatCurrency(Number(work.rate))}</TableCell>
-                            <TableCell>{formatCurrency(Number(work.total))}</TableCell>
+                            <TableCell>
+                              {formatCurrency(Number(work.rate))}
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(Number(work.total))}
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
                     </TableBody>
                   </Table>
-                </div>
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <h3>Kharcha History</h3>
-                    {sortedKharchaRows.length > 5 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          openFilteredLaborTabFromLedger(viewingLaborId, "kharcha")
-                        }
-                      >
-                        See More
-                      </Button>
-                    )}
-                  </div>
+                </TabsContent>
+
+                <TabsContent
+                  value="labor-paid-today"
+                  className="space-y-4"
+                  data-report-tab="labor-paid-today"
+                >
+                  <div className="flex items-center justify-between"></div>
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Reason</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {latestKharchaRows.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={3}
-                            className="text-center text-muted-foreground"
-                          >
-                            No kharcha history yet
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        latestKharchaRows.map((kharcha) => (
-                          <TableRow key={kharcha.id}>
-                            <TableCell>{formatDate(kharcha.date)}</TableCell>
-                            <TableCell>{formatCurrency(Number(kharcha.amount))}</TableCell>
-                            <TableCell>{kharcha.reason || "-"}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <h3>Labor Payments</h3>
-                    {sortedPaymentRows.length > 5 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          openFilteredLaborTabFromLedger(
-                            viewingLaborId,
-                            "labor-paid-today"
-                          )
-                        }
-                      >
-                        See More
-                      </Button>
-                    )}
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
+                        <TableHead>Labor</TableHead>
                         <TableHead>Amount</TableHead>
                         <TableHead>Description</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {latestPaymentRows.length === 0 ? (
+                      {isLoading ? (
                         <TableRow>
                           <TableCell
-                            colSpan={3}
+                            colSpan={4}
                             className="text-center text-muted-foreground"
                           >
-                            No labor payments yet
+                            Loading labor payments...
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredPaidTodayEntries.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-center text-muted-foreground"
+                          >
+                            No labor payments today
                           </TableCell>
                         </TableRow>
                       ) : (
-                        latestPaymentRows.map((payment) => (
-                          <TableRow key={payment.id}>
-                            <TableCell>{formatDate(payment.date)}</TableCell>
-                            <TableCell>{formatCurrency(Number(payment.amount))}</TableCell>
-                            <TableCell>{payment.description || "-"}</TableCell>
+                        filteredPaidTodayEntries.map((entry) => (
+                          <TableRow key={entry.id}>
+                            <TableCell>{formatDate(entry.date)}</TableCell>
+                            <TableCell>{entry.labor?.name || "-"}</TableCell>
+                            <TableCell>
+                              {formatCurrency(Number(entry.amount))}
+                            </TableCell>
+                            <TableCell>{entry.description || "-"}</TableCell>
                           </TableRow>
                         ))
                       )}
                     </TableBody>
                   </Table>
+                </TabsContent>
+
+                <TabsContent
+                  value="kharcha"
+                  className="space-y-4"
+                  data-report-tab="kharcha"
+                >
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Labor</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Reason</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoading ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-center text-muted-foreground"
+                          >
+                            Loading advances...
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredAdvanceEntries.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-center text-muted-foreground"
+                          >
+                            No kharcha entries yet
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredAdvanceEntries.map((kharcha) => (
+                          <TableRow key={kharcha.id}>
+                            <TableCell>{formatDate(kharcha.date)}</TableCell>
+                            <TableCell>{kharcha.laborName}</TableCell>
+                            <TableCell>
+                              {formatCurrency(Number(kharcha.amount))}
+                            </TableCell>
+                            <TableCell>{kharcha.reason || "-"}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => startEditAdvance(kharcha)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => deleteAdvance(kharcha.id)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={ledgerDialog} onOpenChange={setLedgerDialog}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Labor Ledger -{" "}
+              {allProfiles.find((l) => l.id === viewingLaborId)?.name}
+            </DialogTitle>
+          </DialogHeader>
+          {viewingLaborId &&
+            (() => {
+              const summary = getLaborSummary(viewingLaborId);
+              const totalPaid = paidByLabor[viewingLaborId] ?? 0;
+              const adjustedNetPayable = summary.netPayable - totalPaid;
+              const workRows = summary.workEntries.map((work) => ({
+                ...work,
+                articleName:
+                  articles.find((article) => article.id === work.articleId)
+                    ?.name ?? "Unknown",
+              }));
+              const paymentRows = paidEntries.filter(
+                (entry) => entry.laborId === viewingLaborId,
+              );
+              const sortedWorkRows = [...workRows].sort(
+                (a, b) =>
+                  new Date(b.startDate).getTime() -
+                  new Date(a.startDate).getTime(),
+              );
+              const sortedKharchaRows = [...summary.advances].sort(
+                (a, b) =>
+                  new Date(b.date).getTime() - new Date(a.date).getTime(),
+              );
+              const sortedPaymentRows = [...paymentRows].sort(
+                (a, b) =>
+                  new Date(b.date).getTime() - new Date(a.date).getTime(),
+              );
+              const latestWorkRows = sortedWorkRows.slice(0, 5);
+              const latestKharchaRows = sortedKharchaRows.slice(0, 5);
+              const latestPaymentRows = sortedPaymentRows.slice(0, 5);
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-4">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm">Total Earned</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-2xl">
+                          {formatCurrency(summary.totalEarnings)}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm">Total Kharcha</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-2xl">
+                          {formatCurrency(summary.totalAdvances)}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm">Net Payable</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-2xl text-green-600">
+                          {formatCurrency(adjustedNetPayable)}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3>Work History</h3>
+                      {sortedWorkRows.length > 5 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            openFilteredLaborTabFromLedger(
+                              viewingLaborId,
+                              "work",
+                            )
+                          }
+                        >
+                          See More
+                        </Button>
+                      )}
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Article</TableHead>
+                          <TableHead>Quantity</TableHead>
+                          <TableHead>Rate</TableHead>
+                          <TableHead>Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {latestWorkRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={5}
+                              className="text-center text-muted-foreground"
+                            >
+                              No work history yet
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          latestWorkRows.map((work) => (
+                            <TableRow key={work.id}>
+                              <TableCell>
+                                {formatDate(work.startDate)}
+                              </TableCell>
+                              <TableCell>{work.articleName}</TableCell>
+                              <TableCell>{Number(work.quantity)}</TableCell>
+                              <TableCell>
+                                {formatCurrency(Number(work.rate))}
+                              </TableCell>
+                              <TableCell>
+                                {formatCurrency(Number(work.total))}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3>Kharcha History</h3>
+                      {sortedKharchaRows.length > 5 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            openFilteredLaborTabFromLedger(
+                              viewingLaborId,
+                              "kharcha",
+                            )
+                          }
+                        >
+                          See More
+                        </Button>
+                      )}
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Reason</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {latestKharchaRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="text-center text-muted-foreground"
+                            >
+                              No kharcha history yet
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          latestKharchaRows.map((kharcha) => (
+                            <TableRow key={kharcha.id}>
+                              <TableCell>{formatDate(kharcha.date)}</TableCell>
+                              <TableCell>
+                                {formatCurrency(Number(kharcha.amount))}
+                              </TableCell>
+                              <TableCell>{kharcha.reason || "-"}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3>Labor Payments</h3>
+                      {sortedPaymentRows.length > 5 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            openFilteredLaborTabFromLedger(
+                              viewingLaborId,
+                              "labor-paid-today",
+                            )
+                          }
+                        >
+                          See More
+                        </Button>
+                      )}
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Description</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {latestPaymentRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={3}
+                              className="text-center text-muted-foreground"
+                            >
+                              No labor payments yet
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          latestPaymentRows.map((payment) => (
+                            <TableRow key={payment.id}>
+                              <TableCell>{formatDate(payment.date)}</TableCell>
+                              <TableCell>
+                                {formatCurrency(Number(payment.amount))}
+                              </TableCell>
+                              <TableCell>
+                                {payment.description || "-"}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
         </DialogContent>
       </Dialog>
 
@@ -1277,7 +1664,9 @@ export function LaborManagement() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Pay Labor - {allProfiles.find((item) => item.id === payingLaborId)?.name || "-"}
+              Pay Labor -{" "}
+              {allProfiles.find((item) => item.id === payingLaborId)?.name ||
+                "-"}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleLaborPaySubmit} className="space-y-4">
@@ -1286,7 +1675,9 @@ export function LaborManagement() {
               <Input
                 type="date"
                 value={payForm.date}
-                onChange={(e) => setPayForm({ ...payForm, date: e.target.value })}
+                onChange={(e) =>
+                  setPayForm({ ...payForm, date: e.target.value })
+                }
                 required
               />
             </div>
@@ -1306,7 +1697,9 @@ export function LaborManagement() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="CASH">Cash</SelectItem>
-                  <SelectItem value="KHARCHA_ADVANCE">Kharcha (Advance)</SelectItem>
+                  <SelectItem value="KHARCHA_ADVANCE">
+                    Kharcha (Advance)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1317,7 +1710,9 @@ export function LaborManagement() {
                 step="0.01"
                 min="0"
                 value={payForm.amount}
-                onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })}
+                onChange={(e) =>
+                  setPayForm({ ...payForm, amount: e.target.value })
+                }
                 required
               />
             </div>
@@ -1325,12 +1720,18 @@ export function LaborManagement() {
               <Label>Description</Label>
               <Input
                 value={payForm.description}
-                onChange={(e) => setPayForm({ ...payForm, description: e.target.value })}
+                onChange={(e) =>
+                  setPayForm({ ...payForm, description: e.target.value })
+                }
                 placeholder="Optional note"
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setPayDialog(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPayDialog(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit">Save Payment</Button>

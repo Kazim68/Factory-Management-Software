@@ -29,7 +29,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { configApi } from "../lib/api";
-import { TabReportActions } from "./TabReportActions";
 import type {
   ApiArticle,
   ApiExpenseCategory,
@@ -44,8 +43,12 @@ export function Configuration() {
   const [units, setUnits] = useState<ApiUnit[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<ApiExpenseCategory[]>([]);
-  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<
+    ApiExpenseCategory[]
+  >([]);
+  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>(
+    [],
+  );
   const [status, setStatus] = useState<LoadState>("idle");
 
   const [unitDialog, setUnitDialog] = useState(false);
@@ -55,10 +58,11 @@ export function Configuration() {
 
   const [editingUnit, setEditingUnit] = useState<ApiUnit | null>(null);
   const [editingArticle, setEditingArticle] = useState<ApiArticle | null>(null);
-  const [editingPayment, setEditingPayment] = useState<ApiPaymentType | null>(null);
-  const [editingExpense, setEditingExpense] = useState<ApiExpenseCategory | null>(
-    null
+  const [editingPayment, setEditingPayment] = useState<ApiPaymentType | null>(
+    null,
   );
+  const [editingExpense, setEditingExpense] =
+    useState<ApiExpenseCategory | null>(null);
 
   const [unitForm, setUnitForm] = useState({ name: "", symbol: "" });
   const [articleForm, setArticleForm] = useState({ name: "", code: "" });
@@ -72,14 +76,19 @@ export function Configuration() {
   const loadConfig = async () => {
     setStatus("loading");
     try {
-      const [unitsData, articlesData, paymentData, expenseData, laborCategoryData] =
-        await Promise.all([
-          configApi.listUnits(),
-          configApi.listArticles(),
-          configApi.listPaymentTypes(),
-          configApi.listExpenseCategories(),
-          configApi.listLaborCategories(),
-        ]);
+      const [
+        unitsData,
+        articlesData,
+        paymentData,
+        expenseData,
+        laborCategoryData,
+      ] = await Promise.all([
+        configApi.listUnits(),
+        configApi.listArticles(),
+        configApi.listPaymentTypes(),
+        configApi.listExpenseCategories(),
+        configApi.listLaborCategories(),
+      ]);
 
       setUnits(unitsData);
       setArticles(articlesData);
@@ -150,7 +159,6 @@ export function Configuration() {
     }
   };
 
-
   const handlePaymentSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
@@ -163,7 +171,8 @@ export function Configuration() {
       } else {
         await configApi.createPaymentType({
           name: paymentForm.name.trim(),
-          unitId: paymentForm.unitId === "none" ? undefined : paymentForm.unitId,
+          unitId:
+            paymentForm.unitId === "none" ? undefined : paymentForm.unitId,
         });
         toast.success("Payment type added");
       }
@@ -213,7 +222,6 @@ export function Configuration() {
     setArticleDialog(true);
   };
 
-
   const startPaymentEdit = (payment: ApiPaymentType) => {
     setEditingPayment(payment);
     setPaymentForm({ name: payment.name, unitId: payment.unitId || "none" });
@@ -250,7 +258,6 @@ export function Configuration() {
     }
   };
 
-
   const handlePaymentDelete = async (payment: ApiPaymentType) => {
     if (!confirm(`Delete payment type "${payment.name}"?`)) return;
     try {
@@ -277,7 +284,10 @@ export function Configuration() {
 
   const renderEmpty = (colSpan: number, message: string) => (
     <TableRow>
-      <TableCell colSpan={colSpan} className="text-center text-muted-foreground">
+      <TableCell
+        colSpan={colSpan}
+        className="text-center text-muted-foreground"
+      >
         {message}
       </TableCell>
     </TableRow>
@@ -292,22 +302,28 @@ export function Configuration() {
           <CardTitle>System Configuration</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="units" value={activeTab} onValueChange={setActiveTab}>
+          <Tabs
+            defaultValue="units"
+            value={activeTab}
+            onValueChange={setActiveTab}
+          >
             <div className="flex items-center justify-between gap-3">
               <TabsList className="grid w-full grid-cols-5">
-              <TabsTrigger value="units">Units</TabsTrigger>
-              <TabsTrigger value="articles">Articles</TabsTrigger>
-              <TabsTrigger value="payment">Payment Types</TabsTrigger>
-              <TabsTrigger value="expenses">Expense Categories</TabsTrigger>
-              <TabsTrigger value="labor-categories">Labor Categories</TabsTrigger>
+                <TabsTrigger value="units">Units</TabsTrigger>
+                <TabsTrigger value="articles">Articles</TabsTrigger>
+                <TabsTrigger value="payment">Payment Types</TabsTrigger>
+                <TabsTrigger value="expenses">Expense Categories</TabsTrigger>
+                <TabsTrigger value="labor-categories">
+                  Labor Categories
+                </TabsTrigger>
               </TabsList>
-              <TabReportActions
-                title={`Configuration ${activeTab} report`}
-                selector={`[data-report-tab="${activeTab}"]`}
-              />
             </div>
 
-            <TabsContent value="units" className="space-y-4" data-report-tab="units">
+            <TabsContent
+              value="units"
+              className="space-y-4"
+              data-report-tab="units"
+            >
               <div className="flex justify-end">
                 <Dialog
                   open={unitDialog}
@@ -342,7 +358,10 @@ export function Configuration() {
                         <Input
                           value={unitForm.name}
                           onChange={(event) =>
-                            setUnitForm({ ...unitForm, name: event.target.value })
+                            setUnitForm({
+                              ...unitForm,
+                              name: event.target.value,
+                            })
                           }
                           required
                         />
@@ -352,7 +371,10 @@ export function Configuration() {
                         <Input
                           value={unitForm.symbol}
                           onChange={(event) =>
-                            setUnitForm({ ...unitForm, symbol: event.target.value })
+                            setUnitForm({
+                              ...unitForm,
+                              symbol: event.target.value,
+                            })
                           }
                         />
                       </div>
@@ -411,7 +433,11 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="articles" className="space-y-4" data-report-tab="articles">
+            <TabsContent
+              value="articles"
+              className="space-y-4"
+              data-report-tab="articles"
+            >
               <div className="flex justify-end">
                 <Dialog
                   open={articleDialog}
@@ -521,8 +547,11 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-
-            <TabsContent value="payment" className="space-y-4" data-report-tab="payment">
+            <TabsContent
+              value="payment"
+              className="space-y-4"
+              data-report-tab="payment"
+            >
               <div className="flex justify-end">
                 <Dialog
                   open={paymentDialog}
@@ -548,7 +577,9 @@ export function Configuration() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>
-                        {editingPayment ? "Edit Payment Type" : "Add Payment Type"}
+                        {editingPayment
+                          ? "Edit Payment Type"
+                          : "Add Payment Type"}
                       </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handlePaymentSubmit} className="space-y-4">
@@ -641,7 +672,11 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="expenses" className="space-y-4" data-report-tab="expenses">
+            <TabsContent
+              value="expenses"
+              className="space-y-4"
+              data-report-tab="expenses"
+            >
               <div className="flex justify-end">
                 <Dialog
                   open={expenseDialog}
@@ -736,7 +771,11 @@ export function Configuration() {
               </Table>
             </TabsContent>
 
-            <TabsContent value="labor-categories" className="space-y-4" data-report-tab="labor-categories">
+            <TabsContent
+              value="labor-categories"
+              className="space-y-4"
+              data-report-tab="labor-categories"
+            >
               <p className="text-sm text-muted-foreground">
                 Departments are fixed by system and used as labor categories.
               </p>

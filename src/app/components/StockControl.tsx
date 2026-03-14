@@ -4,8 +4,20 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Badge } from "./ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
 import { productionApi } from "../lib/api";
-import type { ApiStockArticleRow, ApiStockMode, ApiStockSummary } from "../types/api";
+import type {
+  ApiStockArticleRow,
+  ApiStockMode,
+  ApiStockSummary,
+} from "../types/api";
 import { toast } from "sonner";
 
 const emptySummary: ApiStockSummary = {
@@ -86,7 +98,9 @@ export function StockControl() {
             <CardTitle className="text-sm">Ready Stock (Dozen)</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl text-green-600">{summary.readyStockDozen}</div>
+            <div className="text-2xl text-green-600">
+              {summary.readyStockDozen}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -123,7 +137,10 @@ export function StockControl() {
               <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                 Stock Filter
               </Label>
-              <Tabs value={mode} onValueChange={(value) => setMode(value as ApiStockMode)}>
+              <Tabs
+                value={mode}
+                onValueChange={(value) => setMode(value as ApiStockMode)}
+              >
                 <TabsList>
                   <TabsTrigger value="IN_STOCK">In Stock</TabsTrigger>
                   <TabsTrigger value="PACKED">Packed</TabsTrigger>
@@ -132,32 +149,45 @@ export function StockControl() {
             </div>
           </div>
 
-          <div className="rounded border">
-            <div className="grid grid-cols-[1fr_auto] gap-2 border-b bg-muted/50 px-4 py-2 text-sm">
-              <span>Article</span>
-              <span>Quantity (Dozen)</span>
-            </div>
-            <div className="max-h-[420px] overflow-y-auto">
-              {isLoading ? (
-                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  Loading stock rows...
-                </div>
-              ) : rows.length === 0 ? (
-                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  No articles found for this filter.
-                </div>
-              ) : (
-                rows.map((row) => (
-                  <div
-                    key={row.articleId}
-                    className="grid grid-cols-[1fr_auto] items-center gap-2 border-b px-4 py-3 last:border-b-0"
-                  >
-                    <span>{row.articleName}</span>
-                    <Badge variant="secondary">{row.quantityDozen}</Badge>
-                  </div>
-                ))
-              )}
-            </div>
+          <div className="max-h-[420px] overflow-y-auto rounded border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Article</TableHead>
+                  <TableHead>Quantity (Dozen)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={2}
+                      className="text-center text-sm text-muted-foreground"
+                    >
+                      Loading stock rows...
+                    </TableCell>
+                  </TableRow>
+                ) : rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={2}
+                      className="text-center text-sm text-muted-foreground"
+                    >
+                      No articles found for this filter.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((row) => (
+                    <TableRow key={row.articleId}>
+                      <TableCell>{row.articleName}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{row.quantityDozen}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>

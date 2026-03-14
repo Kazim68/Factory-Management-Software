@@ -7,6 +7,80 @@ export const listParties = async (req, res) => {
   res.json(parties);
 };
 
+const isCashLikeLedgerEntry = (entry) => {
+  const reference = String(entry.reference ?? "").toLowerCase();
+  const description = String(entry.description ?? "").toLowerCase();
+  return reference.includes("cash") || description.includes("cash");
+};
+
+export const listSupplierPendingDues = async (req, res) => {
+  const asOfDate = toDate(req.query.asOf);
+  const end = asOfDate ?? new Date();
+
+  const [suppliers, ledgerEntries] = await Promise.all([
+    prisma.party.findMany({
+      where: {
+        type: {
+          in: ["SUPPLIER", "BOTH"],
+        },
+      },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+      },
+    }),
+    prisma.partyLedgerEntry.findMany({
+      where: {
+        date: {
+          lte: end,
+        },
+      },
+      select: {
+        partyId: true,
+        reference: true,
+        description: true,
+        balance: true,
+      },
+    }),
+  ]);
+
+  const supplierMap = suppliers.reduce((acc, supplier) => {
+    acc[supplier.id] = supplier;
+    return acc;
+  }, {});
+
+  const runningBalanceByParty = {};
+  for (const entry of ledgerEntries) {
+    if (!supplierMap[entry.partyId]) continue;
+    if (isCashLikeLedgerEntry(entry)) continue;
+    const current = Number(runningBalanceByParty[entry.partyId] ?? 0);
+    runningBalanceByParty[entry.partyId] = current + Number(entry.balance ?? 0);
+  }
+
+  const pending = suppliers
+    .map((supplier) => {
+      const balance = Number(runningBalanceByParty[supplier.id] ?? 0);
+      const remainingDue = balance < 0 ? Math.abs(balance) : 0;
+      return {
+        partyId: supplier.id,
+        partyName: supplier.name,
+        partyType: supplier.type,
+        netBalance: balance,
+        remainingDue,
+      };
+    })
+    .filter((row) => row.remainingDue > 0)
+    .sort((a, b) => b.remainingDue - a.remainingDue);
+
+  res.json({
+    asOf: end.toISOString(),
+    totalPending: pending.reduce((sum, row) => sum + row.remainingDue, 0),
+    pending,
+  });
+};
+
 export const createParty = async (req, res) => {
   const party = await prisma.party.create({
     data: {
@@ -40,65 +114,67 @@ export const getPartyLedger = async (req, res) => {
   const end = toDate(req.query.end);
   const [ledger, payments, chemicalCash, rexineCash, materialCash] =
     await Promise.all([
-    prisma.partyLedgerEntry.findMany({
-      where: {
-        partyId: req.params.partyId,
-        date: withDateRange(start, end),
-      },
-      orderBy: { date: "asc" },
-    }),
-    prisma.partyPayment.findMany({
-      where: {
-        partyId: req.params.partyId,
-        date: withDateRange(start, end),
-      },
-      orderBy: { date: "asc" },
-    }),
-    prisma.chemicalPurchase.findMany({
-      where: {
-        partyId: req.params.partyId,
-        date: withDateRange(start, end),
-        paymentType: "CASH",
-      },
-      include: { expenses: true },
-      orderBy: { date: "asc" },
-    }),
-    prisma.rexinePurchase.findMany({
-      where: {
-        partyId: req.params.partyId,
-        date: withDateRange(start, end),
-        paymentType: "CASH",
-      },
-      include: { expenses: true },
-      orderBy: { date: "asc" },
-    }),
-    prisma.materialPurchase.findMany({
-      where: {
-        partyId: req.params.partyId,
-        date: withDateRange(start, end),
-        paymentType: "CASH",
-      },
-      include: { expenses: true },
-      orderBy: { date: "asc" },
-    }),
-  ]);
+      prisma.partyLedgerEntry.findMany({
+        where: {
+          partyId: req.params.partyId,
+          date: withDateRange(start, end),
+        },
+        orderBy: { date: "asc" },
+      }),
+      prisma.partyPayment.findMany({
+        where: {
+          partyId: req.params.partyId,
+          date: withDateRange(start, end),
+        },
+        orderBy: { date: "asc" },
+      }),
+      prisma.chemicalPurchase.findMany({
+        where: {
+          partyId: req.params.partyId,
+          date: withDateRange(start, end),
+          paymentType: "CASH",
+        },
+        include: { expenses: true },
+        orderBy: { date: "asc" },
+      }),
+      prisma.rexinePurchase.findMany({
+        where: {
+          partyId: req.params.partyId,
+          date: withDateRange(start, end),
+          paymentType: "CASH",
+        },
+        include: { expenses: true },
+        orderBy: { date: "asc" },
+      }),
+      prisma.materialPurchase.findMany({
+        where: {
+          partyId: req.params.partyId,
+          date: withDateRange(start, end),
+          paymentType: "CASH",
+        },
+        include: { expenses: true },
+        orderBy: { date: "asc" },
+      }),
+    ]);
 
   const cashPayments = payments.filter(
-    (payment) =>
-      String(payment.method ?? "CASH").toUpperCase() === "CASH"
+    (payment) => String(payment.method ?? "CASH").toUpperCase() === "CASH",
   );
 
   const makeKey = (entry) => {
     const amount = Number(entry.amount ?? entry.balance ?? 0);
     const reference = entry.reference ?? "";
     const description = entry.description ?? "";
-    const date = entry.date instanceof Date ? entry.date.toISOString() : `${entry.date}`;
+    const date =
+      entry.date instanceof Date ? entry.date.toISOString() : `${entry.date}`;
     return `${entry.partyId}|${date}|${amount}|${reference}|${description}`;
   };
 
   const cashKeys = new Set(cashPayments.map((payment) => makeKey(payment)));
 
-  const filteredLedger = ledger.filter((entry) => !cashKeys.has(makeKey(entry)));
+  const filteredLedger = ledger.filter(
+    (entry) => !cashKeys.has(makeKey(entry)),
+  );
 
   const cashEntries = cashPayments.map((payment) => ({
     id: `cash-${payment.id}`,
@@ -184,8 +260,8 @@ export const getPartyLedger = async (req, res) => {
         const aCreated = a.createdAt ?? a.date;
         const bCreated = b.createdAt ?? b.date;
         return bCreated - aCreated;
-      }
-    )
+      },
+    ),
   );
 };
 
@@ -196,7 +272,7 @@ export const createPartyPayment = async (req, res) => {
       ? "CREDIT"
       : ["CASH", "CREDIT"].includes(rawMethod)
         ? rawMethod
-    : "CASH";
+        : "CASH";
   const isCash = method === "CASH";
   const direction = (req.body.direction ?? "PAY").toString().toUpperCase();
   const normalizedDirection =
@@ -208,7 +284,8 @@ export const createPartyPayment = async (req, res) => {
     req.body.description ?? (isCash ? "Cash payment" : "Khata settlement");
 
   const paymentDate = new Date(req.body.date);
-  const payment = await prisma.$transaction(async (tx) => {
+  const payment = await prisma
+    .$transaction(async (tx) => {
       const allocations = [];
       if (
         normalizedDirection === "RECEIVE" &&
@@ -232,7 +309,7 @@ export const createPartyPayment = async (req, res) => {
           const total = Number(bill.total ?? 0);
           const totalPaid = (bill.payments ?? []).reduce(
             (sum, p) => sum + Number(p.amount ?? 0),
-            0
+            0,
           );
           const remaining = Math.max(total - totalPaid, 0);
           if (remaining <= 0) continue;
@@ -256,7 +333,7 @@ export const createPartyPayment = async (req, res) => {
           const total = Number(bill.total ?? 0);
           const totalPaid = (bill.payments ?? []).reduce(
             (sum, p) => sum + Number(p.amount ?? 0),
-            0
+            0,
           );
           const remaining = Math.max(total - totalPaid, 0);
           if (remaining <= 0) {
@@ -321,8 +398,11 @@ export const createPartyPayment = async (req, res) => {
       });
 
       return createdPayments[0];
-    }).catch((error) => {
-      res.status(400).json({ error: error.message ?? "Failed to record payment." });
+    })
+    .catch((error) => {
+      res
+        .status(400)
+        .json({ error: error.message ?? "Failed to record payment." });
       return null;
     });
 
