@@ -11,6 +11,7 @@ import type {
   ApiPaymentType,
   ApiParty,
   ApiPartyLedgerEntry,
+  ApiSupplierPendingDuesResponse,
   ApiPartyPayment,
   ApiBill,
   ApiBillLedgerEntry,
@@ -27,6 +28,9 @@ import type {
   ApiStockArticleRow,
   ApiStockMode,
   ApiUnit,
+  ApiLaborSummaryReport,
+  ApiPartyMonthlyOutstandingReport,
+  ApiRoznamchaSummaryReport,
 } from "../types/api";
 import { auth } from "./auth";
 
@@ -57,6 +61,20 @@ const request = async <T>(payload: ApiRequest): Promise<T> => {
 
 const get = <T>(path: string) => request<T>({ path });
 
+const withQuery = (
+  path: string,
+  params?: Record<string, string | undefined>,
+) => {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) query.set(key, value);
+    }
+  }
+  const suffix = query.toString();
+  return `${path}${suffix ? `?${suffix}` : ""}`;
+};
+
 const AUDITABLE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -78,14 +96,13 @@ const ENTITY_LABELS: Record<string, string> = {
 };
 
 const toTitleCase = (value: string): string =>
-  value
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  value.replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
 const singularize = (value: string): string =>
   value.endsWith("s") ? value.slice(0, -1) : value;
 
-const isIdSegment = (segment: string): boolean => /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
+const isIdSegment = (segment: string): boolean =>
+  /^(\d+|[0-9a-fA-F-]{8,})$/.test(segment);
 
 const getAuditContext = (path: string, method: string) => {
   const cleanPath = path.split("?")[0];
@@ -93,13 +110,16 @@ const getAuditContext = (path: string, method: string) => {
   const shouldTreatLastSegmentAsId = method === "PATCH" || method === "DELETE";
 
   const resourceId =
-    segments.length > 0 && (shouldTreatLastSegmentAsId || isIdSegment(segments[segments.length - 1]))
+    segments.length > 0 &&
+    (shouldTreatLastSegmentAsId || isIdSegment(segments[segments.length - 1]))
       ? segments[segments.length - 1]
       : undefined;
 
   const entitySegments = resourceId ? segments.slice(0, -1) : segments;
   const entity = entitySegments.length
-    ? entitySegments.map((segment) => toTitleCase(singularize(segment))).join(" / ")
+    ? entitySegments
+        .map((segment) => toTitleCase(singularize(segment)))
+        .join(" / ")
     : "Record";
 
   return { cleanPath, entity, resourceId };
@@ -120,7 +140,8 @@ const formatValue = (value: unknown): string => {
   if (typeof value === "number") return value.toLocaleString();
   if (typeof value === "string") return value;
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (Array.isArray(value)) return value.map((item) => formatValue(item)).join(", ");
+  if (Array.isArray(value))
+    return value.map((item) => formatValue(item)).join(", ");
 
   try {
     return JSON.stringify(value);
@@ -130,9 +151,14 @@ const formatValue = (value: unknown): string => {
 };
 
 const formatFieldName = (field: string): string =>
-  toTitleCase(field.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\bId\b/g, ""));
+  toTitleCase(
+    field.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\bId\b/g, ""),
+  );
 
-const pickComparableValue = (source: Record<string, unknown> | undefined, key: string): unknown => {
+const pickComparableValue = (
+  source: Record<string, unknown> | undefined,
+  key: string,
+): unknown => {
   if (!source) return undefined;
   if (key in source) return source[key];
 
@@ -143,7 +169,6 @@ const pickComparableValue = (source: Record<string, unknown> | undefined, key: s
 
   return undefined;
 };
-
 
 const isNumericLike = (value: unknown): boolean => {
   if (typeof value === "number") return Number.isFinite(value);
@@ -173,7 +198,10 @@ const valuesEqual = (left: unknown, right: unknown): boolean => {
   }
 };
 
-const buildFieldChanges = (payloadBody: unknown, previousValues?: Record<string, unknown>): string[] => {
+const buildFieldChanges = (
+  payloadBody: unknown,
+  previousValues?: Record<string, unknown>,
+): string[] => {
   if (!payloadBody || typeof payloadBody !== "object") return [];
 
   const source = payloadBody as Record<string, unknown>;
@@ -195,7 +223,11 @@ const buildFieldChanges = (payloadBody: unknown, previousValues?: Record<string,
     });
 };
 
-const getFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditMeta): string => {
+const getFieldDisplayValue = (
+  key: string,
+  value: unknown,
+  auditMeta?: ApiAuditMeta,
+): string => {
   if (auditMeta?.fieldLabels?.[key]) {
     return auditMeta.fieldLabels[key];
   }
@@ -203,7 +235,11 @@ const getFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditM
   return formatValue(value);
 };
 
-const getPreviousFieldDisplayValue = (key: string, value: unknown, auditMeta?: ApiAuditMeta): string => {
+const getPreviousFieldDisplayValue = (
+  key: string,
+  value: unknown,
+  auditMeta?: ApiAuditMeta,
+): string => {
   if (auditMeta?.previousFieldLabels?.[key]) {
     return auditMeta.previousFieldLabels[key];
   }
@@ -250,7 +286,9 @@ const pickValue = (payload: unknown, keys: string[]): string | undefined => {
 
 const getEntityLabel = (cleanPath: string, fallbackEntity: string): string => {
   const segments = cleanPath.split("/").filter(Boolean);
-  const baseSegments = segments.filter((segment) => !/^(\d+|[0-9a-fA-F-]{8,})$/.test(segment));
+  const baseSegments = segments.filter(
+    (segment) => !/^(\d+|[0-9a-fA-F-]{8,})$/.test(segment),
+  );
   const key = baseSegments.join("/");
   return ENTITY_LABELS[key] ?? fallbackEntity.toLowerCase();
 };
@@ -265,17 +303,28 @@ const buildFriendlyDetail = (
   const label = getEntityLabel(cleanPath, entity);
   const what =
     auditMeta?.itemLabel ??
-    pickValue(payloadBody, ["name", "description", "detail", "reference", "billNumber"]) ??
-    pickValue(payloadBody, ["amount", "quantity", "total"])?.concat(" amount") ??
+    pickValue(payloadBody, [
+      "name",
+      "description",
+      "detail",
+      "reference",
+      "billNumber",
+    ]) ??
+    pickValue(payloadBody, ["amount", "quantity", "total"])?.concat(
+      " amount",
+    ) ??
     "record";
 
   const titledLabel = `${label[0].toUpperCase()}${label.slice(1)}`;
   const entityName = auditMeta?.itemLabel ? `[${auditMeta.itemLabel}]` : "";
   const fieldChanges = buildAuditChanges(payloadBody, auditMeta);
-  const changeSummary = fieldChanges.length > 0 ? fieldChanges.join("; ") : what;
+  const changeSummary =
+    fieldChanges.length > 0 ? fieldChanges.join("; ") : what;
 
   if (method === "POST") {
-    return `${titledLabel} created: ${entityName || what}.`.replace(/\s+/g, " ").trim();
+    return `${titledLabel} created: ${entityName || what}.`
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   if (method === "PATCH") {
@@ -298,16 +347,22 @@ const buildFriendlyDetail = (
       .trim();
   }
 
-  return `${titledLabel} deleted: ${entityName || what}.`.replace(/\s+/g, " ").trim();
+  return `${titledLabel} deleted: ${entityName || what}.`
+    .replace(/\s+/g, " ")
+    .trim();
 };
 
 const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
 
-  const { cleanPath, entity, resourceId } = getAuditContext(payload.path, method);
+  const { cleanPath, entity, resourceId } = getAuditContext(
+    payload.path,
+    method,
+  );
   const actor = auth.getSessionUser();
-  const verb = method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
+  const verb =
+    method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
 
   auth.logAction({
     actorId: actor?.id,
@@ -317,8 +372,13 @@ const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
     resourceId,
     method: method as "POST" | "PATCH" | "DELETE",
     detail:
-      buildFriendlyDetail(method as "POST" | "PATCH" | "DELETE", cleanPath, entity, payload.body, auditMeta) ??
-      stringifyDetail({ path: cleanPath, payload: payload.body }),
+      buildFriendlyDetail(
+        method as "POST" | "PATCH" | "DELETE",
+        cleanPath,
+        entity,
+        payload.body,
+        auditMeta,
+      ) ?? stringifyDetail({ path: cleanPath, payload: payload.body }),
   });
 };
 
@@ -328,7 +388,7 @@ export const configApi = {
     request({ path: "/config/units", method: "POST", body: data }),
   updateUnit: (
     unitId: string,
-    data: { name: string; symbol?: string | null }
+    data: { name: string; symbol?: string | null },
   ): Promise<ApiUnit> =>
     request({ path: `/config/units/${unitId}`, method: "PATCH", body: data }),
   deleteUnit: (unitId: string): Promise<void> =>
@@ -339,9 +399,13 @@ export const configApi = {
     request({ path: "/config/articles", method: "POST", body: data }),
   updateArticle: (
     articleId: string,
-    data: { name: string; code?: string | null }
+    data: { name: string; code?: string | null },
   ): Promise<ApiArticle> =>
-    request({ path: `/config/articles/${articleId}`, method: "PATCH", body: data }),
+    request({
+      path: `/config/articles/${articleId}`,
+      method: "PATCH",
+      body: data,
+    }),
   deleteArticle: (articleId: string): Promise<void> =>
     request({ path: `/config/articles/${articleId}`, method: "DELETE" }),
 
@@ -351,7 +415,7 @@ export const configApi = {
     request({ path: "/config/labor-categories", method: "POST", body: data }),
   updateLaborCategory: (
     categoryId: string,
-    data: { name: string }
+    data: { name: string },
   ): Promise<ApiLaborCategory> =>
     request({
       path: `/config/labor-categories/${categoryId}`,
@@ -359,7 +423,10 @@ export const configApi = {
       body: data,
     }),
   deleteLaborCategory: (categoryId: string): Promise<void> =>
-    request({ path: `/config/labor-categories/${categoryId}`, method: "DELETE" }),
+    request({
+      path: `/config/labor-categories/${categoryId}`,
+      method: "DELETE",
+    }),
 
   listPaymentTypes: (): Promise<ApiPaymentType[]> =>
     get("/config/payment-types"),
@@ -370,7 +437,7 @@ export const configApi = {
     request({ path: "/config/payment-types", method: "POST", body: data }),
   updatePaymentType: (
     paymentTypeId: string,
-    data: { name: string; unitId?: string | null }
+    data: { name: string; unitId?: string | null },
   ): Promise<ApiPaymentType> =>
     request({
       path: `/config/payment-types/${paymentTypeId}`,
@@ -391,7 +458,7 @@ export const configApi = {
     request({ path: "/config/expense-categories", method: "POST", body: data }),
   updateExpenseCategory: (
     expenseCategoryId: string,
-    data: { name: string }
+    data: { name: string },
   ): Promise<ApiExpenseCategory> =>
     request({
       path: `/config/expense-categories/${expenseCategoryId}`,
@@ -407,6 +474,14 @@ export const configApi = {
 
 export const partyApi = {
   listParties: (): Promise<ApiParty[]> => get("/parties"),
+  listSupplierPendingDues: (params?: {
+    asOf?: string;
+  }): Promise<ApiSupplierPendingDuesResponse> =>
+    get(
+      withQuery("/parties/suppliers/pending", {
+        asOf: params?.asOf,
+      }),
+    ),
   createParty: (data: {
     name: string;
     type: ApiParty["type"];
@@ -419,7 +494,7 @@ export const partyApi = {
       name?: string;
       type?: ApiParty["type"];
       openingBalance?: number;
-    }
+    },
   ): Promise<ApiParty> =>
     request({ path: `/parties/${partyId}`, method: "PATCH", body: data }),
   deleteParty: (partyId: string): Promise<void> =>
@@ -439,7 +514,7 @@ export const partyApi = {
       chemicalPurchaseId?: string;
       rexinePurchaseId?: string;
       materialPurchaseId?: string;
-    }
+    },
   ): Promise<ApiPartyPayment> =>
     request({
       path: `/parties/${partyId}/payments`,
@@ -485,25 +560,35 @@ export const expenseApi = {
     },
     auditMeta?: ApiAuditMeta,
   ): Promise<ApiExpenseEntry> =>
-    request({ path: `/expenses/${expenseId}`, method: "PATCH", body: data, auditMeta }),
+    request({
+      path: `/expenses/${expenseId}`,
+      method: "PATCH",
+      body: data,
+      auditMeta,
+    }),
   deleteExpense: (expenseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({ path: `/expenses/${expenseId}`, method: "DELETE", auditMeta }),
 };
 
 export const laborApi = {
-  listProfiles: (params?: { status?: "ACTIVE" | "FIRED" | "ALL" }): Promise<ApiLaborProfile[]> => {
+  listProfiles: (params?: {
+    status?: "ACTIVE" | "FIRED" | "ALL";
+  }): Promise<ApiLaborProfile[]> => {
     const query = new URLSearchParams();
     if (params?.status) query.set("status", params.status);
     const suffix = query.toString();
     return get(`/labor/profiles${suffix ? `?${suffix}` : ""}`);
   },
-  createProfile: (data: {
-    name: string;
-    categoryId: string;
-    paymentTypeId: string;
-    defaultRate?: number;
-    status?: "ACTIVE" | "FIRED";
-  }, auditMeta?: ApiAuditMeta): Promise<ApiLaborProfile> =>
+  createProfile: (
+    data: {
+      name: string;
+      categoryId: string;
+      paymentTypeId: string;
+      defaultRate?: number;
+      status?: "ACTIVE" | "FIRED";
+    },
+    auditMeta?: ApiAuditMeta,
+  ): Promise<ApiLaborProfile> =>
     request({ path: "/labor/profiles", method: "POST", body: data, auditMeta }),
   updateProfile: (
     laborId: string,
@@ -523,9 +608,17 @@ export const laborApi = {
       auditMeta,
     }),
   fireProfile: (laborId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
-    request({ path: `/labor/profiles/${laborId}/fire`, method: "POST", auditMeta }),
+    request({
+      path: `/labor/profiles/${laborId}/fire`,
+      method: "POST",
+      auditMeta,
+    }),
   deleteProfile: (laborId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
-    request({ path: `/labor/profiles/${laborId}/fire`, method: "POST", auditMeta }),
+    request({
+      path: `/labor/profiles/${laborId}/fire`,
+      method: "POST",
+      auditMeta,
+    }),
   upsertRate: (data: {
     laborId: string;
     articleId: string;
@@ -533,16 +626,19 @@ export const laborApi = {
     rate: number;
   }): Promise<unknown> =>
     request({ path: "/labor/rates", method: "POST", body: data }),
-  createWorkEntry: (data: {
-    laborId: string;
-    articleId: string;
-    unitId?: string;
-    startDate: string;
-    endDate: string;
-    quantity: number;
-    rate: number;
-    total: number;
-  }, auditMeta?: ApiAuditMeta): Promise<ApiLaborWorkEntry> =>
+  createWorkEntry: (
+    data: {
+      laborId: string;
+      articleId: string;
+      unitId?: string;
+      startDate: string;
+      endDate: string;
+      quantity: number;
+      rate: number;
+      total: number;
+    },
+    auditMeta?: ApiAuditMeta,
+  ): Promise<ApiLaborWorkEntry> =>
     request({ path: "/labor/work", method: "POST", body: data, auditMeta }),
   updateWorkEntry: (
     workId: string,
@@ -558,17 +654,25 @@ export const laborApi = {
     },
     auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborWorkEntry> =>
-    request({ path: `/labor/work/${workId}`, method: "PATCH", body: data, auditMeta }),
+    request({
+      path: `/labor/work/${workId}`,
+      method: "PATCH",
+      body: data,
+      auditMeta,
+    }),
   deleteWorkEntry: (workId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({ path: `/labor/work/${workId}`, method: "DELETE", auditMeta }),
-  createAdvance: (data: {
-    laborId: string;
-    date: string;
-    amount: number;
-    reason: string;
-    categoryId?: string;
-    partyId?: string;
-  }, auditMeta?: ApiAuditMeta): Promise<{ advance: ApiLaborAdvance; expense: unknown }> =>
+  createAdvance: (
+    data: {
+      laborId: string;
+      date: string;
+      amount: number;
+      reason: string;
+      categoryId?: string;
+      partyId?: string;
+    },
+    auditMeta?: ApiAuditMeta,
+  ): Promise<{ advance: ApiLaborAdvance; expense: unknown }> =>
     request({ path: "/labor/advances", method: "POST", body: data, auditMeta }),
   updateAdvance: (
     advanceId: string,
@@ -588,7 +692,11 @@ export const laborApi = {
       auditMeta,
     }),
   deleteAdvance: (advanceId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
-    request({ path: `/labor/advances/${advanceId}`, method: "DELETE", auditMeta }),
+    request({
+      path: `/labor/advances/${advanceId}`,
+      method: "DELETE",
+      auditMeta,
+    }),
   getLedger: (laborId: string): Promise<ApiLaborLedger> =>
     get(`/labor/${laborId}/ledger`),
 };
@@ -606,7 +714,8 @@ export const billApi = {
       price: number;
       total: number;
     }>;
-  }): Promise<ApiBill> => request({ path: "/bills", method: "POST", body: data }),
+  }): Promise<ApiBill> =>
+    request({ path: "/bills", method: "POST", body: data }),
   confirmBill: (billId: string): Promise<ApiBill> =>
     request({ path: `/bills/${billId}/confirm`, method: "POST" }),
   updateBill: (
@@ -622,7 +731,7 @@ export const billApi = {
         price: number;
         total: number;
       }>;
-    }
+    },
   ): Promise<ApiBill> =>
     request({ path: `/bills/${billId}`, method: "PATCH", body: data }),
   deleteBill: (billId: string): Promise<void> =>
@@ -637,7 +746,7 @@ export const billApi = {
       method?: ApiPaymentMethod;
       reference?: string;
       description?: string;
-    }
+    },
   ): Promise<{ payment: ApiPartyPayment; bill: ApiBill }> =>
     request({ path: `/bills/${billId}/payments`, method: "POST", body: data }),
   verifyBill: (billId: string): Promise<ApiBill> =>
@@ -646,16 +755,19 @@ export const billApi = {
 
 export const purchaseApi = {
   listChemicals: (): Promise<ApiChemicalPurchase[]> => get("/chemicals"),
-  createChemical: (data: {
-    date: string;
-    partyId?: string;
-    categoryId?: string;
-    quantityKg: number;
-    ratePerKg: number;
-    totalAmount: number;
-    paymentType?: ApiPaymentMethod;
-    description?: string;
-  }, auditMeta?: ApiAuditMeta): Promise<{ purchase: ApiChemicalPurchase }> =>
+  createChemical: (
+    data: {
+      date: string;
+      partyId?: string;
+      categoryId?: string;
+      quantityKg: number;
+      ratePerKg: number;
+      totalAmount: number;
+      paymentType?: ApiPaymentMethod;
+      description?: string;
+    },
+    auditMeta?: ApiAuditMeta,
+  ): Promise<{ purchase: ApiChemicalPurchase }> =>
     request({ path: "/chemicals", method: "POST", body: data, auditMeta }),
   updateChemical: (
     purchaseId: string,
@@ -677,20 +789,26 @@ export const purchaseApi = {
       body: data,
       auditMeta,
     }),
-  deleteChemical: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+  deleteChemical: (
+    purchaseId: string,
+    auditMeta?: ApiAuditMeta,
+  ): Promise<void> =>
     request({ path: `/chemicals/${purchaseId}`, method: "DELETE", auditMeta }),
 
   listRexine: (): Promise<ApiRexinePurchase[]> => get("/rexine"),
-  createRexine: (data: {
-    date: string;
-    partyId?: string;
-    categoryId?: string;
-    quantityMeter: number;
-    ratePerMeter: number;
-    totalAmount: number;
-    paymentType?: ApiPaymentMethod;
-    description?: string;
-  }, auditMeta?: ApiAuditMeta): Promise<{ purchase: ApiRexinePurchase }> =>
+  createRexine: (
+    data: {
+      date: string;
+      partyId?: string;
+      categoryId?: string;
+      quantityMeter: number;
+      ratePerMeter: number;
+      totalAmount: number;
+      paymentType?: ApiPaymentMethod;
+      description?: string;
+    },
+    auditMeta?: ApiAuditMeta,
+  ): Promise<{ purchase: ApiRexinePurchase }> =>
     request({ path: "/rexine", method: "POST", body: data, auditMeta }),
   updateRexine: (
     purchaseId: string,
@@ -716,18 +834,21 @@ export const purchaseApi = {
     request({ path: `/rexine/${purchaseId}`, method: "DELETE", auditMeta }),
 
   listMaterials: (): Promise<ApiMaterialPurchase[]> => get("/materials"),
-  createMaterial: (data: {
-    date: string;
-    partyId?: string;
-    categoryId?: string;
-    articleId?: string;
-    unitId?: string;
-    quantity: number;
-    pricePerUnit: number;
-    totalAmount: number;
-    paymentType?: ApiPaymentMethod;
-    description?: string;
-  }, auditMeta?: ApiAuditMeta): Promise<{ purchase: ApiMaterialPurchase }> =>
+  createMaterial: (
+    data: {
+      date: string;
+      partyId?: string;
+      categoryId?: string;
+      articleId?: string;
+      unitId?: string;
+      quantity: number;
+      pricePerUnit: number;
+      totalAmount: number;
+      paymentType?: ApiPaymentMethod;
+      description?: string;
+    },
+    auditMeta?: ApiAuditMeta,
+  ): Promise<{ purchase: ApiMaterialPurchase }> =>
     request({ path: "/materials", method: "POST", body: data, auditMeta }),
   updateMaterial: (
     purchaseId: string,
@@ -751,12 +872,17 @@ export const purchaseApi = {
       body: data,
       auditMeta,
     }),
-  deleteMaterial: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
+  deleteMaterial: (
+    purchaseId: string,
+    auditMeta?: ApiAuditMeta,
+  ): Promise<void> =>
     request({ path: `/materials/${purchaseId}`, method: "DELETE", auditMeta }),
 };
 
 export const productionApi = {
-  listOrders: (department?: ApiLaborDepartment): Promise<ApiProductionOrder[]> => {
+  listOrders: (
+    department?: ApiLaborDepartment,
+  ): Promise<ApiProductionOrder[]> => {
     const query = new URLSearchParams();
     if (department) query.set("department", department);
     const suffix = query.toString();
@@ -776,7 +902,7 @@ export const productionApi = {
       articleId?: string;
       quantityDozen?: number;
       pricePerDozen?: number;
-    }
+    },
   ): Promise<ApiProductionOrder> =>
     request({
       path: `/production/orders/${orderId}`,
@@ -785,7 +911,7 @@ export const productionApi = {
     }),
   assignLabor: (
     orderId: string,
-    payload: { laborId?: string; pricePerDozen?: number }
+    payload: { laborId?: string; pricePerDozen?: number },
   ): Promise<ApiProductionOrder> =>
     request({
       path: `/production/orders/${orderId}/assign-labor`,
@@ -797,7 +923,7 @@ export const productionApi = {
     }),
   updateCompletion: (
     orderId: string,
-    completedDozen: number
+    completedDozen: number,
   ): Promise<ApiProductionOrder> =>
     request({
       path: `/production/orders/${orderId}/completion`,
@@ -819,4 +945,43 @@ export const productionApi = {
     const suffix = query.toString();
     return get(`/production/stock/articles${suffix ? `?${suffix}` : ""}`);
   },
+};
+
+export const reportsApi = {
+  getRoznamchaSummary: (params?: {
+    period?: "daily" | "weekly" | "monthly";
+    start?: string;
+    end?: string;
+  }): Promise<ApiRoznamchaSummaryReport> =>
+    get(
+      withQuery("/reports/roznamcha/summary", {
+        period: params?.period,
+        start: params?.start,
+        end: params?.end,
+      }),
+    ),
+  getLaborSummary: (params?: {
+    period?: "weekly" | "monthly";
+    start?: string;
+    end?: string;
+  }): Promise<ApiLaborSummaryReport> =>
+    get(
+      withQuery("/reports/labor/summary", {
+        period: params?.period,
+        start: params?.start,
+        end: params?.end,
+      }),
+    ),
+  getPartyMonthlyOutstanding: (params?: {
+    period?: "monthly";
+    start?: string;
+    end?: string;
+  }): Promise<ApiPartyMonthlyOutstandingReport> =>
+    get(
+      withQuery("/reports/parties/monthly-outstanding", {
+        period: params?.period,
+        start: params?.start,
+        end: params?.end,
+      }),
+    ),
 };

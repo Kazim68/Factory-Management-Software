@@ -1,47 +1,32 @@
-import { type ElementType, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dashboard } from './components/Dashboard';
-import { PartyManagement } from './components/PartyManagement';
-import { ChemicalManagement } from './components/ChemicalManagement';
-import { RexineManagement } from './components/RexineManagement';
-import { MaterialManagement } from './components/MaterialManagement';
-import { LaborManagement } from './components/LaborManagement';
-import { BillManagement } from './components/BillManagement';
-import { Roznamcha } from './components/Roznamcha';
-import { Configuration } from './components/Configuration';
-import { UserManagement } from './components/UserManagement';
-import { AuditLogs } from './components/AuditLogs';
-import { CustomReportBuilder } from './components/CustomReportBuilder';
-import { ProductionControl } from './components/ProductionControl';
-import { StockControl } from './components/StockControl';
-import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
-import { Label } from './components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
-import { Badge } from './components/ui/badge';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from './components/ui/dropdown-menu';
-import { Toaster } from './components/ui/sonner';
-import { toast } from 'sonner';
-import { auth, type SessionUser } from './lib/auth';
-import {
-  buildCombinedTablePayload,
-  collectTablesFromContainer,
-  exportTableToExcel,
-  exportTableToPdf,
-  printTable,
-  saveModuleReportTables,
-  type ReportTable,
-} from './lib/report';
-import type { UserRole } from './types';
+  type ElementType,
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { Dashboard } from "./components/Dashboard";
+import { PartyManagement } from "./components/PartyManagement";
+import { ChemicalManagement } from "./components/ChemicalManagement";
+import { RexineManagement } from "./components/RexineManagement";
+import { MaterialManagement } from "./components/MaterialManagement";
+import { LaborManagement } from "./components/LaborManagement";
+import { BillManagement } from "./components/BillManagement";
+import { Roznamcha } from "./components/Roznamcha";
+import { Configuration } from "./components/Configuration";
+import { UserManagement } from "./components/UserManagement";
+import { AuditLogs } from "./components/AuditLogs";
+import { ProductionControl } from "./components/ProductionControl";
+import { StockControl } from "./components/StockControl";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Label } from "./components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { Badge } from "./components/ui/badge";
+import { Toaster } from "./components/ui/sonner";
+import { toast } from "sonner";
+import { auth, type SessionUser } from "./lib/auth";
+import type { UserRole } from "./types";
 import {
   LayoutDashboard,
   Users,
@@ -57,25 +42,23 @@ import {
   ShieldCheck,
   History,
   LogOut,
-  FileOutput,
   Factory,
-} from 'lucide-react';
+} from "lucide-react";
 
 type Page =
-  | 'dashboard'
-  | 'parties'
-  | 'chemicals'
-  | 'rexine'
-  | 'materials'
-  | 'labor'
-  | 'stock_control'
-  | 'production_control'
-  | 'bills'
-  | 'roznamcha'
-  | 'configuration'
-  | 'users'
-  | 'audit_logs'
-  | 'custom_reports';
+  | "dashboard"
+  | "parties"
+  | "chemicals"
+  | "rexine"
+  | "materials"
+  | "labor"
+  | "stock_control"
+  | "production_control"
+  | "bills"
+  | "roznamcha"
+  | "configuration"
+  | "users"
+  | "audit_logs";
 
 interface NavItem {
   name: string;
@@ -85,25 +68,49 @@ interface NavItem {
 }
 
 const navigation: NavItem[] = [
-  { name: 'Dashboard', page: 'dashboard', icon: LayoutDashboard, roles: ['admin', 'munshi'] },
-  { name: 'Roznamcha', page: 'roznamcha', icon: BookOpen, roles: ['admin', 'munshi'] },
-  { name: 'Stock Control', page: 'stock_control', icon: Package, roles: ['admin', 'munshi'] },
-  { name: 'Production Control', page: 'production_control', icon: Factory, roles: ['admin', 'munshi'] },
-  { name: 'Bills', page: 'bills', icon: FileText, roles: ['admin'] },
-  { name: 'Labor', page: 'labor', icon: UserCog, roles: ['admin'] },
-  { name: 'Chemicals', page: 'chemicals', icon: Beaker, roles: ['admin'] },
-  { name: 'Rexine', page: 'rexine', icon: Shirt, roles: ['admin'] },
-  { name: 'Materials', page: 'materials', icon: Package, roles: ['admin'] },
-  { name: 'Parties', page: 'parties', icon: Users, roles: ['admin'] },
-  { name: 'Configuration', page: 'configuration', icon: Settings, roles: ['admin'] },
-  { name: 'Users', page: 'users', icon: ShieldCheck, roles: ['admin'] },
-  { name: 'Audit Logs', page: 'audit_logs', icon: History, roles: ['admin'] },
-  { name: 'Custom Reports', page: 'custom_reports', icon: FileOutput, roles: ['admin', 'munshi'] },
+  {
+    name: "Dashboard",
+    page: "dashboard",
+    icon: LayoutDashboard,
+    roles: ["admin", "munshi"],
+  },
+  {
+    name: "Roznamcha",
+    page: "roznamcha",
+    icon: BookOpen,
+    roles: ["admin", "munshi"],
+  },
+  {
+    name: "Stock Control",
+    page: "stock_control",
+    icon: Package,
+    roles: ["admin", "munshi"],
+  },
+  {
+    name: "Production Control",
+    page: "production_control",
+    icon: Factory,
+    roles: ["admin", "munshi"],
+  },
+  { name: "Bills", page: "bills", icon: FileText, roles: ["admin"] },
+  { name: "Labor", page: "labor", icon: UserCog, roles: ["admin"] },
+  { name: "Chemicals", page: "chemicals", icon: Beaker, roles: ["admin"] },
+  { name: "Rexine", page: "rexine", icon: Shirt, roles: ["admin"] },
+  { name: "Materials", page: "materials", icon: Package, roles: ["admin"] },
+  { name: "Parties", page: "parties", icon: Users, roles: ["admin"] },
+  {
+    name: "Configuration",
+    page: "configuration",
+    icon: Settings,
+    roles: ["admin"],
+  },
+  { name: "Users", page: "users", icon: ShieldCheck, roles: ["admin"] },
+  { name: "Audit Logs", page: "audit_logs", icon: History, roles: ["admin"] },
 ];
 
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -112,7 +119,7 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
       onLogin(user);
       toast.success(`Welcome ${user.name}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Login failed');
+      toast.error(error instanceof Error ? error.message : "Login failed");
     }
   };
 
@@ -122,7 +129,8 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
         <CardHeader>
           <CardTitle>Sign In</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Use your credentials to continue. Default admin: <b>admin / admin123</b>
+            Use your credentials to continue. Default admin:{" "}
+            <b>admin / admin123</b>
           </p>
         </CardHeader>
         <CardContent>
@@ -159,11 +167,9 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
-  const [reportTables, setReportTables] = useState<ReportTable[]>([]);
-  const mainRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     auth.ensureSeedAdmin();
@@ -172,12 +178,16 @@ export default function App() {
 
   const allowedNavigation = useMemo(() => {
     if (!currentUser) return [];
-    return navigation.filter((item) => auth.canAccess(currentUser.role, item.roles));
+    return navigation.filter((item) =>
+      auth.canAccess(currentUser.role, item.roles),
+    );
   }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser || allowedNavigation.length === 0) return;
-    const hasAccess = allowedNavigation.some((item) => item.page === currentPage);
+    const hasAccess = allowedNavigation.some(
+      (item) => item.page === currentPage,
+    );
     if (!hasAccess) {
       setCurrentPage(allowedNavigation[0].page);
     }
@@ -187,89 +197,42 @@ export default function App() {
     if (!currentUser) return null;
 
     switch (currentPage) {
-      case 'dashboard':
+      case "dashboard":
         return <Dashboard />;
-      case 'parties':
+      case "parties":
         return <PartyManagement />;
-      case 'chemicals':
+      case "chemicals":
         return <ChemicalManagement />;
-      case 'rexine':
+      case "rexine":
         return <RexineManagement />;
-      case 'materials':
+      case "materials":
         return <MaterialManagement />;
-      case 'labor':
+      case "labor":
         return <LaborManagement />;
-      case 'stock_control':
+      case "stock_control":
         return <StockControl />;
-      case 'production_control':
+      case "production_control":
         return <ProductionControl />;
-      case 'bills':
+      case "bills":
         return <BillManagement />;
-      case 'roznamcha':
+      case "roznamcha":
         return <Roznamcha />;
-      case 'configuration':
+      case "configuration":
         return <Configuration />;
-      case 'users':
+      case "users":
         return <UserManagement currentUserId={currentUser.id} />;
-      case 'audit_logs':
+      case "audit_logs":
         return <AuditLogs />;
-      case 'custom_reports':
-        return <CustomReportBuilder />;
       default:
         return <Dashboard />;
     }
   };
 
-  const runReportAction = (type: 'excel' | 'pdf' | 'print', tables: ReportTable[], reportTitle: string) => {
-    if (tables.length === 0) {
-      toast.error('No table data found for this view');
-      return;
-    }
-
-    const payload = buildCombinedTablePayload(reportTitle, tables);
-
-    if (type === 'excel') {
-      exportTableToExcel(payload);
-      toast.success('Excel report generated');
-      return;
-    }
-
-    if (type === 'pdf') {
-      exportTableToPdf(payload);
-      toast.success('PDF print dialog opened');
-      return;
-    }
-
-    printTable(payload);
-    toast.success('Print dialog opened');
-  };
-
-  const syncTables = useCallback(() => {
-    const main = mainRef.current;
-    if (!main || !currentUser) return;
-
-    const tables = collectTablesFromContainer(currentPage, currentPage.replace('_', ' '), main);
-    setReportTables(tables);
-    saveModuleReportTables(currentPage, currentPage.replace('_', ' '), tables);
-  }, [currentPage, currentUser]);
-
-
-  useEffect(() => {
-    const main = mainRef.current;
-    if (!main || !currentUser) return;
-
-    syncTables();
-    const observer = new MutationObserver(() => syncTables());
-    observer.observe(main, { childList: true, subtree: true, attributes: true, characterData: true });
-
-    return () => observer.disconnect();
-  }, [currentPage, currentUser, syncTables]);
-
   const handleLogout = () => {
     auth.logout();
     setCurrentUser(null);
-    setCurrentPage('dashboard');
-    toast.success('Logged out successfully');
+    setCurrentPage("dashboard");
+    toast.success("Logged out successfully");
   };
 
   if (!currentUser) {
@@ -285,19 +248,21 @@ export default function App() {
     <div className="flex h-screen bg-background">
       <aside
         className={`${
-          sidebarOpen ? 'w-64' : 'w-0'
+          sidebarOpen ? "w-64" : "w-0"
         } transition-all duration-300 bg-card border-r border-border overflow-hidden`}
       >
         <div className="p-6">
           <h1 className="text-xl mb-2">Factory Management</h1>
-          <p className="text-xs text-muted-foreground mb-6">Role: {currentUser.role}</p>
+          <p className="text-xs text-muted-foreground mb-6">
+            Role: {currentUser.role}
+          </p>
           <nav className="space-y-2">
             {allowedNavigation.map((item) => {
               const Icon = item.icon;
               return (
                 <Button
                   key={item.page}
-                  variant={currentPage === item.page ? 'default' : 'ghost'}
+                  variant={currentPage === item.page ? "default" : "ghost"}
                   className="w-full justify-start"
                   onClick={() => setCurrentPage(item.page)}
                 >
@@ -318,61 +283,17 @@ export default function App() {
               size="sm"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
-              {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              {sidebarOpen ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <Menu className="h-5 w-5" />
+              )}
             </Button>
             <div className="ml-4">
-              <h2 className="capitalize">{currentPage.replace('_', ' ')}</h2>
+              <h2 className="capitalize">{currentPage.replace("_", " ")}</h2>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <FileOutput className="h-4 w-4 mr-2" />
-                  Generate Report
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Current View</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={() => runReportAction('print', reportTables, `${currentPage.replace('_', ' ')} full report`)}
-                >
-                  Print All Sections
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => runReportAction('excel', reportTables, `${currentPage.replace('_', ' ')} full report`)}
-                >
-                  Export All Sections (Excel)
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => runReportAction('pdf', reportTables, `${currentPage.replace('_', ' ')} full report`)}
-                >
-                  Export All Sections (PDF)
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Sections / Tabs</DropdownMenuLabel>
-                {reportTables.length === 0 ? (
-                  <DropdownMenuItem disabled>No tables found in this view</DropdownMenuItem>
-                ) : (
-                  reportTables.map((table) => (
-                    <DropdownMenuSub key={table.id}>
-                      <DropdownMenuSubTrigger>{table.title}</DropdownMenuSubTrigger>
-                      <DropdownMenuSubContent>
-                        <DropdownMenuItem onClick={() => runReportAction('print', [table], `${table.title} report`)}>
-                          Print
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => runReportAction('excel', [table], `${table.title} report`)}>
-                          Excel
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => runReportAction('pdf', [table], `${table.title} report`)}>
-                          PDF
-                        </DropdownMenuItem>
-                      </DropdownMenuSubContent>
-                    </DropdownMenuSub>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
             <Badge variant="secondary">{currentUser.name}</Badge>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" />
@@ -381,7 +302,7 @@ export default function App() {
           </div>
         </header>
 
-        <main ref={mainRef} className="flex-1 overflow-y-auto p-6">{renderPage()}</main>
+        <main className="flex-1 overflow-y-auto p-6">{renderPage()}</main>
       </div>
 
       <Toaster />

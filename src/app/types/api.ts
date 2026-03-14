@@ -255,6 +255,20 @@ export interface ApiPartyPayment {
   createdAt: string;
 }
 
+export interface ApiSupplierPendingDue {
+  partyId: string;
+  partyName: string;
+  partyType: Extract<ApiPartyType, "SUPPLIER" | "BOTH">;
+  netBalance: number;
+  remainingDue: number;
+}
+
+export interface ApiSupplierPendingDuesResponse {
+  asOf: string;
+  totalPending: number;
+  pending: ApiSupplierPendingDue[];
+}
+
 export type ApiProductionStage =
   | "STAGE_PRESSMAN"
   | "STAGE_UPPERMAN"
@@ -309,4 +323,110 @@ export interface ApiStockArticleRow {
   articleName: string;
   articleCode?: string | null;
   quantityDozen: number;
+}
+
+export type ApiReportPeriod = "daily" | "weekly" | "monthly";
+
+export interface ApiRoznamchaReportBucket {
+  key: string;
+  totalInflow: number;
+  totalOutflow: number;
+  netCashFlow: number;
+  entryCount: number;
+  moduleBreakdown: Record<string, number>;
+}
+
+export interface ApiRoznamchaSummaryReport {
+  report: "roznamcha-summary";
+  period: ApiReportPeriod;
+  range: {
+    start: string;
+    end: string;
+  };
+  totals: {
+    totalInflow: number;
+    totalOutflow: number;
+    netCashFlow: number;
+    entryCount: number;
+  };
+  buckets: ApiRoznamchaReportBucket[];
+}
+
+export interface ApiLaborSummaryRow {
+  laborId: string;
+  laborName: string;
+  totalEarnings: number;
+  totalAdvances: number;
+  totalPaidCash: number;
+  netPayable: number;
+}
+
+export interface ApiLaborSummaryBucket {
+  key: string;
+  totalEarnings: number;
+  totalAdvances: number;
+  totalPaidCash: number;
+  netPayable: number;
+  laborCount: number;
+  labors: ApiLaborSummaryRow[];
+}
+
+export interface ApiLaborSummaryReport {
+  report: "labor-summary";
+  period: Extract<ApiReportPeriod, "weekly" | "monthly">;
+  range: {
+    start: string;
+    end: string;
+  };
+  totals: {
+    totalEarnings: number;
+    totalAdvances: number;
+    totalPaidCash: number;
+    netPayable: number;
+  };
+  counts: {
+    workEntries: number;
+    advances: number;
+    payments: number;
+    uniqueLabors: number;
+  };
+  buckets: ApiLaborSummaryBucket[];
+}
+
+export interface ApiPartyMonthlyOutstandingRow {
+  partyId: string;
+  partyName: string;
+  partyType: ApiPartyType;
+  outstanding: number;
+  receivable: number;
+  payable: number;
+}
+
+export interface ApiPartyMonthlyOutstandingBucket {
+  key: string;
+  partyCount: number;
+  totalOutstanding: number;
+  totalReceivable: number;
+  totalPayable: number;
+  parties: ApiPartyMonthlyOutstandingRow[];
+}
+
+export interface ApiPartyMonthlyOutstandingReport {
+  report: "party-monthly-outstanding";
+  period: Extract<ApiReportPeriod, "monthly">;
+  range: {
+    start: string;
+    end: string;
+  };
+  totals: {
+    totalOutstanding: number;
+    totalReceivable: number;
+    totalPayable: number;
+  };
+  counts: {
+    parties: number;
+    ledgerEntries: number;
+    activeOutstandingParties: number;
+  };
+  buckets: ApiPartyMonthlyOutstandingBucket[];
 }
