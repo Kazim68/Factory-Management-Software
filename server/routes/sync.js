@@ -28,6 +28,53 @@ const resolveDelegate = (tx, entity) => {
   return tx[key];
 };
 
+const runtimeModels = prisma._runtimeDataModel?.models ?? {};
+const modelScalarFieldsCache = new Map();
+
+const toModelName = (entity) => {
+  const camel = snakeToCamel(String(entity ?? ""));
+  if (!camel) return "";
+  return camel[0].toUpperCase() + camel.slice(1);
+};
+
+const getModelScalarFields = (entity) => {
+  const modelName = toModelName(entity);
+  if (modelScalarFieldsCache.has(modelName)) {
+    return modelScalarFieldsCache.get(modelName);
+  }
+
+  const model = runtimeModels[modelName];
+  if (!model?.fields) {
+    modelScalarFieldsCache.set(modelName, null);
+    return null;
+  }
+
+  const scalarFields = new Set(
+    model.fields
+      .filter((field) => field.kind !== "object")
+      .map((field) => field.name)
+  );
+
+  modelScalarFieldsCache.set(modelName, scalarFields);
+  return scalarFields;
+};
+
+const sanitizeIncoming = (entity, incoming) => {
+  if (!incoming || typeof incoming !== "object") return incoming;
+
+  const scalarFields = getModelScalarFields(entity);
+  if (!scalarFields) return incoming;
+
+  const sanitized = {};
+  for (const fieldName of scalarFields) {
+    if (Object.prototype.hasOwnProperty.call(incoming, fieldName)) {
+      sanitized[fieldName] = incoming[fieldName];
+    }
+  }
+
+  return sanitized;
+};
+
 router.post("/push", async (req, res, next) => {
   try {
     const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
@@ -46,10 +93,12 @@ router.post("/push", async (req, res, next) => {
           const existing = await delegate.findUnique({ where: { id: incoming.id } });
           if (!shouldApplyIncomingUpdate(existing, incoming)) continue;
 
+          const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
+
           await delegate.upsert({
             where: { id: incoming.id },
-            create: incoming,
-            update: incoming,
+            create: sanitizedIncoming,
+            update: sanitizedIncoming,
           });
         }
 
