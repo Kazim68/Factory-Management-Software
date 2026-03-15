@@ -10,7 +10,7 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: "Sync server error" });
 });
 
-const port = Number(process.env.PORT ?? 4001);
+const port = Number(process.env.PORT ?? 3001);
 app.listen(port, () => {
   console.log(`Sync API listening on ${port}`);
 });

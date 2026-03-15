@@ -6,8 +6,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = "postgresql://postgres.nkopmqdtsfuibmsbmuwm:CrossXkazim123@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?pgbouncer=true"
-  directUrl="postgresql://postgres.nkopmqdtsfuibmsbmuwm:CrossXkazim123@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres"
+  url      = env("CLOUD_DATABASE_URL")
 }
 
 enum PartyType {

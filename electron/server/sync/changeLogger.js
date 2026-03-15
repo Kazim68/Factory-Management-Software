@@ -18,42 +18,50 @@ const toOperationType = (operation) => {
   return "update";
 };
 
+const toEntityName = (model) =>
+  model.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+
+const enqueueChangeLogWrite = (basePrisma, payload) => {
+  setTimeout(() => {
+    basePrisma.changeLog
+      .create({ data: payload })
+      .catch((error) => console.error("Change-log write failed:", error));
+  }, 0);
+};
+
 export const withChangeLogging = (basePrisma, getDeviceId) =>
   basePrisma.$extends({
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          if (globalThis.__SYNC_APPLYING__ || !model || EXCLUDED_MODELS.has(model) || !TRACKED_OPERATIONS.has(operation)) {
+          if (
+            globalThis.__SYNC_APPLYING__ ||
+            !model ||
+            EXCLUDED_MODELS.has(model) ||
+            !TRACKED_OPERATIONS.has(operation)
+          ) {
             return query(args);
           }
 
-          const tableEntity = model
-            .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-            .toLowerCase();
-
           let previous = null;
           if (operation === "delete") {
-            previous = await basePrisma[model[0].toLowerCase() + model.slice(1)].findUnique({
-              where: args.where,
-            });
+            previous = await basePrisma[
+              model[0].toLowerCase() + model.slice(1)
+            ].findUnique({ where: args.where });
           }
 
           const result = await query(args);
           const record = operation === "delete" ? previous : result;
 
-          if (!record?.id) {
-            return result;
-          }
+          if (!record?.id) return result;
 
-          await basePrisma.changeLog.create({
-            data: {
-              id: randomUUID(),
-              entity: tableEntity,
-              entityId: String(record.id),
-              operation: toOperationType(operation),
-              data: serializeRecord(record),
-              deviceId: getDeviceId(),
-            },
+          enqueueChangeLogWrite(basePrisma, {
+            id: randomUUID(),
+            entity: toEntityName(model),
+            entityId: String(record.id),
+            operation: toOperationType(operation),
+            data: serializeRecord(record),
+            deviceId: getDeviceId(),
           });
 
           return result;
