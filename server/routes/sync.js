@@ -80,29 +80,53 @@ router.post("/push", async (req, res, next) => {
     const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
     const deviceId = String(req.body?.deviceId ?? "unknown-device");
 
-    await prisma.$transaction(async (tx) => {
-      for (const change of changes) {
-        const delegate = resolveDelegate(tx, String(change.entity ?? ""));
-        const incoming = change.data;
+    for (const change of changes) {
+      const delegate = resolveDelegate(prisma, String(change.entity ?? ""));
+      const incoming = change.data;
 
-        if (!delegate || !incoming?.id) continue;
+      if (!delegate || !incoming?.id) continue;
 
-        if (change.operation === "delete") {
-          await delegate.deleteMany({ where: { id: incoming.id } });
-        } else {
-          const existing = await delegate.findUnique({ where: { id: incoming.id } });
-          if (!shouldApplyIncomingUpdate(existing, incoming)) continue;
+      if (change.operation === "delete") {
+        await prisma.$transaction([
+          delegate.deleteMany({ where: { id: incoming.id } }),
+          prisma.changeLog.upsert({
+            where: { id: change.id },
+            create: {
+              id: change.id,
+              entity: change.entity,
+              entityId: String(incoming.id),
+              operation: change.operation,
+              data: incoming,
+              synced: true,
+              deviceId,
+              createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
+            },
+            update: {
+              entity: change.entity,
+              entityId: String(incoming.id),
+              operation: change.operation,
+              data: incoming,
+              synced: true,
+              deviceId,
+              createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
+            },
+          }),
+        ]);
+        continue;
+      }
 
-          const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
+      const existing = await delegate.findUnique({ where: { id: incoming.id } });
+      if (!shouldApplyIncomingUpdate(existing, incoming)) continue;
 
-          await delegate.upsert({
-            where: { id: incoming.id },
-            create: sanitizedIncoming,
-            update: sanitizedIncoming,
-          });
-        }
+      const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
 
-        await tx.changeLog.upsert({
+      await prisma.$transaction([
+        delegate.upsert({
+          where: { id: incoming.id },
+          create: sanitizedIncoming,
+          update: sanitizedIncoming,
+        }),
+        prisma.changeLog.upsert({
           where: { id: change.id },
           create: {
             id: change.id,
@@ -123,9 +147,9 @@ router.post("/push", async (req, res, next) => {
             deviceId,
             createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
           },
-        });
-      }
-    });
+        }),
+      ]);
+    }
 
     res.json({ ok: true });
   } catch (error) {
