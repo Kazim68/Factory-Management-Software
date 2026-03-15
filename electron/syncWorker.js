@@ -6,7 +6,7 @@ import {
 } from "./server/sync/syncService.js";
 
 const SYNC_INTERVAL_MS = 30_000;
-const SYNC_BASE_URL = process.env.SYNC_SERVER_URL ?? "http://localhost:3001";
+const SYNC_BASE_URL = process.env.SYNC_SERVER_URL ?? "http://localhost:4001";
 
 const snakeToCamel = (value) =>
   value.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
