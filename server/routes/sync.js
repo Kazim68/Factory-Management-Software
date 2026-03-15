@@ -170,7 +170,7 @@ router.get("/pull", async (req, res, next) => {
       orderBy: { createdAt: "asc" },
     });
 
-    res.json({ changes });
+    res.json({ changes, serverTime: new Date().toISOString() });
   } catch (error) {
     next(error);
   }
