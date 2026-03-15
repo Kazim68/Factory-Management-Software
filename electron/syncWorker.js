@@ -8,19 +8,35 @@ import {
 const SYNC_INTERVAL_MS = 30_000;
 const SYNC_BASE_URL = process.env.SYNC_SERVER_URL ?? "http://localhost:3001";
 
-const ENTITY_MODEL_MAP = {
-  expense_entry: "expenseEntry",
-  labor_advance: "laborAdvance",
-  chemical_purchase: "chemicalPurchase",
-  rexine_purchase: "rexinePurchase",
-  material_purchase: "materialPurchase",
+const snakeToCamel = (value) =>
+  value.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+
+const toComparableTimestamp = (record) => {
+  if (!record) return null;
+  if (record.updatedAt) return new Date(record.updatedAt);
+  if (record.createdAt) return new Date(record.createdAt);
+  return null;
+};
+
+const shouldApplyIncomingUpdate = (existing, incoming) => {
+  if (!existing) return true;
+
+  const incomingTimestamp = toComparableTimestamp(incoming);
+  const existingTimestamp = toComparableTimestamp(existing);
+
+  if (!incomingTimestamp || !existingTimestamp) return true;
+  return incomingTimestamp > existingTimestamp;
+};
+
+const resolveDelegate = (tx, entity) => {
+  const key = snakeToCamel(entity);
+  return tx[key];
 };
 
 const applyRemoteChange = async (tx, change) => {
-  const modelName = ENTITY_MODEL_MAP[change.entity];
-  if (!modelName) return;
+  const delegate = resolveDelegate(tx, String(change.entity ?? ""));
+  if (!delegate) return;
 
-  const delegate = tx[modelName];
   const incoming = change.data;
   if (!incoming?.id) return;
 
@@ -30,12 +46,7 @@ const applyRemoteChange = async (tx, change) => {
   }
 
   const existing = await delegate.findUnique({ where: { id: incoming.id } });
-  const incomingUpdatedAt = incoming.updatedAt ? new Date(incoming.updatedAt) : null;
-  const existingUpdatedAt = existing?.updatedAt ?? null;
-
-  if (existing && incomingUpdatedAt && existingUpdatedAt && incomingUpdatedAt <= existingUpdatedAt) {
-    return;
-  }
+  if (!shouldApplyIncomingUpdate(existing, incoming)) return;
 
   await delegate.upsert({
     where: { id: incoming.id },
@@ -45,6 +56,7 @@ const applyRemoteChange = async (tx, change) => {
 };
 
 const syncOnce = async () => {
+  const deviceId = getDeviceId();
   const pendingChanges = await prisma.changeLog.findMany({
     where: { synced: false },
     orderBy: { createdAt: "asc" },
@@ -54,7 +66,7 @@ const syncOnce = async () => {
     const pushResponse = await fetch(`${SYNC_BASE_URL}/sync/push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId: getDeviceId(), changes: pendingChanges }),
+      body: JSON.stringify({ deviceId, changes: pendingChanges }),
     });
 
     if (pushResponse.ok) {
@@ -67,7 +79,7 @@ const syncOnce = async () => {
 
   const lastSync = await getLastSyncTimestamp(prisma);
   const pullResponse = await fetch(
-    `${SYNC_BASE_URL}/sync/pull?lastSync=${encodeURIComponent(lastSync)}`
+    `${SYNC_BASE_URL}/sync/pull?lastSync=${encodeURIComponent(lastSync)}&deviceId=${encodeURIComponent(deviceId)}`
   );
 
   if (!pullResponse.ok) return;

@@ -1,10 +1,28 @@
+
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/cloud-client"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("CLOUD_DATABASE_URL")
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+enum BillType {
+  CASH
+  CREDIT
+}
+
+enum BillStatus {
+  DRAFT
+  CONFIRMED
 }
 
 enum PaymentMethod {
@@ -26,99 +44,371 @@ enum ExpenseSource {
   SYSTEM
 }
 
-model ExpenseEntry {
-  id                 String        @id @db.Uuid
-  date               DateTime      @db.Timestamptz(6)
-  partyId            String?       @map("party_id") @db.Uuid
-  laborId            String?       @map("labor_id") @db.Uuid
-  module             ExpenseModule @default(MISC)
-  paymentType        PaymentMethod @default(CASH) @map("payment_type")
-  amount             Decimal       @db.Decimal(18, 4)
-  description        String?
-  chemicalPurchaseId String?       @map("chemical_purchase_id") @db.Uuid
-  rexinePurchaseId   String?       @map("rexine_purchase_id") @db.Uuid
-  materialPurchaseId String?       @map("material_purchase_id") @db.Uuid
-  laborAdvanceId     String?       @map("labor_advance_id") @db.Uuid
-  source             ExpenseSource @default(MANUAL)
-  sourceSystem       String?       @map("source_system")
-  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+enum LaborStatus {
+  ACTIVE
+  FIRED
+}
 
-  @@index([updatedAt])
-  @@map("expense_entry")
+enum LaborDepartment {
+  PRESSMAN
+  UPPERMAN
+  PRINTING
+  DC
+  MACHINEMAN
+  PACKING
+}
+
+enum ProductionStage {
+  STAGE_PRESSMAN
+  STAGE_UPPERMAN
+  STAGE_PRINTING
+  STAGE_DC
+  STAGE_MACHINEMAN
+  STAGE_PACKING
+}
+
+enum ProductionOrderSource {
+  MANUAL
+  PRESSMAN_FLOW
+  UPPER_PRINT_PARALLEL
+  STAGE_FLOW
+}
+
+model Unit {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  symbol    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  paymentTypes PaymentCalculationType[]
+  laborRates   LaborRate[]
+  laborWork    LaborWorkEntry[]
+  materials    MaterialPurchase[]
+}
+
+model Article {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  code      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  laborRates LaborRate[]
+  laborWork  LaborWorkEntry[]
+  billLines  BillLine[]
+  materials  MaterialPurchase[]
+  productionOrders ProductionOrder[]
+}
+
+model ExpenseCategory {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PaymentCalculationType {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  unitId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  unit   Unit?           @relation(fields: [unitId], references: [id])
+  labors LaborProfile[]
+}
+
+model Party {
+  id             String            @id @default(uuid())
+  name           String            @unique
+  type           PartyType
+  openingBalance Decimal           @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  bills              Bill[]
+  ledgerEntries      PartyLedgerEntry[]
+  chemicalPurchases  ChemicalPurchase[]
+  rexinePurchases    RexinePurchase[]
+  materialPurchases  MaterialPurchase[]
+  payments           PartyPayment[]
+  expenses           ExpenseEntry[]
+}
+
+model PartyLedgerEntry {
+  id             String   @id @default(uuid())
+  partyId        String
+  billId         String?
+  date           DateTime
+  reference      String?
+  description    String?
+  balance        Decimal  @default(0)
+  chemicalPurchaseId String?
+  rexinePurchaseId   String?
+  materialPurchaseId String?
+  createdAt      DateTime @default(now())
+
+  party Party @relation(fields: [partyId], references: [id])
+  bill  Bill? @relation(fields: [billId], references: [id])
+  chemicalPurchase ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
+  rexinePurchase   RexinePurchase?   @relation(fields: [rexinePurchaseId], references: [id])
+  materialPurchase MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
+
+  @@index([partyId, date])
+}
+
+model ExpenseEntry {
+  id                 String        @id @default(uuid())
+  date               DateTime
+  partyId            String?
+  laborId            String?
+  module             ExpenseModule @default(MISC)
+  paymentType        PaymentMethod @default(CASH)
+  amount             Decimal
+  description        String?
+  chemicalPurchaseId String?
+  rexinePurchaseId   String?
+  materialPurchaseId String?
+  laborAdvanceId     String?
+  source             ExpenseSource @default(MANUAL)
+  sourceSystem       String?
+  createdAt          DateTime      @default(now())
+
+  party             Party?           @relation(fields: [partyId], references: [id])
+  labor             LaborProfile?    @relation(fields: [laborId], references: [id])
+  chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
+  rexinePurchase    RexinePurchase?  @relation(fields: [rexinePurchaseId], references: [id])
+  materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
+  laborAdvance      LaborAdvance?     @relation(fields: [laborAdvanceId], references: [id])
+
+  @@index([date])
+}
+
+model LaborProfile {
+  id               String                   @id @default(uuid())
+  name             String
+  department       LaborDepartment          @default(PRESSMAN)
+  paymentTypeId    String
+  defaultRate      Decimal?
+  status           LaborStatus              @default(ACTIVE)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  paymentType  PaymentCalculationType  @relation(fields: [paymentTypeId], references: [id])
+  rates        LaborRate[]
+  workEntries  LaborWorkEntry[]
+  advances     LaborAdvance[]
+  expenses     ExpenseEntry[]
+  productionOrders ProductionOrder[]
+
+  @@index([department])
+}
+
+model LaborRate {
+  id        String   @id @default(uuid())
+  laborId   String
+  articleId String
+  unitId    String?
+  rate      Decimal
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  labor   LaborProfile @relation(fields: [laborId], references: [id])
+  article Article      @relation(fields: [articleId], references: [id])
+  unit    Unit?        @relation(fields: [unitId], references: [id])
+
+  @@unique([laborId, articleId, unitId])
+}
+
+model LaborWorkEntry {
+  id        String   @id @default(uuid())
+  laborId   String
+  articleId String
+  unitId    String?
+  startDate DateTime
+  endDate   DateTime
+  quantity  Decimal
+  rate      Decimal
+  total     Decimal
+  createdAt DateTime @default(now())
+
+  labor   LaborProfile @relation(fields: [laborId], references: [id])
+  article Article      @relation(fields: [articleId], references: [id])
+  unit    Unit?        @relation(fields: [unitId], references: [id])
+
+  @@index([laborId, startDate, endDate])
 }
 
 model LaborAdvance {
-  id        String   @id @db.Uuid
-  laborId   String   @map("labor_id") @db.Uuid
-  date      DateTime @db.Timestamptz(6)
-  amount    Decimal  @db.Decimal(18, 4)
-  reason    String?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String   @id @default(uuid())
+  laborId        String
+  date           DateTime
+  amount         Decimal
+  reason         String?
+  createdAt      DateTime @default(now())
 
-  @@index([updatedAt])
-  @@map("labor_advance")
+  labor   LaborProfile  @relation(fields: [laborId], references: [id])
+  expenses ExpenseEntry[]
+
+  @@index([laborId, date])
+}
+
+model Bill {
+  id         String     @id @default(uuid())
+  billNumber String     @unique
+  date       DateTime
+  partyId    String?
+  type       BillType   @default(CASH)
+  status     BillStatus @default(DRAFT)
+  total      Decimal
+  verifiedAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  party    Party?    @relation(fields: [partyId], references: [id])
+  lines    BillLine[]
+  payments PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
+
+  @@index([date])
+}
+
+model BillLine {
+  id        String   @id @default(uuid())
+  billId    String
+  articleId String
+  quantity  Decimal
+  price     Decimal
+  total     Decimal
+
+  bill    Bill    @relation(fields: [billId], references: [id])
+  article Article @relation(fields: [articleId], references: [id])
 }
 
 model ChemicalPurchase {
-  id          String        @id @db.Uuid
-  date        DateTime      @db.Timestamptz(6)
-  partyId     String?       @map("party_id") @db.Uuid
-  quantityKg  Decimal       @map("quantity_kg") @db.Decimal(18, 4)
-  ratePerKg   Decimal       @map("rate_per_kg") @db.Decimal(18, 4)
-  totalAmount Decimal       @map("total_amount") @db.Decimal(18, 4)
-  paymentType PaymentMethod @default(CASH) @map("payment_type")
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id           String   @id @default(uuid())
+  date         DateTime
+  partyId      String?
+  quantityKg   Decimal
+  ratePerKg    Decimal
+  totalAmount  Decimal
+  paymentType  PaymentMethod @default(CASH)
+  createdAt    DateTime      @default(now())
 
-  @@index([updatedAt])
-  @@map("chemical_purchase")
+  party     Party?         @relation(fields: [partyId], references: [id])
+  expenses  ExpenseEntry[]
+  payments  PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
+
+  @@index([date])
 }
 
 model RexinePurchase {
-  id            String        @id @db.Uuid
-  date          DateTime      @db.Timestamptz(6)
-  partyId       String?       @map("party_id") @db.Uuid
-  quantityMeter Decimal       @map("quantity_meter") @db.Decimal(18, 4)
-  ratePerMeter  Decimal       @map("rate_per_meter") @db.Decimal(18, 4)
-  totalAmount   Decimal       @map("total_amount") @db.Decimal(18, 4)
-  paymentType   PaymentMethod @default(CASH) @map("payment_type")
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id            String   @id @default(uuid())
+  date          DateTime
+  partyId       String?
+  quantityMeter Decimal
+  ratePerMeter  Decimal
+  totalAmount   Decimal
+  paymentType   PaymentMethod @default(CASH)
+  createdAt     DateTime      @default(now())
 
-  @@index([updatedAt])
-  @@map("rexine_purchase")
+  party     Party?         @relation(fields: [partyId], references: [id])
+  expenses  ExpenseEntry[]
+  payments  PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
+
+  @@index([date])
 }
 
 model MaterialPurchase {
-  id           String        @id @db.Uuid
-  date         DateTime      @db.Timestamptz(6)
-  partyId      String?       @map("party_id") @db.Uuid
-  articleId    String?       @map("article_id") @db.Uuid
-  unitId       String?       @map("unit_id") @db.Uuid
-  quantity     Decimal       @db.Decimal(18, 4)
-  pricePerUnit Decimal       @map("price_per_unit") @db.Decimal(18, 4)
-  totalAmount  Decimal       @map("total_amount") @db.Decimal(18, 4)
-  paymentType  PaymentMethod @default(CASH) @map("payment_type")
-  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id           String   @id @default(uuid())
+  date         DateTime
+  partyId      String?
+  articleId    String?
+  unitId       String?
+  quantity     Decimal
+  pricePerUnit Decimal
+  totalAmount  Decimal
+  paymentType  PaymentMethod @default(CASH)
+  createdAt    DateTime      @default(now())
 
-  @@index([updatedAt])
-  @@map("material_purchase")
+  party    Party?         @relation(fields: [partyId], references: [id])
+  article  Article?       @relation(fields: [articleId], references: [id])
+  unit     Unit?          @relation(fields: [unitId], references: [id])
+  expenses ExpenseEntry[]
+  payments PartyPayment[]
+  ledgerEntries PartyLedgerEntry[]
+
+  @@index([date])
 }
 
+model PartyPayment {
+  id                 String   @id @default(uuid())
+  partyId            String
+  date               DateTime
+  amount             Decimal
+  method             PaymentMethod @default(CASH)
+  reference          String?
+  description        String?
+  billId             String?
+  chemicalPurchaseId String?
+  rexinePurchaseId   String?
+  materialPurchaseId String?
+  createdAt          DateTime @default(now())
+
+  party             Party             @relation(fields: [partyId], references: [id])
+  bill              Bill?             @relation(fields: [billId], references: [id])
+  chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
+  rexinePurchase    RexinePurchase?   @relation(fields: [rexinePurchaseId], references: [id])
+  materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
+
+  @@index([partyId, date])
+}
+
+model ProductionOrder {
+  id            String                @id @default(uuid())
+  department    LaborDepartment
+  stage         ProductionStage
+  articleId     String
+  laborId       String?
+  quantityDozen Decimal
+  pricePerDozen Decimal               @default(0)
+  completedDozen Decimal              @default(0)
+  forwardedDozen Decimal              @default(0)
+  source        ProductionOrderSource @default(MANUAL)
+  isClosed      Boolean               @default(false)
+  closedAt      DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  article Article      @relation(fields: [articleId], references: [id])
+  labor   LaborProfile? @relation(fields: [laborId], references: [id])
+
+  @@index([department, isClosed, updatedAt])
+  @@index([articleId, department])
+}
+
+
 model ChangeLog {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(uuid())
   entity    String
   entityId  String   @map("entity_id")
   operation String
   data      Json
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  synced    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  synced    Boolean  @default(false)
   deviceId  String   @map("device_id")
 
-  @@index([createdAt])
-  @@index([entity, entityId])
+  @@index([synced, createdAt])
   @@map("change_log")
+}
+
+model SyncState {
+  id                String   @id
+  lastSyncTimestamp DateTime? @map("last_sync_timestamp")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("sync_state")
 }
