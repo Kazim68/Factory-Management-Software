@@ -7,10 +7,111 @@ datasource db {
   url      = env("CLOUD_DATABASE_URL")
 }
 
+enum PaymentMethod {
+  CASH
+  CREDIT
+  BANK
+}
+
+enum ExpenseModule {
+  CHEMICAL
+  REXINE
+  MATERIAL
+  LABOR
+  MISC
+}
+
+enum ExpenseSource {
+  MANUAL
+  SYSTEM
+}
+
+model ExpenseEntry {
+  id                 String        @id @db.Uuid
+  date               DateTime      @db.Timestamptz(6)
+  partyId            String?       @map("party_id") @db.Uuid
+  laborId            String?       @map("labor_id") @db.Uuid
+  module             ExpenseModule @default(MISC)
+  paymentType        PaymentMethod @default(CASH) @map("payment_type")
+  amount             Decimal       @db.Decimal(18, 4)
+  description        String?
+  chemicalPurchaseId String?       @map("chemical_purchase_id") @db.Uuid
+  rexinePurchaseId   String?       @map("rexine_purchase_id") @db.Uuid
+  materialPurchaseId String?       @map("material_purchase_id") @db.Uuid
+  laborAdvanceId     String?       @map("labor_advance_id") @db.Uuid
+  source             ExpenseSource @default(MANUAL)
+  sourceSystem       String?       @map("source_system")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([updatedAt])
+  @@map("expense_entry")
+}
+
+model LaborAdvance {
+  id        String   @id @db.Uuid
+  laborId   String   @map("labor_id") @db.Uuid
+  date      DateTime @db.Timestamptz(6)
+  amount    Decimal  @db.Decimal(18, 4)
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([updatedAt])
+  @@map("labor_advance")
+}
+
+model ChemicalPurchase {
+  id          String        @id @db.Uuid
+  date        DateTime      @db.Timestamptz(6)
+  partyId     String?       @map("party_id") @db.Uuid
+  quantityKg  Decimal       @map("quantity_kg") @db.Decimal(18, 4)
+  ratePerKg   Decimal       @map("rate_per_kg") @db.Decimal(18, 4)
+  totalAmount Decimal       @map("total_amount") @db.Decimal(18, 4)
+  paymentType PaymentMethod @default(CASH) @map("payment_type")
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([updatedAt])
+  @@map("chemical_purchase")
+}
+
+model RexinePurchase {
+  id            String        @id @db.Uuid
+  date          DateTime      @db.Timestamptz(6)
+  partyId       String?       @map("party_id") @db.Uuid
+  quantityMeter Decimal       @map("quantity_meter") @db.Decimal(18, 4)
+  ratePerMeter  Decimal       @map("rate_per_meter") @db.Decimal(18, 4)
+  totalAmount   Decimal       @map("total_amount") @db.Decimal(18, 4)
+  paymentType   PaymentMethod @default(CASH) @map("payment_type")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([updatedAt])
+  @@map("rexine_purchase")
+}
+
+model MaterialPurchase {
+  id           String        @id @db.Uuid
+  date         DateTime      @db.Timestamptz(6)
+  partyId      String?       @map("party_id") @db.Uuid
+  articleId    String?       @map("article_id") @db.Uuid
+  unitId       String?       @map("unit_id") @db.Uuid
+  quantity     Decimal       @db.Decimal(18, 4)
+  pricePerUnit Decimal       @map("price_per_unit") @db.Decimal(18, 4)
+  totalAmount  Decimal       @map("total_amount") @db.Decimal(18, 4)
+  paymentType  PaymentMethod @default(CASH) @map("payment_type")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([updatedAt])
+  @@map("material_purchase")
+}
+
 model ChangeLog {
   id        String   @id @default(uuid()) @db.Uuid
   entity    String
-  entityId  String   @map("entity_id") @db.Uuid
+  entityId  String   @map("entity_id")
   operation String
   data      Json
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -18,5 +119,6 @@ model ChangeLog {
   deviceId  String   @map("device_id")
 
   @@index([createdAt])
+  @@index([entity, entityId])
   @@map("change_log")
 }
