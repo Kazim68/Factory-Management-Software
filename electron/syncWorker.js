@@ -7,6 +7,9 @@ import {
 
 const SYNC_INTERVAL_MS = 30_000;
 const SYNC_BASE_URL = process.env.SYNC_SERVER_URL ?? "http://localhost:4001";
+const nowStamp = () => new Date().toISOString();
+const log = (...args) => console.log("[sync]", nowStamp(), ...args);
+const warn = (...args) => console.warn("[sync]", nowStamp(), ...args);
 
 const snakeToCamel = (value) =>
   value.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -168,12 +171,14 @@ const applyRemoteChange = async (tx, change) => {
 
 const syncOnce = async () => {
   const deviceId = getDeviceId();
+  log("run:start", { deviceId, baseUrl: SYNC_BASE_URL });
   const pendingChanges = await prisma.changeLog.findMany({
     where: { synced: false },
     orderBy: { createdAt: "asc" },
   });
 
   if (pendingChanges.length) {
+    log("push:start", { count: pendingChanges.length });
     const pushResponse = await fetch(`${SYNC_BASE_URL}/sync/push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -185,21 +190,31 @@ const syncOnce = async () => {
         where: { id: { in: pendingChanges.map((change) => change.id) } },
         data: { synced: true },
       });
+      log("push:ok", { count: pendingChanges.length });
+    } else {
+      warn("push:failed", { status: pushResponse.status });
     }
+  } else {
+    log("push:skip", { count: 0 });
   }
 
   const lastSync = await getLastSyncTimestamp(prisma);
+  log("pull:start", { lastSync });
   const pullResponse = await fetch(
     `${SYNC_BASE_URL}/sync/pull?lastSync=${encodeURIComponent(lastSync)}&deviceId=${encodeURIComponent(deviceId)}`
   );
 
-  if (!pullResponse.ok) return;
+  if (!pullResponse.ok) {
+    warn("pull:failed", { status: pullResponse.status });
+    return;
+  }
 
   const payload = await pullResponse.json();
   const remoteChanges = Array.isArray(payload?.changes) ? payload.changes : [];
   const serverTime = payload?.serverTime ? new Date(payload.serverTime) : null;
 
   if (remoteChanges.length) {
+    log("pull:ok", { count: remoteChanges.length });
     globalThis.__SYNC_APPLYING__ = true;
     try {
       await prisma.$transaction(async (tx) => {
@@ -235,6 +250,8 @@ const syncOnce = async () => {
     } finally {
       globalThis.__SYNC_APPLYING__ = false;
     }
+  } else {
+    log("pull:empty");
   }
 
   let nextSync = serverTime && !Number.isNaN(serverTime.getTime()) ? serverTime : null;
@@ -244,10 +261,9 @@ const syncOnce = async () => {
     if (!nextSync || createdAt > nextSync) nextSync = createdAt;
   }
 
-  await setLastSyncTimestamp(
-    prisma,
-    (nextSync ?? new Date()).toISOString()
-  );
+  const nextSyncIso = (nextSync ?? new Date()).toISOString();
+  await setLastSyncTimestamp(prisma, nextSyncIso);
+  log("run:done", { nextSync: nextSyncIso });
 };
 
 export const startSyncWorker = () => {

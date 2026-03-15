@@ -81,6 +81,7 @@ router.post("/push", async (req, res, next) => {
     const deviceId = String(req.body?.deviceId ?? "unknown-device");
 
     for (const change of changes) {
+      const receivedAt = new Date();
       const delegate = resolveDelegate(prisma, String(change.entity ?? ""));
       const incoming = change.data;
 
@@ -99,7 +100,7 @@ router.post("/push", async (req, res, next) => {
               data: incoming,
               synced: true,
               deviceId,
-              createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
+              createdAt: receivedAt,
             },
             update: {
               entity: change.entity,
@@ -108,7 +109,7 @@ router.post("/push", async (req, res, next) => {
               data: incoming,
               synced: true,
               deviceId,
-              createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
+              createdAt: receivedAt,
             },
           }),
         ]);
@@ -128,27 +129,27 @@ router.post("/push", async (req, res, next) => {
         }),
         prisma.changeLog.upsert({
           where: { id: change.id },
-          create: {
-            id: change.id,
-            entity: change.entity,
-            entityId: String(incoming.id),
-            operation: change.operation,
-            data: incoming,
-            synced: true,
-            deviceId,
-            createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
-          },
-          update: {
-            entity: change.entity,
-            entityId: String(incoming.id),
-            operation: change.operation,
-            data: incoming,
-            synced: true,
-            deviceId,
-            createdAt: change.createdAt ? new Date(change.createdAt) : new Date(),
-          },
-        }),
-      ]);
+        create: {
+          id: change.id,
+          entity: change.entity,
+          entityId: String(incoming.id),
+          operation: change.operation,
+          data: incoming,
+          synced: true,
+          deviceId,
+          createdAt: receivedAt,
+        },
+        update: {
+          entity: change.entity,
+          entityId: String(incoming.id),
+          operation: change.operation,
+          data: incoming,
+          synced: true,
+          deviceId,
+          createdAt: receivedAt,
+        },
+      }),
+    ]);
     }
 
     res.json({ ok: true });
