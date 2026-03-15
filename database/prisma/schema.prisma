@@ -1,11 +1,12 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/cloud-client"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("CLOUD_DATABASE_URL")
 }
 
 enum PartyType {
