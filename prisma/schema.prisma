@@ -74,7 +74,7 @@ enum ProductionOrderSource {
 }
 
 model Unit {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   name      String   @unique
   symbol    String?
   createdAt DateTime @default(now())
@@ -87,7 +87,7 @@ model Unit {
 }
 
 model Article {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   name      String   @unique
   code      String?
   createdAt DateTime @default(now())
@@ -101,14 +101,14 @@ model Article {
 }
 
 model ExpenseCategory {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model PaymentCalculationType {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   name      String   @unique
   unitId    String?
   createdAt DateTime @default(now())
@@ -119,7 +119,7 @@ model PaymentCalculationType {
 }
 
 model Party {
-  id             String            @id @default(cuid())
+  id             String            @id @default(uuid())
   name           String            @unique
   type           PartyType
   openingBalance Decimal           @default(0)
@@ -136,7 +136,7 @@ model Party {
 }
 
 model PartyLedgerEntry {
-  id             String   @id @default(cuid())
+  id             String   @id @default(uuid())
   partyId        String
   billId         String?
   date           DateTime
@@ -158,7 +158,7 @@ model PartyLedgerEntry {
 }
 
 model ExpenseEntry {
-  id                 String        @id @default(cuid())
+  id                 String        @id @default(uuid())
   date               DateTime
   partyId            String?
   laborId            String?
@@ -185,7 +185,7 @@ model ExpenseEntry {
 }
 
 model LaborProfile {
-  id               String                   @id @default(cuid())
+  id               String                   @id @default(uuid())
   name             String
   department       LaborDepartment          @default(PRESSMAN)
   paymentTypeId    String
@@ -205,7 +205,7 @@ model LaborProfile {
 }
 
 model LaborRate {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   laborId   String
   articleId String
   unitId    String?
@@ -221,7 +221,7 @@ model LaborRate {
 }
 
 model LaborWorkEntry {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   laborId   String
   articleId String
   unitId    String?
@@ -240,7 +240,7 @@ model LaborWorkEntry {
 }
 
 model LaborAdvance {
-  id             String   @id @default(cuid())
+  id             String   @id @default(uuid())
   laborId        String
   date           DateTime
   amount         Decimal
@@ -254,7 +254,7 @@ model LaborAdvance {
 }
 
 model Bill {
-  id         String     @id @default(cuid())
+  id         String     @id @default(uuid())
   billNumber String     @unique
   date       DateTime
   partyId    String?
@@ -274,7 +274,7 @@ model Bill {
 }
 
 model BillLine {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   billId    String
   articleId String
   quantity  Decimal
@@ -286,7 +286,7 @@ model BillLine {
 }
 
 model ChemicalPurchase {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid())
   date         DateTime
   partyId      String?
   quantityKg   Decimal
@@ -304,7 +304,7 @@ model ChemicalPurchase {
 }
 
 model RexinePurchase {
-  id            String   @id @default(cuid())
+  id            String   @id @default(uuid())
   date          DateTime
   partyId       String?
   quantityMeter Decimal
@@ -322,7 +322,7 @@ model RexinePurchase {
 }
 
 model MaterialPurchase {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid())
   date         DateTime
   partyId      String?
   articleId    String?
@@ -344,7 +344,7 @@ model MaterialPurchase {
 }
 
 model PartyPayment {
-  id                 String   @id @default(cuid())
+  id                 String   @id @default(uuid())
   partyId            String
   date               DateTime
   amount             Decimal
@@ -367,7 +367,7 @@ model PartyPayment {
 }
 
 model ProductionOrder {
-  id            String                @id @default(cuid())
+  id            String                @id @default(uuid())
   department    LaborDepartment
   stage         ProductionStage
   articleId     String
@@ -387,4 +387,27 @@ model ProductionOrder {
 
   @@index([department, isClosed, updatedAt])
   @@index([articleId, department])
+}
+
+
+model ChangeLog {
+  id        String   @id @default(uuid())
+  entity    String
+  entityId  String   @map("entity_id")
+  operation String
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at")
+  synced    Boolean  @default(false)
+  deviceId  String   @map("device_id")
+
+  @@index([synced, createdAt])
+  @@map("change_log")
+}
+
+model SyncState {
+  id                String   @id
+  lastSyncTimestamp DateTime? @map("last_sync_timestamp")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("sync_state")
 }

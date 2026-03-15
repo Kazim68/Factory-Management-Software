@@ -2,10 +2,14 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 import { startServer } from "./server/app.js";
+import { initPrisma } from "./server/prisma.js";
+import { startSyncWorker } from "./syncWorker.js";
 import registerIpc from "./ipc/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+let syncTimer;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -20,8 +24,7 @@ function createWindow() {
     const loadDev = async () => {
       try {
         await win.loadURL("http://localhost:5173");
-      } catch (err) {
-        // Retry until Vite is ready
+      } catch {
         setTimeout(loadDev, 300);
       }
     };
@@ -32,7 +35,14 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  await startServer();   // 🔴 IMPORTANT
+  await initPrisma();
+  await startServer();
   registerIpc(ipcMain);
+  syncTimer = startSyncWorker();
   createWindow();
+});
+
+app.on("window-all-closed", () => {
+  if (syncTimer) clearInterval(syncTimer);
+  if (process.platform !== "darwin") app.quit();
 });
