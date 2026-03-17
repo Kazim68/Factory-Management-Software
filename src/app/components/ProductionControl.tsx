@@ -86,7 +86,10 @@ export function ProductionControl() {
       setOrders(orderData);
       setArticles(articleData);
 
-      const grouped: Record<ApiLaborDepartment, Array<{ id: string; name: string }>> = {
+      const grouped: Record<
+        ApiLaborDepartment,
+        Array<{ id: string; name: string }>
+      > = {
         PRESSMAN: [],
         UPPERMAN: [],
         PRINTING: [],
@@ -117,13 +120,13 @@ export function ProductionControl() {
           acc[department] = orders.filter(
             (order) =>
               order.department === department &&
-              Number(order.completedDozen) < Number(order.quantityDozen)
+              Number(order.completedDozen) < Number(order.quantityDozen),
           );
           return acc;
         },
-        {} as Record<ApiLaborDepartment, ApiProductionOrder[]>
+        {} as Record<ApiLaborDepartment, ApiProductionOrder[]>,
       ),
-    [orders]
+    [orders],
   );
 
   return (
@@ -203,6 +206,7 @@ function DepartmentSection({
   const [doneQtyValue, setDoneQtyValue] = useState("");
   const [editForm, setEditForm] = useState({
     articleId: "",
+    laborId: "unassigned",
     quantityDozen: "",
     pricePerDozen: "",
   });
@@ -231,7 +235,8 @@ function DepartmentSection({
       await productionApi.createOrder({
         department,
         articleId: formData.articleId,
-        laborId: formData.laborId === "unassigned" ? undefined : formData.laborId,
+        laborId:
+          formData.laborId === "unassigned" ? undefined : formData.laborId,
         quantityDozen,
         pricePerDozen,
       });
@@ -258,9 +263,11 @@ function DepartmentSection({
     setAssignPriceValue(
       row.pricePerDozen
         ? String(
-            department === "UPPERMAN" ? Number(row.pricePerDozen) / 12 : row.pricePerDozen
+            department === "UPPERMAN"
+              ? Number(row.pricePerDozen) / 12
+              : row.pricePerDozen,
           )
-        : ""
+        : "",
     );
     setAssignOpen(true);
   };
@@ -269,7 +276,7 @@ function DepartmentSection({
     setSelectedOrderId(row.id);
     const remaining = Math.max(
       Number(row.quantityDozen) - Number(row.completedDozen),
-      0
+      0,
     );
     setDoneQtyValue(String(remaining));
     setDoneOpen(true);
@@ -279,6 +286,7 @@ function DepartmentSection({
     setSelectedOrderId(row.id);
     setEditForm({
       articleId: row.articleId,
+      laborId: row.laborId || "unassigned",
       quantityDozen: String(row.quantityDozen),
       pricePerDozen: String(row.pricePerDozen),
     });
@@ -297,7 +305,8 @@ function DepartmentSection({
     try {
       setSaving(true);
       await productionApi.assignLabor(selectedOrderId, {
-        laborId: assignLaborValue === "unassigned" ? undefined : assignLaborValue,
+        laborId:
+          assignLaborValue === "unassigned" ? undefined : assignLaborValue,
         pricePerDozen: department === "UPPERMAN" ? priceInput * 12 : priceInput,
       });
       toast.success("Labor assigned.");
@@ -325,7 +334,10 @@ function DepartmentSection({
     }
     try {
       setSaving(true);
-      await productionApi.updateCompletion(selectedOrderId, alreadyCompleted + value);
+      await productionApi.updateCompletion(
+        selectedOrderId,
+        alreadyCompleted + value,
+      );
       toast.success("Completed quantity updated.");
       setDoneOpen(false);
       await onRefresh();
@@ -339,7 +351,7 @@ function DepartmentSection({
 
   const submitEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || !selectedOrder) return;
     const quantityDozen = Number(editForm.quantityDozen);
     const pricePerDozen = Number(editForm.pricePerDozen);
     if (!Number.isFinite(quantityDozen) || quantityDozen <= 0) return;
@@ -351,6 +363,16 @@ function DepartmentSection({
         quantityDozen,
         pricePerDozen,
       });
+
+      const currentLaborId = selectedOrder.laborId ?? null;
+      const nextLaborId =
+        editForm.laborId === "unassigned" ? null : editForm.laborId;
+      if (currentLaborId !== nextLaborId) {
+        await productionApi.assignLabor(selectedOrderId, {
+          laborId: nextLaborId ?? undefined,
+        });
+      }
+
       toast.success("Order updated.");
       setEditOpen(false);
       await onRefresh();
@@ -372,14 +394,18 @@ function DepartmentSection({
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add {DEPARTMENT_TITLE[department]} Order</DialogTitle>
+              <DialogTitle>
+                Add {DEPARTMENT_TITLE[department]} Order
+              </DialogTitle>
             </DialogHeader>
             <form onSubmit={submit} className="space-y-4">
               <div>
                 <Label>Article</Label>
                 <Select
                   value={formData.articleId}
-                  onValueChange={(value) => setFormData({ ...formData, articleId: value })}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, articleId: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -397,7 +423,9 @@ function DepartmentSection({
                 <Label>Labor</Label>
                 <Select
                   value={formData.laborId}
-                  onValueChange={(value) => setFormData({ ...formData, laborId: value })}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, laborId: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -419,7 +447,9 @@ function DepartmentSection({
                   min="0"
                   step="0.01"
                   value={formData.quantityDozen}
-                  onChange={(e) => setFormData({ ...formData, quantityDozen: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, quantityDozen: e.target.value })
+                  }
                   required
                 />
               </div>
@@ -430,12 +460,18 @@ function DepartmentSection({
                   min="0"
                   step="0.01"
                   value={formData.pricePerDozen}
-                  onChange={(e) => setFormData({ ...formData, pricePerDozen: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, pricePerDozen: e.target.value })
+                  }
                   required
                 />
               </div>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOpen(false)}
+                >
                   Cancel
                 </Button>
                 <Button type="submit" disabled={saving}>
@@ -455,7 +491,10 @@ function DepartmentSection({
           <form onSubmit={submitAssign} className="space-y-4">
             <div>
               <Label>Labor</Label>
-              <Select value={assignLaborValue} onValueChange={setAssignLaborValue}>
+              <Select
+                value={assignLaborValue}
+                onValueChange={setAssignLaborValue}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -470,7 +509,11 @@ function DepartmentSection({
               </Select>
             </div>
             <div>
-              <Label>{department === "UPPERMAN" ? "Price Per Pair" : "Price Per Dozen"}</Label>
+              <Label>
+                {department === "UPPERMAN"
+                  ? "Price Per Pair"
+                  : "Price Per Dozen"}
+              </Label>
               <Input
                 type="number"
                 min="0"
@@ -481,7 +524,11 @@ function DepartmentSection({
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setAssignOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setAssignOpen(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={saving}>
@@ -509,7 +556,7 @@ function DepartmentSection({
                     ? Math.max(
                         Number(selectedOrder.quantityDozen) -
                           Number(selectedOrder.completedDozen),
-                        0
+                        0,
                       )
                     : undefined
                 }
@@ -524,14 +571,18 @@ function DepartmentSection({
                   {Math.max(
                     Number(selectedOrder.quantityDozen) -
                       Number(selectedOrder.completedDozen),
-                    0
+                    0,
                   )}{" "}
                   dozen
                 </p>
               )}
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setDoneOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDoneOpen(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={saving}>
@@ -552,7 +603,9 @@ function DepartmentSection({
               <Label>Article</Label>
               <Select
                 value={editForm.articleId}
-                onValueChange={(value) => setEditForm({ ...editForm, articleId: value })}
+                onValueChange={(value) =>
+                  setEditForm({ ...editForm, articleId: value })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -567,13 +620,36 @@ function DepartmentSection({
               </Select>
             </div>
             <div>
+              <Label>Labor</Label>
+              <Select
+                value={editForm.laborId}
+                onValueChange={(value) =>
+                  setEditForm({ ...editForm, laborId: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {departmentLabors.map((labor) => (
+                    <SelectItem key={labor.id} value={labor.id}>
+                      {labor.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Quantity (Dozen)</Label>
               <Input
                 type="number"
                 min="0"
                 step="0.01"
                 value={editForm.quantityDozen}
-                onChange={(e) => setEditForm({ ...editForm, quantityDozen: e.target.value })}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, quantityDozen: e.target.value })
+                }
                 required
               />
             </div>
@@ -584,12 +660,18 @@ function DepartmentSection({
                 min="0"
                 step="0.01"
                 value={editForm.pricePerDozen}
-                onChange={(e) => setEditForm({ ...editForm, pricePerDozen: e.target.value })}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, pricePerDozen: e.target.value })
+                }
                 required
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditOpen(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={saving}>
@@ -606,7 +688,9 @@ function DepartmentSection({
             <TableHead>Article</TableHead>
             <TableHead>Labor</TableHead>
             <TableHead>Quantity (Dozen)</TableHead>
-            <TableHead>{department === "UPPERMAN" ? "Price / Pair" : "Price / Dozen"}</TableHead>
+            <TableHead>
+              {department === "UPPERMAN" ? "Price / Pair" : "Price / Dozen"}
+            </TableHead>
             <TableHead>Completed Qty</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Actions</TableHead>
@@ -615,13 +699,19 @@ function DepartmentSection({
         <TableBody>
           {isLoading ? (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
+              <TableCell
+                colSpan={7}
+                className="text-center text-muted-foreground"
+              >
                 Loading orders...
               </TableCell>
             </TableRow>
           ) : rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
+              <TableCell
+                colSpan={7}
+                className="text-center text-muted-foreground"
+              >
                 No orders in this department.
               </TableCell>
             </TableRow>
@@ -653,21 +743,33 @@ function DepartmentSection({
                 <TableCell>
                   <div className="flex gap-2">
                     {department === "PRESSMAN" ? (
-                      <Button size="sm" variant="outline" onClick={() => openEditDialog(row)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openEditDialog(row)}
+                      >
                         Edit
                       </Button>
+                    ) : row.laborId ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openAssignDialog(row)}
+                      >
+                        Assign Labor
+                      </Button>
                     ) : (
-                      <Button size="sm" variant="outline" onClick={() => openAssignDialog(row)}>
+                      <></>
+                    )}
+                    {row.laborId ? (
+                      <Button size="sm" onClick={() => openDoneDialog(row)}>
+                        Done
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => openAssignDialog(row)}>
                         Assign Labor
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      onClick={() => openDoneDialog(row)}
-                      disabled={department !== "PRESSMAN" && !row.laborId}
-                    >
-                      Done
-                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
