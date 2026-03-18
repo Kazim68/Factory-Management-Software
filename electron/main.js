@@ -4,12 +4,13 @@ import { fileURLToPath } from "url";
 import { startServer } from "./server/app.js";
 import { initPrisma } from "./server/prisma.js";
 import { startSyncWorker } from "./syncWorker.js";
+import { disconnectCloudPrisma } from "./server/cloudPrisma.js";
 import registerIpc from "./ipc/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let syncTimer;
+let syncWorker;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -38,11 +39,14 @@ app.whenReady().then(async () => {
   await initPrisma();
   await startServer();
   registerIpc(ipcMain);
-  syncTimer = startSyncWorker();
+  syncWorker = startSyncWorker();
   createWindow();
 });
 
 app.on("window-all-closed", () => {
-  if (syncTimer) clearInterval(syncTimer);
+  if (syncWorker) syncWorker.stop();
+  disconnectCloudPrisma().catch((error) =>
+    console.error("Cloud Prisma disconnect error:", error)
+  );
   if (process.platform !== "darwin") app.quit();
 });

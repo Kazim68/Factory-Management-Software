@@ -1,23 +1,60 @@
 import prisma from "./server/prisma.js";
+import { getCloudPrisma } from "./server/cloudPrisma.js";
 import {
   getDeviceId,
   getLastSyncTimestamp,
   setLastSyncTimestamp,
 } from "./server/sync/syncService.js";
 
-const SYNC_INTERVAL_MS = 30_000;
-const SYNC_BASE_URL = process.env.SYNC_SERVER_URL ?? "http://localhost:4001";
+const BASE_INTERVAL_MS = 30_000;
+const MAX_BACKOFF_MS = 5 * 60_000;
+const BATCH_SIZE = 200;
+const MAX_PASSES = 5;
+const MAX_RETRIES = 3;
+
 const nowStamp = () => new Date().toISOString();
 const log = (...args) => console.log("[sync]", nowStamp(), ...args);
 const warn = (...args) => console.warn("[sync]", nowStamp(), ...args);
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withRetry = async (fn, label) => {
+  let attempt = 0;
+  let lastError;
+  while (attempt < MAX_RETRIES) {
+    attempt += 1;
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      warn(`${label}:retry`, { attempt, error: error?.message ?? error });
+      await sleep(250 * attempt);
+    }
+  }
+  throw lastError;
+};
 
 const snakeToCamel = (value) =>
   value.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 
 const toComparableTimestamp = (record) => {
   if (!record) return null;
-  if (record.updatedAt) return new Date(record.updatedAt);
-  if (record.createdAt) return new Date(record.createdAt);
+  const value = record.updatedAt ?? record.createdAt;
+  if (!value) return null;
+  const dateValue = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(dateValue.getTime()) ? null : dateValue;
+};
+
+const getChangeTimestamp = (change) => {
+  const byData = toComparableTimestamp(change?.data);
+  if (byData) return byData;
+  if (change?.createdAt) {
+    const dateValue =
+      change.createdAt instanceof Date
+        ? change.createdAt
+        : new Date(change.createdAt);
+    return Number.isNaN(dateValue.getTime()) ? null : dateValue;
+  }
   return null;
 };
 
@@ -97,7 +134,9 @@ const getModelRelations = (entity) => {
   }
 
   const relations = model.fields
-    .filter((field) => field.kind === "object" && Array.isArray(field.relationFromFields))
+    .filter(
+      (field) => field.kind === "object" && Array.isArray(field.relationFromFields)
+    )
     .map((field) => ({
       targetModel: field.type,
       fromFields: field.relationFromFields,
@@ -136,21 +175,130 @@ const areForeignKeysSatisfied = async (tx, entity, incoming) => {
   return true;
 };
 
-const applyRemoteChange = async (tx, change) => {
+const applyChangeToRemote = async (cloud, change, deviceId) => {
+  const delegate = resolveDelegate(cloud, String(change.entity ?? ""));
+  if (!delegate) return { applied: false, deferred: false };
+
+  const incoming = change.data;
+  if (!incoming?.id) return { applied: false, deferred: false };
+
+  const changeTimestamp = getChangeTimestamp(change);
+
+  if (change.operation === "delete") {
+    const existing = await delegate.findUnique({ where: { id: incoming.id } });
+    if (existing) {
+      const existingTimestamp = toComparableTimestamp(existing);
+      if (
+        existingTimestamp &&
+        changeTimestamp &&
+        existingTimestamp > changeTimestamp
+      ) {
+        return { applied: true, skipped: true };
+      }
+    }
+
+    await cloud.$transaction([
+      delegate.deleteMany({ where: { id: incoming.id } }),
+      cloud.changeLog.upsert({
+        where: { id: change.id },
+        create: {
+          id: change.id,
+          entity: change.entity,
+          entityId: String(incoming.id),
+          operation: change.operation,
+          data: incoming,
+          synced: true,
+          deviceId,
+          createdAt: changeTimestamp ?? new Date(),
+        },
+        update: {
+          entity: change.entity,
+          entityId: String(incoming.id),
+          operation: change.operation,
+          data: incoming,
+          synced: true,
+          deviceId,
+          createdAt: changeTimestamp ?? new Date(),
+        },
+      }),
+    ]);
+    return { applied: true, skipped: false };
+  }
+
+  const existing = await delegate.findUnique({ where: { id: incoming.id } });
+  if (!shouldApplyIncomingUpdate(existing, incoming)) {
+    return { applied: true, skipped: true };
+  }
+
+  const canApply = await areForeignKeysSatisfied(cloud, change.entity, incoming);
+  if (!canApply) {
+    return { applied: false, deferred: true };
+  }
+
+  const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
+
+  await cloud.$transaction([
+    delegate.upsert({
+      where: { id: incoming.id },
+      create: sanitizedIncoming,
+      update: sanitizedIncoming,
+    }),
+    cloud.changeLog.upsert({
+      where: { id: change.id },
+      create: {
+        id: change.id,
+        entity: change.entity,
+        entityId: String(incoming.id),
+        operation: change.operation,
+        data: incoming,
+        synced: true,
+        deviceId,
+        createdAt: changeTimestamp ?? new Date(),
+      },
+      update: {
+        entity: change.entity,
+        entityId: String(incoming.id),
+        operation: change.operation,
+        data: incoming,
+        synced: true,
+        deviceId,
+        createdAt: changeTimestamp ?? new Date(),
+      },
+    }),
+  ]);
+
+  return { applied: true, skipped: false };
+};
+
+const applyChangeToLocal = async (tx, change) => {
   const delegate = resolveDelegate(tx, String(change.entity ?? ""));
   if (!delegate) return { applied: false, deferred: false };
 
   const incoming = change.data;
   if (!incoming?.id) return { applied: false, deferred: false };
 
+  const changeTimestamp = getChangeTimestamp(change);
+
   if (change.operation === "delete") {
+    const existing = await delegate.findUnique({ where: { id: incoming.id } });
+    if (existing) {
+      const existingTimestamp = toComparableTimestamp(existing);
+      if (
+        existingTimestamp &&
+        changeTimestamp &&
+        existingTimestamp > changeTimestamp
+      ) {
+        return { applied: true, skipped: true };
+      }
+    }
+
     await delegate.deleteMany({ where: { id: incoming.id } });
     return { applied: true, deferred: false };
   }
 
   const existing = await delegate.findUnique({ where: { id: incoming.id } });
   if (!shouldApplyIncomingUpdate(existing, incoming)) {
-    return { applied: false, deferred: false };
+    return { applied: true, deferred: false, skipped: true };
   }
 
   const canApply = await areForeignKeysSatisfied(tx, change.entity, incoming);
@@ -159,122 +307,187 @@ const applyRemoteChange = async (tx, change) => {
   }
 
   const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
-
   await delegate.upsert({
     where: { id: incoming.id },
     create: sanitizedIncoming,
     update: sanitizedIncoming,
   });
-
   return { applied: true, deferred: false };
 };
 
-const syncOnce = async () => {
+const pushPendingChanges = async () => {
   const deviceId = getDeviceId();
-  log("run:start", { deviceId, baseUrl: SYNC_BASE_URL });
+  const cloud = getCloudPrisma();
+
   const pendingChanges = await prisma.changeLog.findMany({
     where: { synced: false },
     orderBy: { createdAt: "asc" },
+    take: BATCH_SIZE,
   });
 
-  if (pendingChanges.length) {
-    log("push:start", { count: pendingChanges.length });
-    const pushResponse = await fetch(`${SYNC_BASE_URL}/sync/push`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId, changes: pendingChanges }),
+  if (!pendingChanges.length) {
+    return { pushed: 0 };
+  }
+
+  log("push:start", { count: pendingChanges.length });
+
+  let pending = pendingChanges.slice();
+  let pass = 0;
+  const appliedIds = new Set();
+
+  while (pending.length && pass < MAX_PASSES) {
+    pass += 1;
+    const nextPending = [];
+    let progress = false;
+
+    for (const change of pending) {
+      const result = await applyChangeToRemote(cloud, change, deviceId);
+      if (result.applied) {
+        appliedIds.add(change.id);
+        progress = true;
+        continue;
+      }
+      if (result.deferred) {
+        nextPending.push(change);
+      }
+    }
+
+    pending = nextPending;
+    if (!progress) break;
+  }
+
+  if (appliedIds.size) {
+    await prisma.changeLog.updateMany({
+      where: { id: { in: Array.from(appliedIds) } },
+      data: { synced: true },
     });
-
-    if (pushResponse.ok) {
-      await prisma.changeLog.updateMany({
-        where: { id: { in: pendingChanges.map((change) => change.id) } },
-        data: { synced: true },
-      });
-      log("push:ok", { count: pendingChanges.length });
-    } else {
-      warn("push:failed", { status: pushResponse.status });
-    }
-  } else {
-    log("push:skip", { count: 0 });
   }
 
+  if (pending.length) {
+    warn("push:deferred", { count: pending.length });
+  }
+
+  return { pushed: appliedIds.size, deferred: pending.length };
+};
+
+const pullRemoteChanges = async () => {
+  const deviceId = getDeviceId();
+  const cloud = getCloudPrisma();
   const lastSync = await getLastSyncTimestamp(prisma);
-  log("pull:start", { lastSync });
-  const pullResponse = await fetch(
-    `${SYNC_BASE_URL}/sync/pull?lastSync=${encodeURIComponent(lastSync)}&deviceId=${encodeURIComponent(deviceId)}`
-  );
+  const lastSyncDate = new Date(lastSync);
 
-  if (!pullResponse.ok) {
-    warn("pull:failed", { status: pullResponse.status });
-    return;
+  const changes = await cloud.changeLog.findMany({
+    where: {
+      createdAt: { gt: lastSyncDate },
+      deviceId: { not: deviceId },
+    },
+    orderBy: { createdAt: "asc" },
+    take: BATCH_SIZE,
+  });
+
+  if (!changes.length) {
+    return { applied: 0, maxTimestamp: null };
   }
 
-  const payload = await pullResponse.json();
-  const remoteChanges = Array.isArray(payload?.changes) ? payload.changes : [];
-  const serverTime = payload?.serverTime ? new Date(payload.serverTime) : null;
+  log("pull:start", { count: changes.length });
 
-  if (remoteChanges.length) {
-    log("pull:ok", { count: remoteChanges.length });
-    globalThis.__SYNC_APPLYING__ = true;
-    try {
-      await prisma.$transaction(async (tx) => {
-        let pending = remoteChanges;
-        let pass = 0;
-        let progress = true;
+  let appliedCount = 0;
+  let deferredCount = 0;
 
-        while (pending.length && progress && pass < 5) {
-          pass += 1;
-          progress = false;
-          const nextPending = [];
+  globalThis.__SYNC_APPLYING__ = true;
+  try {
+    await prisma.$transaction(async (tx) => {
+      let pending = changes;
+      let pass = 0;
+      let progress = true;
 
-          for (const change of pending) {
-            const result = await applyRemoteChange(tx, change);
-            if (result.applied) {
-              progress = true;
-              continue;
-            }
-            if (result.deferred) {
-              nextPending.push(change);
-            }
+      while (pending.length && progress && pass < MAX_PASSES) {
+        pass += 1;
+        progress = false;
+        const nextPending = [];
+
+        for (const change of pending) {
+          const result = await applyChangeToLocal(tx, change);
+          if (result.applied) {
+            appliedCount += 1;
+            progress = true;
+            continue;
           }
-
-          pending = nextPending;
+          if (result.deferred) {
+            nextPending.push(change);
+          }
         }
 
-        if (pending.length) {
-          throw new Error(
-            `Sync deferred ${pending.length} change(s) due to missing dependencies.`
-          );
-        }
-      });
-    } finally {
-      globalThis.__SYNC_APPLYING__ = false;
+        pending = nextPending;
+      }
+
+      deferredCount = pending.length;
+    });
+  } finally {
+    globalThis.__SYNC_APPLYING__ = false;
+  }
+
+  if (deferredCount) {
+    warn("pull:deferred", { count: deferredCount });
+    return { applied: appliedCount, maxTimestamp: null, deferred: true };
+  }
+
+  let maxTimestamp = null;
+  for (const change of changes) {
+    const ts = getChangeTimestamp(change);
+    if (!ts) continue;
+    if (!maxTimestamp || ts > maxTimestamp) {
+      maxTimestamp = ts;
     }
-  } else {
-    log("pull:empty");
   }
 
-  let nextSync = serverTime && !Number.isNaN(serverTime.getTime()) ? serverTime : null;
-  for (const change of remoteChanges) {
-    const createdAt = change?.createdAt ? new Date(change.createdAt) : null;
-    if (!createdAt || Number.isNaN(createdAt.getTime())) continue;
-    if (!nextSync || createdAt > nextSync) nextSync = createdAt;
-  }
+  return { applied: appliedCount, maxTimestamp, deferred: false };
+};
 
-  const nextSyncIso = (nextSync ?? new Date()).toISOString();
-  await setLastSyncTimestamp(prisma, nextSyncIso);
-  log("run:done", { nextSync: nextSyncIso });
+const runSyncCycle = async () => {
+  await withRetry(pushPendingChanges, "push");
+  const pullResult = await withRetry(pullRemoteChanges, "pull");
+
+  if (pullResult.maxTimestamp) {
+    await setLastSyncTimestamp(prisma, pullResult.maxTimestamp.toISOString());
+  }
 };
 
 export const startSyncWorker = () => {
-  const run = async () => {
+  let stopped = false;
+  let backoffMs = 0;
+
+  const scheduleNext = () => {
+    if (stopped) return;
+    const interval = Math.min(
+      BASE_INTERVAL_MS + backoffMs,
+      BASE_INTERVAL_MS + MAX_BACKOFF_MS
+    );
+    setTimeout(runLoop, interval);
+  };
+
+  const runLoop = async () => {
+    if (stopped) return;
     try {
-      await syncOnce();
+      await runSyncCycle();
+      backoffMs = 0;
+      log("cycle:ok");
     } catch (error) {
-      console.error("Sync worker error:", error);
+      warn("cycle:error", { error: error?.message ?? error });
+      backoffMs = Math.min(
+        backoffMs ? backoffMs * 2 : BASE_INTERVAL_MS,
+        MAX_BACKOFF_MS
+      );
+    } finally {
+      scheduleNext();
     }
   };
 
-  run();
-  return setInterval(run, SYNC_INTERVAL_MS);
+  runLoop();
+
+  return {
+    stop: () => {
+      stopped = true;
+    },
+  };
 };

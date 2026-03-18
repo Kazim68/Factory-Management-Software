@@ -90,6 +90,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "database/generated/cloud-client/**/*",
       "package.json"
     ],
     "win": {
