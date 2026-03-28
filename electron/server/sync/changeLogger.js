@@ -1,6 +1,14 @@
 import { randomUUID } from "crypto";
 
-const TRACKED_OPERATIONS = new Set(["create", "update", "upsert", "delete"]);
+const TRACKED_OPERATIONS = new Set([
+  "create",
+  "createMany",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
+]);
 const EXCLUDED_MODELS = new Set(["ChangeLog", "SyncState"]);
 
 const serializeRecord = (record) =>
@@ -29,6 +37,13 @@ const enqueueChangeLogWrite = (basePrisma, payload) => {
   }, 0);
 };
 
+const modelKeyFromName = (model) => model[0].toLowerCase() + model.slice(1);
+
+const normalizeCreateManyData = (data) => {
+  if (!data) return [];
+  return Array.isArray(data) ? data : [data];
+};
+
 export const withChangeLogging = (basePrisma, getDeviceId) =>
   basePrisma.$extends({
     query: {
@@ -43,11 +58,71 @@ export const withChangeLogging = (basePrisma, getDeviceId) =>
             return query(args);
           }
 
+          const delegate = basePrisma[modelKeyFromName(model)];
+
+          if (operation === "createMany") {
+            const dataItems = normalizeCreateManyData(args?.data).map((item) => ({
+              ...item,
+              id: item?.id ?? randomUUID(),
+            }));
+
+            const result = await query({ ...args, data: dataItems });
+            for (const record of dataItems) {
+              enqueueChangeLogWrite(basePrisma, {
+                id: randomUUID(),
+                entity: toEntityName(model),
+                entityId: String(record.id),
+                operation: "insert",
+                data: serializeRecord(record),
+                deviceId: getDeviceId(),
+              });
+            }
+            return result;
+          }
+
+          if (operation === "updateMany") {
+            const where = args?.where ?? {};
+            const existing = await delegate.findMany({ where });
+            const result = await query(args);
+            if (existing.length) {
+              const updated = await delegate.findMany({
+                where: { id: { in: existing.map((row) => row.id) } },
+              });
+              for (const record of updated) {
+                enqueueChangeLogWrite(basePrisma, {
+                  id: randomUUID(),
+                  entity: toEntityName(model),
+                  entityId: String(record.id),
+                  operation: "update",
+                  data: serializeRecord(record),
+                  deviceId: getDeviceId(),
+                });
+              }
+            }
+            return result;
+          }
+
+          if (operation === "deleteMany") {
+            const where = args?.where ?? {};
+            const existing = await delegate.findMany({ where });
+            const result = await query(args);
+            for (const record of existing) {
+              if (!record?.id) continue;
+              enqueueChangeLogWrite(basePrisma, {
+                id: randomUUID(),
+                entity: toEntityName(model),
+                entityId: String(record.id),
+                operation: "delete",
+                data: serializeRecord(record),
+                deviceId: getDeviceId(),
+              });
+            }
+            return result;
+          }
+
           let previous = null;
           if (operation === "delete") {
-            previous = await basePrisma[
-              model[0].toLowerCase() + model.slice(1)
-            ].findUnique({ where: args.where });
+            previous = await delegate.findUnique({ where: args.where });
           }
 
           const result = await query(args);
