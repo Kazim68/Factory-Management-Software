@@ -748,44 +748,6 @@ export function Roznamcha() {
     });
   };
 
-  const usersById = useMemo(() => {
-    return new Map(auth.listUsers().map((user) => [user.id, user]));
-  }, []);
-
-  const expenseActorByResourceId = useMemo(() => {
-    const map = new Map<string, { actorName: string; actorRole?: string }>();
-    auth
-      .listAuditLogs()
-      .filter((log) => (log.entity || "").toLowerCase().includes("expense") && log.resourceId)
-      .forEach((log) => {
-        if (!log.resourceId) return;
-        const role =
-          (log.actorId ? usersById.get(log.actorId)?.role : undefined) ||
-          Array.from(usersById.values()).find((user) => user.name === log.actorName)?.role;
-        map.set(log.resourceId, {
-          actorName: log.actorName,
-          actorRole: role,
-        });
-      });
-    return map;
-  }, [usersById]);
-
-  const getRecordedBy = (entry: ApiExpenseEntry) => {
-    const audit = expenseActorByResourceId.get(entry.id);
-    if (!audit) {
-      if (entry.source === "SYSTEM") return "System (Auto)";
-      const session = auth.getSessionUser();
-      if (session) {
-        return `${session.name} (${session.role.charAt(0).toUpperCase()}${session.role.slice(1)})`;
-      }
-      return "Unknown (User)";
-    }
-    const roleLabel = audit.actorRole
-      ? `${audit.actorRole.charAt(0).toUpperCase()}${audit.actorRole.slice(1)}`
-      : "User";
-    return `${audit.actorName} (${roleLabel})`;
-  };
-
   const filteredEntries = entries.filter((entry) => {
     const amount = Number(entry.amount ?? 0);
     const isLaborEntry =
@@ -1606,17 +1568,6 @@ export function Roznamcha() {
                   <p className="text-2xl text-green-600">
                     {formatCurrency(cashInToday)}
                   </p>
-                  <Button
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => {
-                      setQuickDirection("IN");
-                      setEditingEntry(null);
-                      setIsDialogOpen(true);
-                    }}
-                  >
-                    Record Cash In
-                  </Button>
                 </div>
                 <div className="rounded border p-4">
                   <p className="text-sm text-muted-foreground">
@@ -1625,18 +1576,6 @@ export function Roznamcha() {
                   <p className="text-2xl text-red-600">
                     {formatCurrency(cashOutToday)}
                   </p>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="mt-3"
-                    onClick={() => {
-                      setQuickDirection("OUT");
-                      setEditingEntry(null);
-                      setIsDialogOpen(true);
-                    }}
-                  >
-                    Record Cash Out
-                  </Button>
                 </div>
               </div>
 
