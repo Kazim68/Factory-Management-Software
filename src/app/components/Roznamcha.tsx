@@ -41,6 +41,7 @@ import {
   exportTableToPdf,
   type ReportExportPayload,
 } from "../lib/report";
+import { auth } from "../lib/auth";
 import type {
   ApiBill,
   ApiExpenseEntry,
@@ -125,6 +126,7 @@ export function Roznamcha() {
     .slice(0, 8);
 
   const [filterDate, setFilterDate] = useState(getCurrentDate());
+  const sessionUser = auth.getSessionUser();
   const computedPurchaseAmount =
     Number(formData.quantity || 0) * Number(formData.rate || 0);
   const selectedBill = billOptions.find((bill) => bill.id === formData.billId);
@@ -606,6 +608,8 @@ export function Roznamcha() {
           paymentType: formData.paymentType,
           amount,
           description: formData.description,
+          actorUsername: sessionUser?.username,
+          actorRole: sessionUser?.role,
         });
         toast.success("Expense recorded");
       } else {
@@ -620,6 +624,8 @@ export function Roznamcha() {
           paymentType: formData.paymentType,
           amount: formData.direction === "IN" ? -amount : amount,
           description: formData.description,
+          actorUsername: sessionUser?.username,
+          actorRole: sessionUser?.role,
         });
         toast.success("Entry recorded");
       }
@@ -746,6 +752,32 @@ export function Roznamcha() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const getActorLabel = (entry: ApiExpenseEntry) => {
+    const sourceSystem = String(entry.sourceSystem ?? "");
+    const taggedActor = sourceSystem.match(
+      /^ROZNAMCHA_MANUAL(?:\|([^|]+)\|([^|]+))?$/,
+    );
+
+    if (taggedActor?.[1] && taggedActor?.[2]) {
+      return `${taggedActor[1]} (${taggedActor[2]})`;
+    }
+
+    if (entry.source === "MANUAL" || typeof entry.source === "undefined") {
+      if (sessionUser?.username && sessionUser?.role) {
+        return `${sessionUser.username} (${sessionUser.role})`;
+      }
+      return "Manual Entry";
+    }
+
+    return "System";
+  };
+
+  const openCreateDialog = (direction: "IN" | "OUT") => {
+    resetForm();
+    setFormData((prev) => ({ ...prev, direction }));
+    setIsDialogOpen(true);
   };
 
   const filteredEntries = entries.filter((entry) => {
@@ -1018,11 +1050,15 @@ export function Roznamcha() {
                   }}
                 >
                   <DialogTrigger asChild>
-                    <Button className="h-10 self-end">
+                    <Button className="h-10 self-end" variant="outline" onClick={() => openCreateDialog("IN")}>
                       <Plus className="mr-2 h-4 w-4" />
-                      Add Entry
+                      Record In
                     </Button>
                   </DialogTrigger>
+                  <Button className="h-10 self-end" onClick={() => openCreateDialog("OUT")}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Record Out
+                  </Button>
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>
@@ -1588,6 +1624,7 @@ export function Roznamcha() {
                     <TableHead>Payment Type</TableHead>
                     <TableHead>In/Out</TableHead>
                     <TableHead>Amount</TableHead>
+                    <TableHead>By User</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1595,7 +1632,7 @@ export function Roznamcha() {
                   {isLoading ? (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center text-muted-foreground"
                       >
                         Loading expenses...
@@ -1604,7 +1641,7 @@ export function Roznamcha() {
                   ) : filteredEntries.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center text-muted-foreground"
                       >
                         No expenses recorded yet
@@ -1621,6 +1658,7 @@ export function Roznamcha() {
                         <TableCell>
                           {formatCurrency(Math.abs(Number(entry.amount)))}
                         </TableCell>
+                        <TableCell>{getActorLabel(entry)}</TableCell>
                         <TableCell>
                           {entry.source === "MANUAL" ||
                           typeof entry.source === "undefined" ? (
