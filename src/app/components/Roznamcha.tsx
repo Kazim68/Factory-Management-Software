@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -52,6 +52,7 @@ import type {
   ApiSupplierPendingDue,
 } from "../types/api";
 import { toast } from "sonner";
+import { auth } from "../lib/auth";
 
 export function Roznamcha() {
   type RoznamchaModule = ApiExpenseModule | "BILL" | "SUPPLIER_PAYMENT";
@@ -66,6 +67,7 @@ export function Roznamcha() {
   const [parties, setParties] = useState<ApiParty[]>([]);
   const [labors, setLabors] = useState<ApiLaborProfile[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [quickDirection, setQuickDirection] = useState<"IN" | "OUT" | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [billOptions, setBillOptions] = useState<ApiBill[]>([]);
   const [isLoadingBills, setIsLoadingBills] = useState(false);
@@ -210,6 +212,12 @@ export function Roznamcha() {
     if (typeof window === "undefined") return;
     localStorage.setItem("roznamcha.activeSection", activeSection);
   }, [activeSection]);
+
+  useEffect(() => {
+    if (!isDialogOpen || !quickDirection) return;
+    setFormData((prev) => ({ ...prev, direction: quickDirection }));
+  }, [isDialogOpen, quickDirection]);
+
 
   const buildRoznamchaPayload = (
     report: ApiRoznamchaSummaryReport,
@@ -748,6 +756,37 @@ export function Roznamcha() {
     });
   };
 
+  const usersById = useMemo(() => {
+    return new Map(auth.listUsers().map((user) => [user.id, user]));
+  }, []);
+
+  const expenseActorByResourceId = useMemo(() => {
+    const map = new Map<string, { actorName: string; actorRole?: string }>();
+    auth
+      .listAuditLogs()
+      .filter((log) => log.entity === "expenses" && log.resourceId)
+      .forEach((log) => {
+        if (!log.resourceId) return;
+        const role =
+          (log.actorId ? usersById.get(log.actorId)?.role : undefined) ||
+          Array.from(usersById.values()).find((user) => user.name === log.actorName)?.role;
+        map.set(log.resourceId, {
+          actorName: log.actorName,
+          actorRole: role,
+        });
+      });
+    return map;
+  }, [usersById]);
+
+  const getRecordedBy = (entry: ApiExpenseEntry) => {
+    const audit = expenseActorByResourceId.get(entry.id);
+    if (!audit) return entry.source === "SYSTEM" ? "System" : "-";
+    const roleLabel = audit.actorRole
+      ? `${audit.actorRole.charAt(0).toUpperCase()}${audit.actorRole.slice(1)}`
+      : "User";
+    return `${audit.actorName} (${roleLabel})`;
+  };
+
   const filteredEntries = entries.filter((entry) => {
     const amount = Number(entry.amount ?? 0);
     const isLaborEntry =
@@ -1014,19 +1053,43 @@ export function Roznamcha() {
                   open={isDialogOpen}
                   onOpenChange={(open) => {
                     setIsDialogOpen(open);
-                    if (!open) resetForm();
+                    if (!open) {
+                      setQuickDirection(null);
+                      resetForm();
+                    }
                   }}
                 >
-                  <DialogTrigger asChild>
-                    <Button className="h-10 self-end">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Entry
-                    </Button>
-                  </DialogTrigger>
+                  <div className="flex gap-2 self-end">
+                    <DialogTrigger asChild>
+                      <Button
+                        className="h-10"
+                        onClick={() => {
+                          setQuickDirection("IN");
+                          setEditingEntry(null);
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Record In
+                      </Button>
+                    </DialogTrigger>
+                    <DialogTrigger asChild>
+                      <Button
+                        className="h-10"
+                        variant="secondary"
+                        onClick={() => {
+                          setQuickDirection("OUT");
+                          setEditingEntry(null);
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Record Out
+                      </Button>
+                    </DialogTrigger>
+                  </div>
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>
-                        {editingEntry ? "Edit Entry" : "Record Entry"}
+                        {editingEntry ? "Edit Entry" : quickDirection === "IN" ? "Record In Entry" : "Record Out Entry"}
                       </DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleSubmit} className="space-y-4">
@@ -1588,6 +1651,7 @@ export function Roznamcha() {
                     <TableHead>Payment Type</TableHead>
                     <TableHead>In/Out</TableHead>
                     <TableHead>Amount</TableHead>
+                    <TableHead>Recorded By</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1595,7 +1659,7 @@ export function Roznamcha() {
                   {isLoading ? (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center text-muted-foreground"
                       >
                         Loading expenses...
@@ -1604,7 +1668,7 @@ export function Roznamcha() {
                   ) : filteredEntries.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center text-muted-foreground"
                       >
                         No expenses recorded yet
@@ -1620,6 +1684,9 @@ export function Roznamcha() {
                         <TableCell>{getInOut(Number(entry.amount))}</TableCell>
                         <TableCell>
                           {formatCurrency(Math.abs(Number(entry.amount)))}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">{getRecordedBy(entry)}</span>
                         </TableCell>
                         <TableCell>
                           {entry.source === "MANUAL" ||
@@ -1641,9 +1708,7 @@ export function Roznamcha() {
                               </Button>
                             </div>
                           ) : (
-                            <span className="text-xs text-muted-foreground">
-                              System
-                            </span>
+                            <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </TableCell>
                       </TableRow>
