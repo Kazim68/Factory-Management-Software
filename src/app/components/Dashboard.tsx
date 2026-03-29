@@ -6,9 +6,9 @@ import { Label } from "./ui/label";
 import { formatCurrency, getCurrentDate } from "../lib/utils";
 import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api";
 import { DollarSign, Users, TrendingUp, TrendingDown, Package } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-type DateFilter = "weekly" | "monthly" | "yearly" | "custom";
+type DateFilter = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
 const toStartOfDay = (value: string) => {
   const date = new Date(value);
@@ -82,6 +82,10 @@ export function Dashboard() {
 
     if (dateFilter === "weekly") {
       return { start: toStartOfDay(toInputDate(subtractDays(now, 6))), end };
+    }
+
+    if (dateFilter === "daily") {
+      return { start: toStartOfDay(toInputDate(now)), end };
     }
 
     if (dateFilter === "monthly") {
@@ -174,38 +178,33 @@ export function Dashboard() {
 
     const laborPendingPayable = Math.max(laborCost - laborPaid, 0);
 
-    const grouped = new Map<string, { revenue: number; expenses: number }>();
-
-    const getLabel = (dateValue: string | Date) => {
-      const date = new Date(dateValue);
-      if (dateFilter === "weekly") {
-        return date.toLocaleDateString([], { month: "short", day: "numeric" });
-      }
-      if (dateFilter === "yearly") {
-        return date.toLocaleDateString([], { month: "short" });
-      }
-      return date.toLocaleDateString([], { month: "short", day: "numeric" });
-    };
+    const daySeries = new Map<string, { revenue: number; expenses: number }>();
+    const cursor = new Date(selectedRange.start);
+    while (cursor <= selectedRange.end) {
+      const key = toInputDate(cursor);
+      daySeries.set(key, { revenue: 0, expenses: 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
 
     bills.forEach((bill) => {
-      const key = getLabel(bill.date);
-      const bucket = grouped.get(key) ?? { revenue: 0, expenses: 0 };
+      const key = toInputDate(new Date(bill.date));
+      const bucket = daySeries.get(key);
+      if (!bucket) return;
       bucket.revenue += Number(bill.total ?? 0);
-      grouped.set(key, bucket);
     });
 
     expenses.forEach((entry) => {
-      const key = getLabel(entry.date);
-      const bucket = grouped.get(key) ?? { revenue: 0, expenses: 0 };
+      const key = toInputDate(new Date(entry.date));
+      const bucket = daySeries.get(key);
+      if (!bucket) return;
       const amount = Number(entry.amount ?? 0);
       if (amount > 0) {
         bucket.expenses += amount;
       }
-      grouped.set(key, bucket);
     });
 
-    const profitLossTrend = Array.from(grouped.entries()).map(([label, row]) => ({
-      label,
+    const profitLossTrend = Array.from(daySeries.entries()).map(([key, row]) => ({
+      label: new Date(key).toLocaleDateString([], { month: "short", day: "numeric" }),
       profitLoss: row.revenue - row.expenses,
     }));
 
@@ -245,6 +244,7 @@ export function Dashboard() {
         <CardContent>
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-wrap gap-2">
+              <Button variant={dateFilter === "daily" ? "default" : "outline"} onClick={() => setDateFilter("daily")}>Daily</Button>
               <Button variant={dateFilter === "weekly" ? "default" : "outline"} onClick={() => setDateFilter("weekly")}>Weekly</Button>
               <Button variant={dateFilter === "monthly" ? "default" : "outline"} onClick={() => setDateFilter("monthly")}>Monthly</Button>
               <Button variant={dateFilter === "yearly" ? "default" : "outline"} onClick={() => setDateFilter("yearly")}>Yearly</Button>
@@ -292,13 +292,13 @@ export function Dashboard() {
         <CardContent>
           <div className="h-[280px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.profitLossTrend}>
+              <LineChart data={stats.profitLossTrend}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
                 <Tooltip formatter={(value: number) => formatCurrency(Number(value))} />
-                <Bar dataKey="profitLoss" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-              </BarChart>
+                <Line type="monotone" dataKey="profitLoss" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </CardContent>

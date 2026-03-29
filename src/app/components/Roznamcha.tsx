@@ -22,7 +22,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "./ui/dialog";
 import { Card, CardContent, CardHeader } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -100,6 +99,9 @@ export function Roznamcha() {
     useState<ApiRoznamchaSummaryReport | null>(null);
   const [isLoadingRoznamchaReport, setIsLoadingRoznamchaReport] =
     useState(false);
+  const [lockedDirection, setLockedDirection] = useState<"IN" | "OUT" | null>(
+    null,
+  );
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") return "entries";
     return localStorage.getItem("roznamcha.activeSection") || "entries";
@@ -657,9 +659,11 @@ export function Roznamcha() {
     setShowLaborSuggestions(false);
     setSelectedLaborSummary(null);
     setEditingEntry(null);
+    setLockedDirection(null);
   };
 
   const startEdit = (entry: ApiExpenseEntry) => {
+    setLockedDirection(null);
     setEditingEntry(entry);
     setFormData({
       date: entry.date.slice(0, 10),
@@ -776,6 +780,7 @@ export function Roznamcha() {
 
   const openCreateDialog = (direction: "IN" | "OUT") => {
     resetForm();
+    setLockedDirection(direction);
     setFormData((prev) => ({ ...prev, direction }));
     setIsDialogOpen(true);
   };
@@ -1049,16 +1054,6 @@ export function Roznamcha() {
                     if (!open) resetForm();
                   }}
                 >
-                  <DialogTrigger asChild>
-                    <Button className="h-10 self-end" variant="outline" onClick={() => openCreateDialog("IN")}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Record In
-                    </Button>
-                  </DialogTrigger>
-                  <Button className="h-10 self-end" onClick={() => openCreateDialog("OUT")}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Record Out
-                  </Button>
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>
@@ -1147,6 +1142,7 @@ export function Roznamcha() {
                               setFormData({ ...formData, direction: value })
                             }
                             disabled={
+                              !!lockedDirection ||
                               formData.module === "BILL" ||
                               formData.module === "CHEMICAL" ||
                               formData.module === "MATERIAL" ||
@@ -1604,6 +1600,14 @@ export function Roznamcha() {
                   <p className="text-2xl text-green-600">
                     {formatCurrency(cashInToday)}
                   </p>
+                  <Button
+                    className="mt-3"
+                    variant="outline"
+                    onClick={() => openCreateDialog("IN")}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Record In
+                  </Button>
                 </div>
                 <div className="rounded border p-4">
                   <p className="text-sm text-muted-foreground">
@@ -1612,6 +1616,10 @@ export function Roznamcha() {
                   <p className="text-2xl text-red-600">
                     {formatCurrency(cashOutToday)}
                   </p>
+                  <Button className="mt-3" onClick={() => openCreateDialog("OUT")}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Record Out
+                  </Button>
                 </div>
               </div>
 
