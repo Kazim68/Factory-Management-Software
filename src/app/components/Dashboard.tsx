@@ -295,12 +295,11 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="mb-2">Dashboard Overview</h2>
-        <p className="text-muted-foreground">
-          Summary of your factory operations and financials
-        </p>
-      </div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="mb-2">Dashboard Overview</h2>
+          <p className="text-muted-foreground">Summary of your factory operations and financials</p>
+        </div>
 
       <div className="flex flex-wrap items-end gap-2">
         <Button variant={filterType === "WEEKLY" ? "default" : "outline"} onClick={() => setFilterType("WEEKLY")}>Weekly</Button>
@@ -365,99 +364,40 @@ export function Dashboard() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">Total Parties</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">{stats.totalParties}</div>
-            <p className="text-xs text-muted-foreground">Customers & Suppliers</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">Labor Costs</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">{formatCurrency(stats.laborCost)}</div>
-            <p className="text-xs text-muted-foreground">
-              Paid {formatCurrency(stats.laborPaid)} • Pending {formatCurrency(stats.laborPendingPayable)}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm">Material Costs</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl">{formatCurrency(stats.materialCost)}</div>
-            <p className="text-xs text-muted-foreground">
-              Paid {formatCurrency(stats.materialPaid)} • Pending {formatCurrency(stats.materialPendingPayable)}
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Total Revenue</CardTitle><DollarSign className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{formatCurrency(filtered.totalRevenue)}</div><p className="text-xs text-muted-foreground">From {filtered.totalBills} bills</p></CardContent></Card>
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Net Profit</CardTitle><TrendingUp className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className={`text-2xl ${filtered.netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(filtered.netProfit)}</div><p className="text-xs text-muted-foreground">Revenue - Expenses</p></CardContent></Card>
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Receivables</CardTitle><TrendingUp className="h-4 w-4 text-green-600" /></CardHeader><CardContent><div className="text-2xl text-green-600">{formatCurrency(filtered.totalReceivables)}</div><p className="text-xs text-muted-foreground">Amount to receive</p></CardContent></Card>
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Payables</CardTitle><TrendingDown className="h-4 w-4 text-red-600" /></CardHeader><CardContent><div className="text-2xl text-red-600">{formatCurrency(filtered.totalPayables)}</div><p className="text-xs text-muted-foreground">Parties + Labor pending ({formatCurrency(filtered.laborPendingPayable)} labor)</p></CardContent></Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Expense Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span>Misc Expenses</span>
-                <span className="font-medium">{formatCurrency(stats.totalExpenses)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Labor Costs</span>
-                <span className="font-medium">{formatCurrency(stats.laborCost)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Material Costs</span>
-                <span className="font-medium">{formatCurrency(stats.materialCost)}</span>
-              </div>
-              <div className="border-t pt-3 flex justify-between">
-                <span>Total Expenses</span>
-                <span className="font-medium">
-                  {formatCurrency(stats.totalExpenses + stats.laborCost + stats.materialCost)}
-                </span>
-              </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Profit / Loss Graph</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {profitLossData.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No chart data for selected range.</p>
+          ) : (
+            <div className="h-[260px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={profitLossData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="label" />
+                  <YAxis />
+                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Line type="monotone" dataKey="profit" stroke="#2563eb" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
-          </CardContent>
-        </Card>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Financial Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span>Total Revenue</span>
-                <span className="font-medium text-green-600">{formatCurrency(stats.totalRevenue)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Total Expenses</span>
-                <span className="font-medium text-red-600">
-                  {formatCurrency(stats.totalExpenses + stats.laborCost + stats.materialCost)}
-                </span>
-              </div>
-              <div className="border-t pt-3 flex justify-between">
-                <span>Net Profit/Loss</span>
-                <span className={`font-medium ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
-                  {formatCurrency(netProfit)}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Total Parties</CardTitle><Users className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{filtered.totalParties}</div><p className="text-xs text-muted-foreground">Customers & Suppliers</p></CardContent></Card>
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Labor Costs</CardTitle><Users className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{formatCurrency(filtered.laborCost)}</div><p className="text-xs text-muted-foreground">Paid {formatCurrency(filtered.laborPaid)} • Pending {formatCurrency(filtered.laborPendingPayable)}</p></CardContent></Card>
+        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Material Costs</CardTitle><Package className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{formatCurrency(filtered.materialCost)}</div><p className="text-xs text-muted-foreground">Paid {formatCurrency(filtered.materialPaid)} • Pending {formatCurrency(filtered.materialPendingPayable)}</p></CardContent></Card>
       </div>
 
       <Card>
