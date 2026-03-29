@@ -764,7 +764,7 @@ export function Roznamcha() {
     const map = new Map<string, { actorName: string; actorRole?: string }>();
     auth
       .listAuditLogs()
-      .filter((log) => log.entity === "expenses" && log.resourceId)
+      .filter((log) => (log.entity || "").toLowerCase().includes("expense") && log.resourceId)
       .forEach((log) => {
         if (!log.resourceId) return;
         const role =
@@ -780,7 +780,14 @@ export function Roznamcha() {
 
   const getRecordedBy = (entry: ApiExpenseEntry) => {
     const audit = expenseActorByResourceId.get(entry.id);
-    if (!audit) return entry.source === "SYSTEM" ? "System" : "-";
+    if (!audit) {
+      if (entry.source === "SYSTEM") return "System (Auto)";
+      const session = auth.getSessionUser();
+      if (session) {
+        return `${session.name} (${session.role.charAt(0).toUpperCase()}${session.role.slice(1)})`;
+      }
+      return "Unknown (User)";
+    }
     const roleLabel = audit.actorRole
       ? `${audit.actorRole.charAt(0).toUpperCase()}${audit.actorRole.slice(1)}`
       : "User";
@@ -1631,6 +1638,17 @@ export function Roznamcha() {
                   <p className="text-2xl text-green-600">
                     {formatCurrency(cashInToday)}
                   </p>
+                  <Button
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => {
+                      setQuickDirection("IN");
+                      setEditingEntry(null);
+                      setIsDialogOpen(true);
+                    }}
+                  >
+                    Record Cash In
+                  </Button>
                 </div>
                 <div className="rounded border p-4">
                   <p className="text-sm text-muted-foreground">
@@ -1639,6 +1657,18 @@ export function Roznamcha() {
                   <p className="text-2xl text-red-600">
                     {formatCurrency(cashOutToday)}
                   </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-3"
+                    onClick={() => {
+                      setQuickDirection("OUT");
+                      setEditingEntry(null);
+                      setIsDialogOpen(true);
+                    }}
+                  >
+                    Record Cash Out
+                  </Button>
                 </div>
               </div>
 
