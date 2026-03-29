@@ -544,6 +544,8 @@ export const expenseApi = {
     paymentType?: ApiPaymentMethod;
     amount: number;
     description?: string;
+    actorUsername?: string;
+    actorRole?: string;
     moduleData?: Record<string, unknown>;
   }): Promise<ApiExpenseEntry> =>
     request({ path: "/expenses", method: "POST", body: data }),

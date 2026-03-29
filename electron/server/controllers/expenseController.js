@@ -37,6 +37,8 @@ export const createExpense = async (req, res) => {
     amount,
     description,
     moduleData,
+    actorUsername,
+    actorRole,
   } = req.body;
 
   const result = await prisma.$transaction(async (tx) => {
@@ -137,6 +139,10 @@ export const createExpense = async (req, res) => {
       laborAdvanceId = advance.id;
     }
 
+    const sourceSystem = actorUsername && actorRole
+      ? `ROZNAMCHA_MANUAL|${String(actorUsername)}|${String(actorRole)}`
+      : "ROZNAMCHA_MANUAL";
+
     const expense = await tx.expenseEntry.create({
       data: {
         date: new Date(date),
@@ -151,7 +157,7 @@ export const createExpense = async (req, res) => {
         materialPurchaseId,
         laborAdvanceId,
         source: "MANUAL",
-        sourceSystem: "ROZNAMCHA_MANUAL",
+        sourceSystem,
       },
       include: {
         party: true,
