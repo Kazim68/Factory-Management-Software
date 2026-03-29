@@ -55,7 +55,7 @@ const request = async <T>(payload: ApiRequest): Promise<T> => {
 
   const { auditMeta, ...apiPayload } = payload;
   const response = (await window.api.request(apiPayload)) as T;
-  writeAuditLog(apiPayload, auditMeta, response);
+  writeAuditLog(apiPayload, auditMeta);
   return response;
 };
 
@@ -352,11 +352,7 @@ const buildFriendlyDetail = (
     .trim();
 };
 
-const writeAuditLog = (
-  payload: ApiRequest,
-  auditMeta?: ApiAuditMeta,
-  response?: unknown,
-): void => {
+const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
   const method = (payload.method ?? "GET").toUpperCase();
   if (!AUDITABLE_METHODS.has(method)) return;
 
@@ -364,14 +360,6 @@ const writeAuditLog = (
     payload.path,
     method,
   );
-  const createdResourceId =
-    method === "POST" &&
-    response &&
-    typeof response === "object" &&
-    "id" in response &&
-    typeof (response as { id?: unknown }).id === "string"
-      ? (response as { id: string }).id
-      : undefined;
   const actor = auth.getSessionUser();
   const verb =
     method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
@@ -381,7 +369,7 @@ const writeAuditLog = (
     actorName: actor?.name ?? "System",
     action: `${entity} ${verb}`,
     entity,
-    resourceId: createdResourceId ?? resourceId,
+    resourceId,
     method: method as "POST" | "PATCH" | "DELETE",
     detail:
       buildFriendlyDetail(

@@ -1,71 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { formatCurrency, getCurrentDate } from "../lib/utils";
+import { formatCurrency } from "../lib/utils";
 import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api";
-import { DollarSign, Users, TrendingUp, TrendingDown, Package } from "lucide-react";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import type {
-  ApiBill,
-  ApiChemicalPurchase,
-  ApiExpenseEntry,
-  ApiLaborLedger,
-  ApiLaborProfile,
-  ApiMaterialPurchase,
-  ApiParty,
-  ApiRexinePurchase,
-} from "../types/api";
-
-type FilterType = "WEEKLY" | "MONTHLY" | "YEARLY" | "CUSTOM";
-
-type LoadedData = {
-  bills: ApiBill[];
-  expenses: ApiExpenseEntry[];
-  parties: ApiParty[];
-  chemicals: ApiChemicalPurchase[];
-  rexine: ApiRexinePurchase[];
-  materials: ApiMaterialPurchase[];
-  labors: ApiLaborProfile[];
-  laborLedgers: ApiLaborLedger[];
-  ledgers: { receivable: number; payable: number }[];
-};
-
-const toISODate = (date: Date) => date.toISOString().slice(0, 10);
-
-const parseDate = (value?: string | null) => {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const getPresetRange = (filter: Exclude<FilterType, "CUSTOM">) => {
-  const today = new Date();
-  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const start = new Date(end);
-
-  if (filter === "WEEKLY") start.setDate(end.getDate() - 6);
-  if (filter === "MONTHLY") start.setMonth(end.getMonth() - 1);
-  if (filter === "YEARLY") start.setFullYear(end.getFullYear() - 1);
-
-  return { start: toISODate(start), end: toISODate(end) };
-};
+import { DollarSign, Users, FileText, TrendingUp, TrendingDown, Package } from "lucide-react";
 
 export function Dashboard() {
-  const [filterType, setFilterType] = useState<FilterType>("MONTHLY");
-  const [customRange, setCustomRange] = useState(() => {
-    const monthly = getPresetRange("MONTHLY");
-    return { start: monthly.start, end: getCurrentDate() };
+  const [stats, setStats] = useState({
+    totalParties: 0,
+    totalBills: 0,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    totalReceivables: 0,
+    totalPayables: 0,
+    laborPendingPayable: 0,
+    laborPaid: 0,
+    laborCost: 0,
+    materialPaid: 0,
+    materialPendingPayable: 0,
+    materialCost: 0,
   });
-  const [data, setData] = useState<LoadedData | null>(null);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -82,18 +36,37 @@ export function Dashboard() {
           ]);
 
         const ledgers = await Promise.all(
-          parties.map((party) => partyApi.getLedger(party.id).catch(() => [])),
+          parties.map((party) =>
+            partyApi.getLedger(party.id).catch(() => [])
+          )
         );
 
-        const ledgerTotals = ledgers.map((ledger) =>
-          ledger.reduce(
-            (sum, entry) => ({
-              receivable: sum.receivable + Number(entry.receivable ?? 0),
-              payable: sum.payable + Number(entry.payable ?? 0),
-            }),
-            { receivable: 0, payable: 0 },
-          ),
+        const totalRevenue = bills.reduce(
+          (sum, bill) => sum + Number(bill.total),
+          0
         );
+        // Only misc outflows here. Labor and material are added separately.
+        const miscExpenses = expenses.reduce((sum, entry) => {
+          const amount = Number(entry.amount);
+          return entry.module === "MISC" && amount > 0 ? sum + amount : sum;
+        }, 0);
+
+        const balances = parties.map((party, index) => {
+          const ledger = ledgers[index];
+          const delta = ledger.reduce(
+            (sum, entry) =>
+              sum + Number(entry.receivable ?? 0) - Number(entry.payable ?? 0),
+            0
+          );
+          return delta;
+        });
+
+        const totalReceivables = balances
+          .filter((balance) => balance > 0)
+          .reduce((sum, balance) => sum + balance, 0);
+        const partyPayables = balances
+          .filter((balance) => balance < 0)
+          .reduce((sum, balance) => sum + Math.abs(balance), 0);
 
         const laborLedgers = await Promise.all(
           labors.map((labor) =>
@@ -103,8 +76,8 @@ export function Dashboard() {
               netPayable: 0,
               workEntries: [],
               advances: [],
-            })),
-          ),
+            }))
+          )
         );
 
         setData({

@@ -199,9 +199,6 @@ export interface AuditLog {
   actorId?: string;
   actorName: string;
   action: string;
-  method?: "POST" | "PATCH" | "DELETE";
-  entity?: string;
-  resourceId?: string;
   targetUserId?: string;
   targetUserName?: string;
   detail?: string;
