@@ -30,6 +30,13 @@ enum PaymentMethod {
   CASH
   CREDIT
   BANK
+  CHEQUE
+}
+
+enum ChequeStatus {
+  AVAILABLE
+  USED
+  CASHED
 }
 
 enum ExpenseModule {
@@ -135,6 +142,8 @@ model Party {
   materialPurchases  MaterialPurchase[]
   payments           PartyPayment[]
   expenses           ExpenseEntry[]
+  receivedCheques    Cheque[]          @relation("ChequeSourceParty")
+  usedCheques        Cheque[]          @relation("ChequeUsedParty")
 }
 
 model PartyLedgerEntry {
@@ -201,7 +210,8 @@ model LaborProfile {
   workEntries  LaborWorkEntry[]
   advances     LaborAdvance[]
   expenses     ExpenseEntry[]
-  productionOrders ProductionOrder[]
+  productionOrdersAsMachineman ProductionOrder[] @relation("ProductionOrderMachinemanLabor")
+  productionOrdersAsPacking    ProductionOrder[] @relation("ProductionOrderPackingLabor")
 
   @@index([department])
 }
@@ -364,8 +374,34 @@ model PartyPayment {
   chemicalPurchase  ChemicalPurchase? @relation(fields: [chemicalPurchaseId], references: [id])
   rexinePurchase    RexinePurchase?   @relation(fields: [rexinePurchaseId], references: [id])
   materialPurchase  MaterialPurchase? @relation(fields: [materialPurchaseId], references: [id])
+  receivedCheque    Cheque?           @relation("ChequeSourcePayment")
+  usedCheque        Cheque?           @relation("ChequeUsedPayment")
 
   @@index([partyId, date])
+}
+
+model Cheque {
+  id              String      @id @default(uuid())
+  date            DateTime
+  amount          Decimal
+  chequeNumber    String?
+  notes           String?
+  status          ChequeStatus @default(AVAILABLE)
+  sourcePartyId   String?
+  usedPartyId     String?
+  sourcePaymentId String?     @unique
+  usedPaymentId   String?     @unique
+  cashedAt        DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  sourceParty   Party?       @relation("ChequeSourceParty", fields: [sourcePartyId], references: [id])
+  usedParty     Party?       @relation("ChequeUsedParty", fields: [usedPartyId], references: [id])
+  sourcePayment PartyPayment? @relation("ChequeSourcePayment", fields: [sourcePaymentId], references: [id])
+  usedPayment   PartyPayment? @relation("ChequeUsedPayment", fields: [usedPaymentId], references: [id])
+
+  @@index([status, date])
+  @@index([amount])
 }
 
 model ProductionOrder {
@@ -374,9 +410,13 @@ model ProductionOrder {
   stage         ProductionStage
   articleId     String
   laborId       String?
+  packingLaborId String?
   quantityDozen Decimal
   pricePerDozen Decimal               @default(0)
+  packingPricePerDozen Decimal        @default(0)
   completedDozen Decimal              @default(0)
+  bMallDozen    Decimal               @default(0)
+  cMallDozen    Decimal               @default(0)
   forwardedDozen Decimal              @default(0)
   source        ProductionOrderSource @default(MANUAL)
   isClosed      Boolean               @default(false)
@@ -385,10 +425,12 @@ model ProductionOrder {
   updatedAt     DateTime              @updatedAt
 
   article Article      @relation(fields: [articleId], references: [id])
-  labor   LaborProfile? @relation(fields: [laborId], references: [id])
+  labor   LaborProfile? @relation("ProductionOrderMachinemanLabor", fields: [laborId], references: [id])
+  packingLabor LaborProfile? @relation("ProductionOrderPackingLabor", fields: [packingLaborId], references: [id])
 
   @@index([department, isClosed, updatedAt])
   @@index([articleId, department])
+  @@index([packingLaborId])
 }
 
 

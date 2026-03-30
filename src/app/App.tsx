@@ -12,6 +12,7 @@ import { RexineManagement } from "./components/RexineManagement";
 import { MaterialManagement } from "./components/MaterialManagement";
 import { LaborManagement } from "./components/LaborManagement";
 import { BillManagement } from "./components/BillManagement";
+import { ChequeManagement } from "./components/ChequeManagement";
 import { Roznamcha } from "./components/Roznamcha";
 import { Configuration } from "./components/Configuration";
 import { UserManagement } from "./components/UserManagement";
@@ -43,6 +44,7 @@ import {
   History,
   LogOut,
   Factory,
+  Landmark,
 } from "lucide-react";
 
 type Page =
@@ -55,6 +57,7 @@ type Page =
   | "stock_control"
   | "production_control"
   | "bills"
+  | "cheques"
   | "roznamcha"
   | "configuration"
   | "users"
@@ -93,6 +96,7 @@ const navigation: NavItem[] = [
     roles: ["admin", "munshi"],
   },
   { name: "Bills", page: "bills", icon: FileText, roles: ["admin"] },
+  { name: "Cheques", page: "cheques", icon: Landmark, roles: ["admin"] },
   { name: "Labor", page: "labor", icon: UserCog, roles: ["admin"] },
   { name: "Chemicals", page: "chemicals", icon: Beaker, roles: ["admin"] },
   { name: "Rexine", page: "rexine", icon: Shirt, roles: ["admin"] },
@@ -215,6 +219,8 @@ export default function App() {
         return <ProductionControl />;
       case "bills":
         return <BillManagement />;
+      case "cheques":
+        return <ChequeManagement />;
       case "roznamcha":
         return <Roznamcha />;
       case "configuration":

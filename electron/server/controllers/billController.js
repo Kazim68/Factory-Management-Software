@@ -10,7 +10,8 @@ const toDbBillType = (type) => {
 const toDbPaymentMethod = (method) => {
   const normalized = String(method ?? "KHATA").toUpperCase();
   if (normalized === "KHATA") return "CREDIT";
-  if (["CASH", "CREDIT", "BANK"].includes(normalized)) return normalized;
+  if (["CASH", "CREDIT", "BANK", "CHEQUE"].includes(normalized))
+    return normalized;
   return "CREDIT";
 };
 
@@ -25,7 +26,10 @@ const toApiBill = (bill) => {
   if (!bill) return bill;
   const total = Number(bill.total ?? 0);
   const totalPaid = Number(
-    (bill.payments ?? []).reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0)
+    (bill.payments ?? []).reduce(
+      (sum, payment) => sum + Number(payment.amount ?? 0),
+      0,
+    ),
   );
   const remaining = Math.max(total - totalPaid, 0);
   return {
@@ -41,7 +45,11 @@ const toApiBill = (bill) => {
 const getBillSummary = async (tx, billId) => {
   const bill = await tx.bill.findUnique({
     where: { id: billId },
-    include: { lines: { include: { article: true } }, party: true, payments: true },
+    include: {
+      lines: { include: { article: true } },
+      party: true,
+      payments: true,
+    },
   });
   return toApiBill(bill);
 };
@@ -81,7 +89,11 @@ const syncBillLedgerEntry = async (tx, bill) => {
 
 export const listBills = async (req, res) => {
   const bills = await prisma.bill.findMany({
-    include: { lines: { include: { article: true } }, party: true, payments: true },
+    include: {
+      lines: { include: { article: true } },
+      party: true,
+      payments: true,
+    },
     orderBy: { date: "desc" },
   });
   res.json(bills.map(toApiBill));
@@ -136,7 +148,9 @@ export const updateBill = async (req, res) => {
         partyId,
         type: toDbBillType(type),
         status,
-        total: lines ? lines.reduce((sum, line) => sum + Number(line.total), 0) : undefined,
+        total: lines
+          ? lines.reduce((sum, line) => sum + Number(line.total), 0)
+          : undefined,
       },
     });
 
@@ -155,7 +169,9 @@ export const updateBill = async (req, res) => {
 
     await syncBillLedgerEntry(tx, updated);
 
-    const hasPayments = await tx.partyPayment.count({ where: { billId: updated.id } });
+    const hasPayments = await tx.partyPayment.count({
+      where: { billId: updated.id },
+    });
     if (hasPayments > 0) {
       await tx.bill.update({
         where: { id: updated.id },
@@ -165,7 +181,11 @@ export const updateBill = async (req, res) => {
 
     return tx.bill.findUnique({
       where: { id: updated.id },
-      include: { lines: { include: { article: true } }, party: true, payments: true },
+      include: {
+        lines: { include: { article: true } },
+        party: true,
+        payments: true,
+      },
     });
   });
 
@@ -214,136 +234,175 @@ export const receiveBillPayment = async (req, res) => {
     return;
   }
 
-  const response = await prisma.$transaction(async (tx) => {
-    const bill = await tx.bill.findUnique({
-      where: { id: req.params.billId },
-      include: { payments: true },
-    });
-    if (!bill) {
-      throw new Error("Bill not found");
-    }
-    if (!bill.partyId) {
-      throw new Error("Bill has no linked party.");
-    }
+  const response = await prisma
+    .$transaction(async (tx) => {
+      const bill = await tx.bill.findUnique({
+        where: { id: req.params.billId },
+        include: { payments: true },
+      });
+      if (!bill) {
+        throw new Error("Bill not found");
+      }
+      if (!bill.partyId) {
+        throw new Error("Bill has no linked party.");
+      }
 
-    const total = Number(bill.total ?? 0);
-    const totalPaid = bill.payments.reduce(
-      (sum, payment) => sum + Number(payment.amount ?? 0),
-      0
-    );
-    const remaining = Math.max(total - totalPaid, 0);
-    if (remaining <= 0) {
-      throw new Error("Bill is already fully paid.");
-    }
-    if (amount > remaining) {
-      throw new Error("Payment exceeds remaining amount.");
-    }
+      const total = Number(bill.total ?? 0);
+      const totalPaid = bill.payments.reduce(
+        (sum, payment) => sum + Number(payment.amount ?? 0),
+        0,
+      );
+      const remaining = Math.max(total - totalPaid, 0);
+      if (remaining <= 0) {
+        throw new Error("Bill is already fully paid.");
+      }
+      if (amount > remaining) {
+        throw new Error("Payment exceeds remaining amount.");
+      }
 
-    const method = toDbPaymentMethod(req.body.method ?? "KHATA");
-    const paymentDate = req.body.date ? new Date(req.body.date) : new Date();
+      const method = toDbPaymentMethod(req.body.method ?? "KHATA");
+      const paymentDate = req.body.date ? new Date(req.body.date) : new Date();
+      const chequeNumber =
+        req.body.chequeNumber == null
+          ? null
+          : String(req.body.chequeNumber).trim();
+      const chequeNotes =
+        req.body.chequeNotes == null
+          ? null
+          : String(req.body.chequeNotes).trim();
 
-    const payment = await tx.partyPayment.create({
-      data: {
-        partyId: bill.partyId,
-        billId: bill.id,
+      const payment = await tx.partyPayment.create({
+        data: {
+          partyId: bill.partyId,
+          billId: bill.id,
+          date: paymentDate,
+          amount,
+          method,
+          reference: req.body.reference ?? bill.billNumber,
+          description: req.body.description ?? "Bill payment received",
+        },
+      });
+
+      if (method === "CHEQUE") {
+        await tx.cheque.create({
+          data: {
+            date: paymentDate,
+            amount,
+            chequeNumber: chequeNumber || null,
+            notes: chequeNotes || req.body.description || null,
+            sourcePartyId: bill.partyId,
+            sourcePaymentId: payment.id,
+            status: "AVAILABLE",
+          },
+        });
+      }
+
+      await tx.partyLedgerEntry.create({
+        data: {
+          partyId: bill.partyId,
+          billId: bill.id,
+          date: paymentDate,
+          reference: bill.billNumber,
+          description: "Bill payment received",
+          balance: -amount,
+        },
+      });
+
+      await createSystemRoznamchaEntry(tx, {
         date: paymentDate,
-        amount,
-        method,
-        reference: req.body.reference ?? bill.billNumber,
-        description: req.body.description ?? "Bill payment received",
-      },
-    });
-
-    await tx.partyLedgerEntry.create({
-      data: {
+        amount: -amount,
+        description:
+          method === "CHEQUE"
+            ? `Cheque received against bill ${bill.billNumber}`
+            : `Cash received against bill ${bill.billNumber}`,
         partyId: bill.partyId,
-        billId: bill.id,
-        date: paymentDate,
-        reference: bill.billNumber,
-        description: "Bill payment received",
-        balance: -amount,
-      },
-    });
+        sourceSystem: "BILL_PAYMENT_RECEIVED",
+        paymentType: method,
+      });
 
-    await createSystemRoznamchaEntry(tx, {
-      date: paymentDate,
-      amount: -amount,
-      description: `Cash received against bill ${bill.billNumber}`,
-      partyId: bill.partyId,
-      sourceSystem: "BILL_PAYMENT_RECEIVED",
-      paymentType: method,
-    });
+      await tx.bill.update({
+        where: { id: bill.id },
+        data: { verifiedAt: null },
+      });
 
-    await tx.bill.update({
-      where: { id: bill.id },
-      data: { verifiedAt: null },
+      return {
+        payment: {
+          ...payment,
+          method: payment.method === "CREDIT" ? "KHATA" : payment.method,
+        },
+        bill: await getBillSummary(tx, bill.id),
+      };
+    })
+    .catch((error) => {
+      res
+        .status(400)
+        .json({ error: error.message ?? "Failed to receive payment." });
+      return null;
     });
-
-    return {
-      payment: {
-        ...payment,
-        method: payment.method === "CREDIT" ? "KHATA" : payment.method,
-      },
-      bill: await getBillSummary(tx, bill.id),
-    };
-  }).catch((error) => {
-    res.status(400).json({ error: error.message ?? "Failed to receive payment." });
-    return null;
-  });
 
   if (!response) return;
   res.status(201).json(response);
 };
 
 export const verifyBill = async (req, res) => {
-  const bill = await prisma.$transaction(async (tx) => {
-    const found = await tx.bill.findUnique({
-      where: { id: req.params.billId },
-      include: { payments: true },
+  const bill = await prisma
+    .$transaction(async (tx) => {
+      const found = await tx.bill.findUnique({
+        where: { id: req.params.billId },
+        include: { payments: true },
+      });
+      if (!found) throw new Error("Bill not found");
+
+      const total = Number(found.total ?? 0);
+      const totalPaid = found.payments.reduce(
+        (sum, payment) => sum + Number(payment.amount ?? 0),
+        0,
+      );
+      const remaining = Math.max(total - totalPaid, 0);
+      if (remaining > 0) {
+        throw new Error("Bill cannot be verified until remaining amount is 0.");
+      }
+
+      await tx.bill.update({
+        where: { id: found.id },
+        data: { verifiedAt: new Date() },
+      });
+
+      return getBillSummary(tx, found.id);
+    })
+    .catch((error) => {
+      res
+        .status(400)
+        .json({ error: error.message ?? "Failed to verify bill." });
+      return null;
     });
-    if (!found) throw new Error("Bill not found");
-
-    const total = Number(found.total ?? 0);
-    const totalPaid = found.payments.reduce(
-      (sum, payment) => sum + Number(payment.amount ?? 0),
-      0
-    );
-    const remaining = Math.max(total - totalPaid, 0);
-    if (remaining > 0) {
-      throw new Error("Bill cannot be verified until remaining amount is 0.");
-    }
-
-    await tx.bill.update({
-      where: { id: found.id },
-      data: { verifiedAt: new Date() },
-    });
-
-    return getBillSummary(tx, found.id);
-  }).catch((error) => {
-    res.status(400).json({ error: error.message ?? "Failed to verify bill." });
-    return null;
-  });
 
   if (!bill) return;
   res.json(bill);
 };
 
 export const deleteBill = async (req, res) => {
-  await prisma.$transaction(async (tx) => {
-    const paymentCount = await tx.partyPayment.count({
-      where: { billId: req.params.billId },
-    });
-    if (paymentCount > 0) {
-      throw new Error("Cannot delete bill with existing payments.");
-    }
+  await prisma
+    .$transaction(async (tx) => {
+      const paymentCount = await tx.partyPayment.count({
+        where: { billId: req.params.billId },
+      });
+      if (paymentCount > 0) {
+        throw new Error("Cannot delete bill with existing payments.");
+      }
 
-    await tx.partyLedgerEntry.deleteMany({ where: { billId: req.params.billId } });
-    await tx.billLine.deleteMany({ where: { billId: req.params.billId } });
-    await tx.bill.delete({ where: { id: req.params.billId } });
-  }).catch((error) => {
-    res.status(400).json({ error: error.message ?? "Failed to delete bill." });
-    return null;
-  });
+      await tx.partyLedgerEntry.deleteMany({
+        where: { billId: req.params.billId },
+      });
+      await tx.billLine.deleteMany({ where: { billId: req.params.billId } });
+      await tx.bill.delete({ where: { id: req.params.billId } });
+    })
+    .catch((error) => {
+      res
+        .status(400)
+        .json({ error: error.message ?? "Failed to delete bill." });
+      return null;
+    });
   if (res.headersSent) return;
   res.status(204).end();
 };

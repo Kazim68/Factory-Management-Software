@@ -42,6 +42,7 @@ import type {
   ApiArticle,
   ApiBill,
   ApiBillLedgerEntry,
+  ApiPaymentMethod,
   ApiParty,
 } from "../types/api";
 import { toast } from "sonner";
@@ -71,6 +72,7 @@ export function BillManagement() {
   const [paymentData, setPaymentData] = useState({
     date: getCurrentDate(),
     amount: "",
+    method: "KHATA" as ApiPaymentMethod,
     description: "",
   });
 
@@ -142,7 +144,9 @@ export function BillManagement() {
       date: getCurrentDate(),
       partyId: "",
     });
-    setItems([{ articleId: "", articleName: "", quantity: 0, price: 0, total: 0 }]);
+    setItems([
+      { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 },
+    ]);
     setEditingBillId(null);
   };
 
@@ -156,7 +160,7 @@ export function BillManagement() {
     }
 
     const validItems = items.filter(
-      (item) => item.articleId && item.quantity > 0 && item.price > 0
+      (item) => item.articleId && item.quantity > 0 && item.price > 0,
     );
     if (validItems.length === 0) {
       toast.error("Please add at least one valid item");
@@ -215,7 +219,7 @@ export function BillManagement() {
         quantity: Number(line.quantity),
         price: Number(line.price),
         total: Number(line.total),
-      }))
+      })),
     );
     setIsDialogOpen(true);
   };
@@ -249,6 +253,7 @@ export function BillManagement() {
     setPaymentData({
       date: getCurrentDate(),
       amount: String(Number(bill.remaining ?? 0)),
+      method: "KHATA",
       description: "",
     });
     setIsPaymentOpen(true);
@@ -268,7 +273,7 @@ export function BillManagement() {
       await billApi.receivePayment(paymentBill.id, {
         amount,
         date: paymentData.date,
-        method: "KHATA",
+        method: paymentData.method,
         description: paymentData.description || undefined,
       });
       toast.success("Payment received");
@@ -467,7 +472,10 @@ export function BillManagement() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   {articles.map((article) => (
-                                    <SelectItem key={article.id} value={article.id}>
+                                    <SelectItem
+                                      key={article.id}
+                                      value={article.id}
+                                    >
                                       {article.name}
                                     </SelectItem>
                                   ))}
@@ -483,7 +491,7 @@ export function BillManagement() {
                                   updateItem(
                                     index,
                                     "quantity",
-                                    parseFloat(e.target.value) || 0
+                                    parseFloat(e.target.value) || 0,
                                   )
                                 }
                               />
@@ -497,7 +505,7 @@ export function BillManagement() {
                                   updateItem(
                                     index,
                                     "price",
-                                    parseFloat(e.target.value) || 0
+                                    parseFloat(e.target.value) || 0,
                                   )
                                 }
                               />
@@ -523,7 +531,9 @@ export function BillManagement() {
 
                   <div className="flex justify-between items-center p-4 bg-muted rounded">
                     <span className="text-lg">Grand Total:</span>
-                    <span className="text-2xl">{formatCurrency(grandTotal)}</span>
+                    <span className="text-2xl">
+                      {formatCurrency(grandTotal)}
+                    </span>
                   </div>
 
                   <div className="flex justify-end gap-2">
@@ -559,13 +569,19 @@ export function BillManagement() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={7}
+                    className="text-center text-muted-foreground"
+                  >
                     Loading bills...
                   </TableCell>
                 </TableRow>
               ) : bills.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={7}
+                    className="text-center text-muted-foreground"
+                  >
                     No bills yet
                   </TableCell>
                 </TableRow>
@@ -588,7 +604,9 @@ export function BillManagement() {
                       <TableCell>{formatCurrency(remaining)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span className={getStatusClass(bill)}>{getStatusLabel(bill)}</span>
+                          <span className={getStatusClass(bill)}>
+                            {getStatusLabel(bill)}
+                          </span>
                           {bill.paymentStatus === "PAID" && bill.isVerified && (
                             <CheckCircle2 className="h-4 w-4 text-green-600" />
                           )}
@@ -697,17 +715,45 @@ export function BillManagement() {
               />
             </div>
             <div>
+              <Label>Method</Label>
+              <Select
+                value={paymentData.method}
+                onValueChange={(value) =>
+                  setPaymentData({
+                    ...paymentData,
+                    method: value as ApiPaymentMethod,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Cash</SelectItem>
+                  <SelectItem value="KHATA">Khata</SelectItem>
+                  <SelectItem value="CHEQUE">Cheque</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Description</Label>
               <Input
                 value={paymentData.description}
                 onChange={(e) =>
-                  setPaymentData({ ...paymentData, description: e.target.value })
+                  setPaymentData({
+                    ...paymentData,
+                    description: e.target.value,
+                  })
                 }
                 placeholder="Optional note"
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setIsPaymentOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsPaymentOpen(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit">Receive</Button>
@@ -736,7 +782,10 @@ export function BillManagement() {
               <TableBody>
                 {ledgerEntries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={4}
+                      className="text-center text-muted-foreground"
+                    >
                       No bill ledger records
                     </TableCell>
                   </TableRow>
@@ -749,8 +798,12 @@ export function BillManagement() {
                           ? entry.description.slice(0, 12)
                           : "-"}
                       </TableCell>
-                      <TableCell>{entry.kind === "RECEIVABLE" ? "Receivable" : "Payment"}</TableCell>
-                      <TableCell>{formatCurrency(Number(entry.amount ?? 0))}</TableCell>
+                      <TableCell>
+                        {entry.kind === "RECEIVABLE" ? "Receivable" : "Payment"}
+                      </TableCell>
+                      <TableCell>
+                        {formatCurrency(Number(entry.amount ?? 0))}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}

@@ -18,6 +18,7 @@ import type {
   ApiBillLine,
   ApiBillStatus,
   ApiBillType,
+  ApiCheque,
   ApiChemicalPurchase,
   ApiMaterialPurchase,
   ApiPaymentMethod,
@@ -510,6 +511,9 @@ export const partyApi = {
       direction?: "RECEIVE" | "PAY";
       reference?: string;
       description?: string;
+      chequeId?: string;
+      chequeNumber?: string;
+      chequeNotes?: string;
       billId?: string;
       chemicalPurchaseId?: string;
       rexinePurchaseId?: string;
@@ -748,11 +752,45 @@ export const billApi = {
       method?: ApiPaymentMethod;
       reference?: string;
       description?: string;
+      chequeNumber?: string;
+      chequeNotes?: string;
     },
   ): Promise<{ payment: ApiPartyPayment; bill: ApiBill }> =>
     request({ path: `/bills/${billId}/payments`, method: "POST", body: data }),
   verifyBill: (billId: string): Promise<ApiBill> =>
     request({ path: `/bills/${billId}/verify`, method: "POST" }),
+};
+
+export const chequeApi = {
+  listCheques: (): Promise<ApiCheque[]> => get("/cheques"),
+  listAvailableCheques: (params?: { amount?: number }): Promise<ApiCheque[]> =>
+    get(
+      withQuery("/cheques/available", {
+        amount:
+          params?.amount != null && Number.isFinite(params.amount)
+            ? String(params.amount)
+            : undefined,
+      }),
+    ),
+  updateCheque: (
+    chequeId: string,
+    data: {
+      date?: string;
+      amount?: number;
+      chequeNumber?: string;
+      notes?: string;
+    },
+  ): Promise<ApiCheque> =>
+    request({ path: `/cheques/${chequeId}`, method: "PATCH", body: data }),
+  cashCheque: (
+    chequeId: string,
+    data?: { date?: string; notes?: string },
+  ): Promise<ApiCheque> =>
+    request({
+      path: `/cheques/${chequeId}/cash`,
+      method: "POST",
+      body: data ?? {},
+    }),
 };
 
 export const purchaseApi = {
@@ -913,7 +951,14 @@ export const productionApi = {
     }),
   assignLabor: (
     orderId: string,
-    payload: { laborId?: string; pricePerDozen?: number },
+    payload: {
+      laborId?: string;
+      pricePerDozen?: number;
+      machinemanLaborId?: string;
+      machinemanPricePerDozen?: number;
+      packingLaborId?: string;
+      packingPricePerDozen?: number;
+    },
   ): Promise<ApiProductionOrder> =>
     request({
       path: `/production/orders/${orderId}/assign-labor`,
@@ -921,16 +966,38 @@ export const productionApi = {
       body: {
         laborId: payload.laborId ?? null,
         pricePerDozen: payload.pricePerDozen,
+        machinemanLaborId: payload.machinemanLaborId ?? null,
+        machinemanPricePerDozen: payload.machinemanPricePerDozen,
+        packingLaborId: payload.packingLaborId ?? null,
+        packingPricePerDozen: payload.packingPricePerDozen,
       },
     }),
   updateCompletion: (
     orderId: string,
-    completedDozen: number,
+    payload: {
+      completedDozen: number;
+      nextDepartment?: ApiLaborDepartment;
+      bMallDozenDelta?: number;
+      cMallDozenDelta?: number;
+      upperDozenDelta?: number;
+      upperNextDepartment?: ApiLaborDepartment;
+      ptawaDozenDelta?: number;
+      ptawaNextDepartment?: ApiLaborDepartment;
+    },
   ): Promise<ApiProductionOrder> =>
     request({
       path: `/production/orders/${orderId}/completion`,
       method: "PATCH",
-      body: { completedDozen },
+      body: {
+        completedDozen: payload.completedDozen,
+        nextDepartment: payload.nextDepartment,
+        bMallDozenDelta: payload.bMallDozenDelta,
+        cMallDozenDelta: payload.cMallDozenDelta,
+        upperDozenDelta: payload.upperDozenDelta,
+        upperNextDepartment: payload.upperNextDepartment,
+        ptawaDozenDelta: payload.ptawaDozenDelta,
+        ptawaNextDepartment: payload.ptawaNextDepartment,
+      },
     }),
   listDepartmentLabors: (): Promise<
     Array<{ id: string; name: string; department: ApiLaborDepartment }>

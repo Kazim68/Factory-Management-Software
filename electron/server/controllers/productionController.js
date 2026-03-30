@@ -14,9 +14,20 @@ const STAGE_BY_DEPARTMENT = {
   PACKING: "STAGE_PACKING",
 };
 
-const NEXT_DEPARTMENT = {
-  DC: "MACHINEMAN",
-  MACHINEMAN: "PACKING",
+const DEPARTMENT_FLOW = [
+  "PRESSMAN",
+  "UPPERMAN",
+  "PRINTING",
+  "DC",
+  "MACHINEMAN",
+];
+
+const MERGED_FINAL_DEPARTMENTS = ["MACHINEMAN", "PACKING"];
+
+const getAllowedNextDepartments = (department) => {
+  const currentIndex = DEPARTMENT_FLOW.indexOf(department);
+  if (currentIndex === -1) return [];
+  return DEPARTMENT_FLOW.slice(currentIndex + 1);
 };
 
 const toNumber = (value) => {
@@ -30,31 +41,36 @@ const computeStatus = (completedDozen, quantityDozen) => {
   return "PARTIALLY_COMPLETE";
 };
 
+const getOrderProgressDozen = (order) => {
+  const aMall = toNumber(order.completedDozen);
+  if (!MERGED_FINAL_DEPARTMENTS.includes(order.department)) return aMall;
+  return aMall + toNumber(order.bMallDozen) + toNumber(order.cMallDozen);
+};
+
 const toApiOrder = (order) => {
   const quantityDozen = toNumber(order.quantityDozen);
   const completedDozen = toNumber(order.completedDozen);
+  const bMallDozen = toNumber(order.bMallDozen);
+  const cMallDozen = toNumber(order.cMallDozen);
   const forwardedDozen = toNumber(order.forwardedDozen);
+  const progressDozen = getOrderProgressDozen(order);
   return {
     ...order,
     departmentLabel: getLaborDepartmentLabel(order.department),
     quantityDozen,
     completedDozen,
+    bMallDozen,
+    cMallDozen,
     forwardedDozen,
     pricePerDozen: toNumber(order.pricePerDozen),
-    status: computeStatus(completedDozen, quantityDozen),
+    packingPricePerDozen: toNumber(order.packingPricePerDozen),
+    status: computeStatus(progressDozen, quantityDozen),
   };
 };
 
 const createOrExpandQueueOrder = async (
   tx,
-  {
-    department,
-    articleId,
-    quantityDozen,
-    source,
-    exclusionSource,
-    pricePerDozen = 0,
-  }
+  { department, articleId, quantityDozen, source, pricePerDozen = 0 },
 ) => {
   if (quantityDozen <= 0) return;
 
@@ -64,7 +80,6 @@ const createOrExpandQueueOrder = async (
     laborId: null,
     isClosed: false,
     ...(source ? { source } : {}),
-    ...(exclusionSource ? { NOT: { source: exclusionSource } } : {}),
   };
 
   const existing = await tx.productionOrder.findFirst({
@@ -125,6 +140,7 @@ export const listProductionOrders = async (req, res) => {
     include: {
       article: true,
       labor: true,
+      packingLabor: true,
     },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
   });
@@ -132,7 +148,7 @@ export const listProductionOrders = async (req, res) => {
   res.json(
     rows
       .map(toApiOrder)
-      .filter((row) => row.completedDozen < row.quantityDozen)
+      .filter((row) => getOrderProgressDozen(row) < row.quantityDozen),
   );
 };
 
@@ -150,9 +166,11 @@ export const createProductionOrder = async (req, res) => {
     return;
   }
 
-  await assertDepartmentLaborMatch(department, req.body.laborId).catch((error) => {
-    res.status(400).json({ error: error.message });
-  });
+  await assertDepartmentLaborMatch(department, req.body.laborId).catch(
+    (error) => {
+      res.status(400).json({ error: error.message });
+    },
+  );
   if (res.headersSent) return;
 
   const order = await prisma.productionOrder.create({
@@ -171,6 +189,7 @@ export const createProductionOrder = async (req, res) => {
     include: {
       article: true,
       labor: true,
+      packingLabor: true,
     },
   });
 
@@ -223,6 +242,7 @@ export const updateProductionOrder = async (req, res) => {
     include: {
       article: true,
       labor: true,
+      packingLabor: true,
     },
   });
 
@@ -238,30 +258,111 @@ export const assignProductionOrderLabor = async (req, res) => {
     return;
   }
 
+  const isMergedFinal = MERGED_FINAL_DEPARTMENTS.includes(existing.department);
+
   const laborId = req.body.laborId || null;
   const pricePerDozenInput = req.body.pricePerDozen;
-  const hasPriceUpdate = pricePerDozenInput !== undefined && pricePerDozenInput !== null;
+  const hasPriceUpdate =
+    pricePerDozenInput !== undefined && pricePerDozenInput !== null;
   const normalizedPricePerDozen = hasPriceUpdate
     ? Math.abs(toNumber(pricePerDozenInput))
     : undefined;
-  if (hasPriceUpdate && normalizedPricePerDozen <= 0) {
-    res.status(400).json({ error: "Price must be greater than 0." });
-    return;
+
+  if (!isMergedFinal) {
+    if (hasPriceUpdate && normalizedPricePerDozen <= 0) {
+      res.status(400).json({ error: "Price must be greater than 0." });
+      return;
+    }
+    await assertDepartmentLaborMatch(existing.department, laborId).catch(
+      (error) => {
+        res.status(400).json({ error: error.message });
+      },
+    );
+    if (res.headersSent) return;
   }
-  await assertDepartmentLaborMatch(existing.department, laborId).catch((error) => {
-    res.status(400).json({ error: error.message });
-  });
-  if (res.headersSent) return;
+
+  const machinamanLaborIdRaw =
+    req.body.machinemanLaborId === undefined
+      ? undefined
+      : req.body.machinemanLaborId;
+  const packingLaborIdRaw =
+    req.body.packingLaborId === undefined ? undefined : req.body.packingLaborId;
+  const machinamanLaborId =
+    machinamanLaborIdRaw === undefined
+      ? undefined
+      : machinamanLaborIdRaw || null;
+  const packingLaborId =
+    packingLaborIdRaw === undefined ? undefined : packingLaborIdRaw || null;
+
+  const machinamanPriceInput = req.body.machinemanPricePerDozen;
+  const hasMachinemanPriceUpdate =
+    machinamanPriceInput !== undefined && machinamanPriceInput !== null;
+  const normalizedMachinemanPrice = hasMachinemanPriceUpdate
+    ? Math.abs(toNumber(machinamanPriceInput))
+    : undefined;
+
+  const packingPriceInput = req.body.packingPricePerDozen;
+  const hasPackingPriceUpdate =
+    packingPriceInput !== undefined && packingPriceInput !== null;
+  const normalizedPackingPrice = hasPackingPriceUpdate
+    ? Math.abs(toNumber(packingPriceInput))
+    : undefined;
+
+  if (isMergedFinal) {
+    if (hasMachinemanPriceUpdate && normalizedMachinemanPrice <= 0) {
+      res
+        .status(400)
+        .json({ error: "Machineman price must be greater than 0." });
+      return;
+    }
+    if (hasPackingPriceUpdate && normalizedPackingPrice <= 0) {
+      res.status(400).json({ error: "Packing price must be greater than 0." });
+      return;
+    }
+    if (machinamanLaborId !== undefined) {
+      await assertDepartmentLaborMatch("MACHINEMAN", machinamanLaborId).catch(
+        (error) => {
+          res.status(400).json({ error: error.message });
+        },
+      );
+      if (res.headersSent) return;
+    }
+    if (packingLaborId !== undefined) {
+      await assertDepartmentLaborMatch("PACKING", packingLaborId).catch(
+        (error) => {
+          res.status(400).json({ error: error.message });
+        },
+      );
+      if (res.headersSent) return;
+    }
+  }
 
   const order = await prisma.productionOrder.update({
     where: { id: req.params.orderId },
     data: {
-      laborId,
-      pricePerDozen: hasPriceUpdate ? normalizedPricePerDozen : undefined,
+      laborId:
+        isMergedFinal && machinamanLaborId !== undefined
+          ? machinamanLaborId
+          : laborId,
+      pricePerDozen:
+        isMergedFinal && hasMachinemanPriceUpdate
+          ? normalizedMachinemanPrice
+          : hasPriceUpdate
+            ? normalizedPricePerDozen
+            : undefined,
+      packingLaborId:
+        isMergedFinal && packingLaborId !== undefined
+          ? packingLaborId
+          : undefined,
+      packingPricePerDozen:
+        isMergedFinal && hasPackingPriceUpdate
+          ? normalizedPackingPrice
+          : undefined,
     },
     include: {
       article: true,
       labor: true,
+      packingLabor: true,
     },
   });
 
@@ -270,154 +371,258 @@ export const assignProductionOrderLabor = async (req, res) => {
 
 export const updateProductionOrderCompletion = async (req, res) => {
   const completedInput = Math.abs(toNumber(req.body.completedDozen));
+  const bMallDeltaInput = Math.abs(toNumber(req.body.bMallDozenDelta));
+  const cMallDeltaInput = Math.abs(toNumber(req.body.cMallDozenDelta));
+  const upperDozenDeltaInput = Math.abs(toNumber(req.body.upperDozenDelta));
+  const ptawaDozenDeltaInput = Math.abs(toNumber(req.body.ptawaDozenDelta));
+  const requestedNextDepartmentRaw =
+    req.body.nextDepartment == null
+      ? ""
+      : String(req.body.nextDepartment).trim();
+  const requestedNextDepartment = requestedNextDepartmentRaw
+    ? normalizeLaborDepartment(requestedNextDepartmentRaw, "")
+    : null;
+  if (requestedNextDepartmentRaw && !requestedNextDepartment) {
+    res.status(400).json({ error: "Invalid next department." });
+    return;
+  }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const row = await tx.productionOrder.findUnique({
-      where: { id: req.params.orderId },
-    });
-    if (!row) {
-      throw new Error("Order not found.");
-    }
-    if (row.department !== "PRESSMAN" && !row.laborId) {
-      throw new Error("Assign labor before marking this order done.");
-    }
+  const upperNextDepartmentRaw =
+    req.body.upperNextDepartment == null
+      ? ""
+      : String(req.body.upperNextDepartment).trim();
+  const upperNextDepartment = upperNextDepartmentRaw
+    ? normalizeLaborDepartment(upperNextDepartmentRaw, "")
+    : null;
+  if (upperNextDepartmentRaw && !upperNextDepartment) {
+    res.status(400).json({ error: "Invalid upper department." });
+    return;
+  }
 
-    const rowQty = toNumber(row.quantityDozen);
-    const rowCompleted = toNumber(row.completedDozen);
-    const rowForwarded = toNumber(row.forwardedDozen);
-    const clampedCompleted = Math.min(Math.max(completedInput, 0), rowQty);
-    if (clampedCompleted < rowCompleted) {
-      throw new Error("Completed quantity cannot be reduced.");
-    }
-    const progressDelta = Math.max(0, clampedCompleted - rowCompleted);
+  const ptawaNextDepartmentRaw =
+    req.body.ptawaNextDepartment == null
+      ? ""
+      : String(req.body.ptawaNextDepartment).trim();
+  const ptawaNextDepartment = ptawaNextDepartmentRaw
+    ? normalizeLaborDepartment(ptawaNextDepartmentRaw, "")
+    : null;
+  if (ptawaNextDepartmentRaw && !ptawaNextDepartment) {
+    res.status(400).json({ error: "Invalid ptawa department." });
+    return;
+  }
 
-    const patch = {
-      completedDozen: clampedCompleted,
-      isClosed: clampedCompleted >= rowQty,
-      closedAt: clampedCompleted >= rowQty ? new Date() : null,
-    };
-
-    await tx.productionOrder.update({
-      where: { id: row.id },
-      data: patch,
-    });
-
-    if (progressDelta > 0 && row.laborId) {
-      const baseRatePerDozen = toNumber(row.pricePerDozen);
-      const isUpperman = row.department === "UPPERMAN";
-      const quantity = isUpperman ? progressDelta * 12 : progressDelta;
-      const rate = isUpperman ? baseRatePerDozen / 12 : baseRatePerDozen;
-
-      await tx.laborWorkEntry.create({
-        data: {
-          laborId: row.laborId,
-          articleId: row.articleId,
-          startDate: new Date(),
-          endDate: new Date(),
-          quantity,
-          rate,
-          total: quantity * rate,
-        },
+  const result = await prisma
+    .$transaction(async (tx) => {
+      const row = await tx.productionOrder.findUnique({
+        where: { id: req.params.orderId },
       });
-    }
-
-    if (row.department === "PRESSMAN") {
-      const releasable = Math.max(0, clampedCompleted - rowForwarded);
-      if (releasable > 0) {
-        await createOrExpandQueueOrder(tx, {
-          department: "UPPERMAN",
-          articleId: row.articleId,
-          quantityDozen: releasable,
-          source: "PRESSMAN_FLOW",
-        });
-        await createOrExpandQueueOrder(tx, {
-          department: "PRINTING",
-          articleId: row.articleId,
-          quantityDozen: releasable,
-          source: "PRESSMAN_FLOW",
-        });
+      if (!row) {
+        throw new Error("Order not found.");
       }
+      const isMergedFinal = MERGED_FINAL_DEPARTMENTS.includes(row.department);
+      if (isMergedFinal) {
+        if (!row.laborId || !row.packingLaborId) {
+          throw new Error(
+            "Assign both Machineman and Packing labors before marking this order done.",
+          );
+        }
+      } else if (row.department !== "PRESSMAN" && !row.laborId) {
+        throw new Error("Assign labor before marking this order done.");
+      }
+
+      const rowQty = toNumber(row.quantityDozen);
+      const rowCompleted = toNumber(row.completedDozen);
+      const rowBMall = toNumber(row.bMallDozen);
+      const rowCMall = toNumber(row.cMallDozen);
+      const rowProgress = getOrderProgressDozen(row);
+      const rowForwarded = toNumber(row.forwardedDozen);
+      const allowedNextDepartments = getAllowedNextDepartments(row.department);
+      const isPressman = row.department === "PRESSMAN";
+      const isPrinting = row.department === "PRINTING";
+      if (
+        !isPressman &&
+        requestedNextDepartment &&
+        !allowedNextDepartments.includes(requestedNextDepartment)
+      ) {
+        throw new Error(
+          "Selected next department is not valid for this order.",
+        );
+      }
+      if (isPrinting && requestedNextDepartment) {
+        throw new Error("Printing done does not allow department assignment.");
+      }
+      if (isPressman && requestedNextDepartment) {
+        throw new Error(
+          "Use upper/ptawa department fields for pressman done flow.",
+        );
+      }
+      if (isPressman && bMallDeltaInput > 0) {
+        throw new Error("B-mall is not allowed for pressman flow.");
+      }
+      if (isPressman && cMallDeltaInput > 0) {
+        throw new Error("C-mall is not allowed for pressman flow.");
+      }
+      if (isPressman && upperDozenDeltaInput <= 0) {
+        throw new Error("Upper quantity must be greater than 0.");
+      }
+      if (isPressman && !upperNextDepartment) {
+        throw new Error("Upper department is required.");
+      }
+      if (isPressman && upperNextDepartment === "PRINTING") {
+        throw new Error(
+          "Upper can be assigned to any department except printing.",
+        );
+      }
+      if (
+        isPressman &&
+        upperNextDepartment &&
+        !allowedNextDepartments.includes(upperNextDepartment)
+      ) {
+        throw new Error("Selected upper department is not valid.");
+      }
+      if (
+        isPressman &&
+        ptawaNextDepartment &&
+        ptawaNextDepartment !== "PRINTING"
+      ) {
+        throw new Error("Ptawa can only be assigned to printing.");
+      }
+
+      const clampedCompleted = Math.min(Math.max(completedInput, 0), rowQty);
+      if (clampedCompleted < rowCompleted) {
+        throw new Error("Completed quantity cannot be reduced.");
+      }
+      const aMallDelta = Math.max(0, clampedCompleted - rowCompleted);
+      const bMallDelta = isMergedFinal ? bMallDeltaInput : 0;
+      const cMallDelta = isMergedFinal ? cMallDeltaInput : 0;
+      if (!isMergedFinal && (bMallDeltaInput > 0 || cMallDeltaInput > 0)) {
+        throw new Error(
+          "B-mall and C-mall values are only allowed for Machineman + Packing stage.",
+        );
+      }
+
+      const progressDelta = aMallDelta + bMallDelta + cMallDelta;
+      const remaining = Math.max(rowQty - rowProgress, 0);
+      if (!isPressman && progressDelta > remaining) {
+        throw new Error(
+          `You can mark up to ${remaining} dozen only for this order.`,
+        );
+      }
+
+      const nextBMall = rowBMall + bMallDelta;
+      const nextCMall = rowCMall + cMallDelta;
+      const nextProgress = isMergedFinal
+        ? clampedCompleted + nextBMall + nextCMall
+        : clampedCompleted;
+
+      const patch = {
+        completedDozen: clampedCompleted,
+        bMallDozen: isMergedFinal ? nextBMall : undefined,
+        cMallDozen: isMergedFinal ? nextCMall : undefined,
+        isClosed: nextProgress >= rowQty,
+        closedAt: nextProgress >= rowQty ? new Date() : null,
+      };
+
       await tx.productionOrder.update({
         where: { id: row.id },
-        data: { forwardedDozen: clampedCompleted },
+        data: patch,
       });
-    } else if (row.department === "UPPERMAN" || row.department === "PRINTING") {
-      const [upperRows, printingRows, dcRows] = await Promise.all([
-        tx.productionOrder.findMany({
-          where: { department: "UPPERMAN", articleId: row.articleId },
-          select: { completedDozen: true },
-        }),
-        tx.productionOrder.findMany({
-          where: { department: "PRINTING", articleId: row.articleId },
-          select: { completedDozen: true },
-        }),
-        tx.productionOrder.findMany({
-          where: {
-            department: "DC",
+
+      if (progressDelta > 0 && row.laborId) {
+        const baseRatePerDozen = toNumber(row.pricePerDozen);
+        const isUpperman = row.department === "UPPERMAN";
+        const quantity = isUpperman ? progressDelta * 12 : progressDelta;
+        const rate = isUpperman ? baseRatePerDozen / 12 : baseRatePerDozen;
+
+        await tx.laborWorkEntry.create({
+          data: {
+            laborId: row.laborId,
             articleId: row.articleId,
-            source: "UPPER_PRINT_PARALLEL",
+            startDate: new Date(),
+            endDate: new Date(),
+            quantity,
+            rate,
+            total: quantity * rate,
           },
-          select: { quantityDozen: true },
-        }),
-      ]);
-
-      const upperCompleted = upperRows.reduce(
-        (sum, item) => sum + toNumber(item.completedDozen),
-        0
-      );
-      const printingCompleted = printingRows.reduce(
-        (sum, item) => sum + toNumber(item.completedDozen),
-        0
-      );
-      const parallelReady = Math.min(upperCompleted, printingCompleted);
-      const alreadyReleasedToDc = dcRows.reduce(
-        (sum, item) => sum + toNumber(item.quantityDozen),
-        0
-      );
-      const releasable = Math.max(0, parallelReady - alreadyReleasedToDc);
-
-      if (releasable > 0) {
-        await createOrExpandQueueOrder(tx, {
-          department: "DC",
-          articleId: row.articleId,
-          quantityDozen: releasable,
-          source: "UPPER_PRINT_PARALLEL",
         });
+
+        if (isMergedFinal && row.packingLaborId) {
+          const packingRatePerDozen = toNumber(row.packingPricePerDozen);
+          if (packingRatePerDozen > 0) {
+            await tx.laborWorkEntry.create({
+              data: {
+                laborId: row.packingLaborId,
+                articleId: row.articleId,
+                startDate: new Date(),
+                endDate: new Date(),
+                quantity: progressDelta,
+                rate: packingRatePerDozen,
+                total: progressDelta * packingRatePerDozen,
+              },
+            });
+          }
+        }
       }
 
-      await tx.productionOrder.update({
-        where: { id: row.id },
-        data: { forwardedDozen: clampedCompleted },
-      });
-    } else {
       const releasable = Math.max(0, clampedCompleted - rowForwarded);
-      const nextDepartment = NEXT_DEPARTMENT[row.department];
-      if (nextDepartment && releasable > 0) {
+      if (isPressman) {
+        const upperForwarded = upperNextDepartment ? upperDozenDeltaInput : 0;
+        const ptawaForwarded =
+          ptawaNextDepartment === "PRINTING" ? ptawaDozenDeltaInput : 0;
+
+        if (upperForwarded > 0) {
+          await createOrExpandQueueOrder(tx, {
+            department: upperNextDepartment,
+            articleId: row.articleId,
+            quantityDozen: upperForwarded,
+            source: "STAGE_FLOW",
+          });
+        }
+
+        if (ptawaForwarded > 0) {
+          await createOrExpandQueueOrder(tx, {
+            department: "PRINTING",
+            articleId: row.articleId,
+            quantityDozen: ptawaForwarded,
+            source: "STAGE_FLOW",
+          });
+        }
+
+        const forwardedIncrement = upperForwarded + ptawaForwarded;
+        if (forwardedIncrement > 0) {
+          await tx.productionOrder.update({
+            where: { id: row.id },
+            data: { forwardedDozen: rowForwarded + forwardedIncrement },
+          });
+        }
+      } else if (requestedNextDepartment && releasable > 0) {
         await createOrExpandQueueOrder(tx, {
-          department: nextDepartment,
+          department: requestedNextDepartment,
           articleId: row.articleId,
           quantityDozen: releasable,
           source: "STAGE_FLOW",
-          exclusionSource: "UPPER_PRINT_PARALLEL",
+        });
+        await tx.productionOrder.update({
+          where: { id: row.id },
+          data: { forwardedDozen: clampedCompleted },
         });
       }
-      await tx.productionOrder.update({
-        where: { id: row.id },
-        data: { forwardedDozen: clampedCompleted },
-      });
-    }
 
-    return tx.productionOrder.findUnique({
-      where: { id: row.id },
-      include: {
-        article: true,
-        labor: true,
-      },
+      return tx.productionOrder.findUnique({
+        where: { id: row.id },
+        include: {
+          article: true,
+          labor: true,
+          packingLabor: true,
+        },
+      });
+    })
+    .catch((error) => {
+      res
+        .status(400)
+        .json({ error: error.message ?? "Failed to update completion." });
+      return null;
     });
-  }).catch((error) => {
-    res.status(400).json({ error: error.message ?? "Failed to update completion." });
-    return null;
-  });
 
   if (!result) return;
   res.json(toApiOrder(result));
@@ -429,6 +634,8 @@ export const getStockSummary = async (req, res) => {
       department: true,
       quantityDozen: true,
       completedDozen: true,
+      bMallDozen: true,
+      cMallDozen: true,
       forwardedDozen: true,
       isClosed: true,
     },
@@ -442,21 +649,20 @@ export const getStockSummary = async (req, res) => {
   for (const row of orders) {
     const quantity = toNumber(row.quantityDozen);
     const completed = toNumber(row.completedDozen);
-    const forwarded = toNumber(row.forwardedDozen);
-    if (!row.isClosed && completed < quantity) {
+    const bMall = toNumber(row.bMallDozen);
+    const cMall = toNumber(row.cMallDozen);
+    const progress = MERGED_FINAL_DEPARTMENTS.includes(row.department)
+      ? completed + bMall + cMall
+      : completed;
+    if (!row.isClosed && progress < quantity) {
       activeOrders += 1;
     }
-    wipDozen += Math.max(quantity - completed, 0);
+    wipDozen += Math.max(quantity - progress, 0);
 
-    if (row.department === "PACKING") {
-      packedStockDozen += completed;
-      readyStockDozen += Math.max(quantity - completed, 0);
+    if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
+      packedStockDozen += progress;
+      readyStockDozen += Math.max(quantity - progress, 0);
       continue;
-    }
-
-    // Stock starts when rows reach Machineman queue from DC completion.
-    if (row.department === "MACHINEMAN") {
-      readyStockDozen += Math.max(quantity - forwarded, 0);
     }
   }
 
@@ -470,7 +676,9 @@ export const getStockSummary = async (req, res) => {
 
 export const listStockByArticle = async (req, res) => {
   const mode = String(req.query.mode ?? "IN_STOCK").toUpperCase();
-  const search = String(req.query.q ?? "").trim().toLowerCase();
+  const search = String(req.query.q ?? "")
+    .trim()
+    .toLowerCase();
   const isPackedMode = mode === "PACKED";
 
   const orders = await prisma.productionOrder.findMany({
@@ -479,7 +687,8 @@ export const listStockByArticle = async (req, res) => {
       articleId: true,
       quantityDozen: true,
       completedDozen: true,
-      forwardedDozen: true,
+      bMallDozen: true,
+      cMallDozen: true,
       article: { select: { id: true, name: true, code: true } },
     },
   });
@@ -488,36 +697,48 @@ export const listStockByArticle = async (req, res) => {
   for (const row of orders) {
     const quantity = toNumber(row.quantityDozen);
     const completed = toNumber(row.completedDozen);
-    const forwarded = toNumber(row.forwardedDozen);
+    const bMall = toNumber(row.bMallDozen);
+    const cMall = toNumber(row.cMallDozen);
+    const progress = MERGED_FINAL_DEPARTMENTS.includes(row.department)
+      ? completed + bMall + cMall
+      : completed;
 
-    let contribution = 0;
+    let contributionA = 0;
+    let contributionB = 0;
+    let contributionC = 0;
     if (isPackedMode) {
-      if (row.department === "PACKING") {
-        contribution = completed;
+      if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
+        contributionA = completed;
+        contributionB = bMall;
+        contributionC = cMall;
       }
-    } else if (row.department === "PACKING") {
-      contribution = Math.max(quantity - completed, 0);
-    } else if (row.department === "MACHINEMAN") {
-      // Reached Machineman means in-stock (until fully packed).
-      contribution = Math.max(quantity - forwarded, 0);
+    } else if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
+      contributionA = Math.max(quantity - progress, 0);
     }
 
-    if (contribution <= 0) continue;
+    if (contributionA <= 0 && contributionB <= 0 && contributionC <= 0) {
+      continue;
+    }
 
     const prev = quantityByArticle.get(row.articleId) ?? {
       articleId: row.articleId,
       articleName: row.article?.name ?? "-",
       articleCode: row.article?.code ?? null,
       quantityDozen: 0,
+      bMallDozen: 0,
+      cMallDozen: 0,
     };
-    prev.quantityDozen += contribution;
+    prev.quantityDozen += contributionA;
+    prev.bMallDozen += contributionB;
+    prev.cMallDozen += contributionC;
     quantityByArticle.set(row.articleId, prev);
   }
 
   const rows = Array.from(quantityByArticle.values())
     .filter((row) => {
       if (!search) return true;
-      const haystack = `${row.articleName} ${row.articleCode ?? ""}`.toLowerCase();
+      const haystack =
+        `${row.articleName} ${row.articleCode ?? ""}`.toLowerCase();
       return haystack.includes(search);
     })
     .sort((a, b) => a.articleName.localeCompare(b.articleName));

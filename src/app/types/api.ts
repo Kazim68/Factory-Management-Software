@@ -126,10 +126,30 @@ export interface ApiBillLedgerEntry {
   description?: string | null;
   amount: number;
   kind: "RECEIVABLE" | "PAYMENT";
-  method?: "CASH" | "KHATA" | "CREDIT" | "BANK";
+  method?: "CASH" | "KHATA" | "CREDIT" | "BANK" | "CHEQUE";
 }
 
-export type ApiPaymentMethod = "CASH" | "KHATA" | "CREDIT" | "BANK";
+export type ApiPaymentMethod = "CASH" | "KHATA" | "CREDIT" | "BANK" | "CHEQUE";
+
+export type ApiChequeStatus = "AVAILABLE" | "USED" | "CASHED";
+
+export interface ApiCheque {
+  id: string;
+  date: string;
+  amount: number;
+  chequeNumber?: string | null;
+  notes?: string | null;
+  status: ApiChequeStatus;
+  sourcePartyId?: string | null;
+  usedPartyId?: string | null;
+  sourcePaymentId?: string | null;
+  usedPaymentId?: string | null;
+  cashedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sourceParty?: ApiParty | null;
+  usedParty?: ApiParty | null;
+}
 
 export interface ApiChemicalPurchase {
   id: string;
@@ -244,7 +264,7 @@ export interface ApiPartyPayment {
   partyId: string;
   date: string;
   amount: number | string;
-  method: "CASH" | "KHATA" | "CREDIT" | "BANK";
+  method: "CASH" | "KHATA" | "CREDIT" | "BANK" | "CHEQUE";
   direction?: "RECEIVE" | "PAY";
   reference?: string | null;
   description?: string | null;
@@ -295,9 +315,13 @@ export interface ApiProductionOrder {
   stage: ApiProductionStage;
   articleId: string;
   laborId?: string | null;
+  packingLaborId?: string | null;
   quantityDozen: number;
   pricePerDozen: number;
+  packingPricePerDozen: number;
   completedDozen: number;
+  bMallDozen: number;
+  cMallDozen: number;
   forwardedDozen: number;
   source: ApiProductionOrderSource;
   isClosed: boolean;
@@ -307,6 +331,7 @@ export interface ApiProductionOrder {
   status: ApiProductionOrderStatus;
   article?: ApiArticle | null;
   labor?: ApiLaborProfile | null;
+  packingLabor?: ApiLaborProfile | null;
 }
 
 export type ApiStockMode = "IN_STOCK" | "PACKED";
@@ -323,6 +348,8 @@ export interface ApiStockArticleRow {
   articleName: string;
   articleCode?: string | null;
   quantityDozen: number;
+  bMallDozen: number;
+  cMallDozen: number;
 }
 
 export type ApiReportPeriod = "daily" | "weekly" | "monthly";

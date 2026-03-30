@@ -41,15 +41,38 @@ const DEPARTMENTS: ApiLaborDepartment[] = [
   "PRINTING",
   "DC",
   "MACHINEMAN",
+];
+
+const MERGED_FINAL_DEPARTMENTS: ApiLaborDepartment[] = [
+  "MACHINEMAN",
   "PACKING",
 ];
+
+const getOrderProgressDozen = (order: ApiProductionOrder) => {
+  if (!MERGED_FINAL_DEPARTMENTS.includes(order.department)) {
+    return Number(order.completedDozen);
+  }
+  return (
+    Number(order.completedDozen) +
+    Number(order.bMallDozen ?? 0) +
+    Number(order.cMallDozen ?? 0)
+  );
+};
+
+const getRemainingDepartments = (
+  department: ApiLaborDepartment,
+): ApiLaborDepartment[] => {
+  const currentIndex = DEPARTMENTS.indexOf(department);
+  if (currentIndex === -1) return [];
+  return DEPARTMENTS.slice(currentIndex + 1);
+};
 
 const DEPARTMENT_TITLE: Record<ApiLaborDepartment, string> = {
   PRESSMAN: "Pressman",
   UPPERMAN: "Upperman",
   PRINTING: "Printing",
   DC: "DC",
-  MACHINEMAN: "Machineman",
+  MACHINEMAN: "Machineman + Packing",
   PACKING: "Packing",
 };
 
@@ -117,11 +140,17 @@ export function ProductionControl() {
     () =>
       DEPARTMENTS.reduce(
         (acc, department) => {
-          acc[department] = orders.filter(
-            (order) =>
-              order.department === department &&
-              Number(order.completedDozen) < Number(order.quantityDozen),
-          );
+          acc[department] = orders.filter((order) => {
+            const belongsToMergedFinal =
+              department === "MACHINEMAN" &&
+              MERGED_FINAL_DEPARTMENTS.includes(order.department);
+            const belongsToDepartment =
+              order.department === department || belongsToMergedFinal;
+            return (
+              belongsToDepartment &&
+              getOrderProgressDozen(order) < Number(order.quantityDozen)
+            );
+          });
           return acc;
         },
         {} as Record<ApiLaborDepartment, ApiProductionOrder[]>,
@@ -161,6 +190,7 @@ export function ProductionControl() {
                   rows={byDepartment[department] ?? []}
                   articles={articles}
                   departmentLabors={departmentLabors[department] ?? []}
+                  packingLabors={departmentLabors.PACKING ?? []}
                   isLoading={isLoading}
                   onRefresh={loadData}
                 />
@@ -178,6 +208,7 @@ function DepartmentSection({
   rows,
   articles,
   departmentLabors,
+  packingLabors,
   isLoading,
   onRefresh,
 }: {
@@ -185,6 +216,7 @@ function DepartmentSection({
   rows: ApiProductionOrder[];
   articles: ApiArticle[];
   departmentLabors: Array<{ id: string; name: string }>;
+  packingLabors: Array<{ id: string; name: string }>;
   isLoading: boolean;
   onRefresh: () => Promise<void>;
 }) {
@@ -203,7 +235,18 @@ function DepartmentSection({
   });
   const [assignLaborValue, setAssignLaborValue] = useState("unassigned");
   const [assignPriceValue, setAssignPriceValue] = useState("");
+  const [assignPackingLaborValue, setAssignPackingLaborValue] =
+    useState("unassigned");
+  const [assignPackingPriceValue, setAssignPackingPriceValue] = useState("");
   const [doneQtyValue, setDoneQtyValue] = useState("");
+  const [doneBMallValue, setDoneBMallValue] = useState("");
+  const [doneCMallValue, setDoneCMallValue] = useState("");
+  const [doneNextDepartmentValue, setDoneNextDepartmentValue] = useState("");
+  const [doneUpperValue, setDoneUpperValue] = useState("");
+  const [doneUpperDepartmentValue, setDoneUpperDepartmentValue] = useState("");
+  const [donePtawaValue, setDonePtawaValue] = useState("");
+  const [donePtawaDepartmentValue, setDonePtawaDepartmentValue] =
+    useState("SKIP");
   const [editForm, setEditForm] = useState({
     articleId: "",
     laborId: "unassigned",
@@ -221,6 +264,17 @@ function DepartmentSection({
   }, [articles, editForm.articleId, formData.articleId]);
 
   const selectedOrder = rows.find((row) => row.id === selectedOrderId) || null;
+  const isMergedFinalDepartment = department === "MACHINEMAN";
+  const isPressmanDepartment = department === "PRESSMAN";
+  const isPrintingDepartment = department === "PRINTING";
+  const doneNextDepartmentOptions = selectedOrder
+    ? getRemainingDepartments(selectedOrder.department).filter((item) =>
+        selectedOrder.department === "UPPERMAN" ? item !== "PRINTING" : true,
+      )
+    : [];
+  const doneUpperDepartmentOptions = doneNextDepartmentOptions.filter(
+    (item) => item !== "PRINTING",
+  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,16 +323,33 @@ function DepartmentSection({
           )
         : "",
     );
+    setAssignPackingLaborValue(row.packingLaborId || "unassigned");
+    setAssignPackingPriceValue(
+      row.packingPricePerDozen ? String(row.packingPricePerDozen) : "",
+    );
     setAssignOpen(true);
   };
 
   const openDoneDialog = (row: ApiProductionOrder) => {
     setSelectedOrderId(row.id);
     const remaining = Math.max(
-      Number(row.quantityDozen) - Number(row.completedDozen),
+      Number(row.quantityDozen) - getOrderProgressDozen(row),
       0,
     );
     setDoneQtyValue(String(remaining));
+    setDoneUpperValue(String(remaining));
+    setDonePtawaValue("");
+    const options = getRemainingDepartments(row.department).filter(
+      (item) => item !== "PRINTING",
+    );
+    setDoneUpperDepartmentValue(options[0] ?? "");
+    setDonePtawaDepartmentValue("SKIP");
+    setDoneBMallValue("");
+    setDoneCMallValue("");
+    const nextOptions = getRemainingDepartments(row.department).filter(
+      (item) => (row.department === "UPPERMAN" ? item !== "PRINTING" : true),
+    );
+    setDoneNextDepartmentValue(nextOptions[0] ?? "");
     setDoneOpen(true);
   };
 
@@ -302,13 +373,36 @@ function DepartmentSection({
       return;
     }
 
+    const packingPriceInput = Number(assignPackingPriceValue);
+    if (
+      isMergedFinalDepartment &&
+      (!Number.isFinite(packingPriceInput) || packingPriceInput <= 0)
+    ) {
+      toast.error("Enter a valid packing price.");
+      return;
+    }
+
     try {
       setSaving(true);
-      await productionApi.assignLabor(selectedOrderId, {
-        laborId:
-          assignLaborValue === "unassigned" ? undefined : assignLaborValue,
-        pricePerDozen: department === "UPPERMAN" ? priceInput * 12 : priceInput,
-      });
+      if (isMergedFinalDepartment) {
+        await productionApi.assignLabor(selectedOrderId, {
+          machinemanLaborId:
+            assignLaborValue === "unassigned" ? undefined : assignLaborValue,
+          machinemanPricePerDozen: priceInput,
+          packingLaborId:
+            assignPackingLaborValue === "unassigned"
+              ? undefined
+              : assignPackingLaborValue,
+          packingPricePerDozen: packingPriceInput,
+        });
+      } else {
+        await productionApi.assignLabor(selectedOrderId, {
+          laborId:
+            assignLaborValue === "unassigned" ? undefined : assignLaborValue,
+          pricePerDozen:
+            department === "UPPERMAN" ? priceInput * 12 : priceInput,
+        });
+      }
       toast.success("Labor assigned.");
       setAssignOpen(false);
       await onRefresh();
@@ -324,20 +418,87 @@ function DepartmentSection({
     e.preventDefault();
     if (!selectedOrderId || !selectedOrder) return;
     const value = Number(doneQtyValue);
+    const upperValue = Number(doneUpperValue || 0);
+    const ptawaValue = Number(donePtawaValue || 0);
+    const bMallDelta = Number(doneBMallValue || 0);
+    const cMallDelta = Number(doneCMallValue || 0);
     const alreadyCompleted = Number(selectedOrder.completedDozen);
     const totalQuantity = Number(selectedOrder.quantityDozen);
-    const remaining = Math.max(totalQuantity - alreadyCompleted, 0);
+    const remaining = Math.max(
+      totalQuantity - getOrderProgressDozen(selectedOrder),
+      0,
+    );
     if (!Number.isFinite(value) || value < 0) return;
-    if (value > remaining) {
+    if (!Number.isFinite(upperValue) || upperValue < 0) return;
+    if (!Number.isFinite(ptawaValue) || ptawaValue < 0) return;
+    if (!Number.isFinite(bMallDelta) || bMallDelta < 0) return;
+    if (!Number.isFinite(cMallDelta) || cMallDelta < 0) return;
+
+    const totalDelta = value + bMallDelta + cMallDelta;
+    if (!isPressmanDepartment && totalDelta > remaining) {
       toast.error(`You can add up to ${remaining} dozen only.`);
       return;
     }
+    if (isPressmanDepartment && upperValue <= 0) {
+      toast.error("Upper quantity must be greater than 0.");
+      return;
+    }
+    if (
+      isPressmanDepartment &&
+      upperValue > 0 &&
+      (!doneUpperDepartmentValue || doneUpperDepartmentValue === "PRINTING")
+    ) {
+      toast.error("Upper can only be assigned to non-printing department.");
+      return;
+    }
+    if (
+      isPressmanDepartment &&
+      donePtawaDepartmentValue !== "SKIP" &&
+      donePtawaDepartmentValue !== "PRINTING"
+    ) {
+      toast.error("Ptawa can only go to printing or be skipped.");
+      return;
+    }
+    if (
+      !isMergedFinalDepartment &&
+      !isPressmanDepartment &&
+      !isPrintingDepartment &&
+      value > 0 &&
+      doneNextDepartmentOptions.length > 0 &&
+      !doneNextDepartmentValue
+    ) {
+      toast.error("Select next department.");
+      return;
+    }
+
     try {
       setSaving(true);
-      await productionApi.updateCompletion(
-        selectedOrderId,
-        alreadyCompleted + value,
-      );
+      await productionApi.updateCompletion(selectedOrderId, {
+        completedDozen:
+          alreadyCompleted +
+          (isPressmanDepartment ? upperValue + ptawaValue : value),
+        nextDepartment:
+          !isMergedFinalDepartment &&
+          !isPressmanDepartment &&
+          !isPrintingDepartment &&
+          value > 0 &&
+          doneNextDepartmentValue
+            ? (doneNextDepartmentValue as ApiLaborDepartment)
+            : undefined,
+        bMallDozenDelta: isMergedFinalDepartment ? bMallDelta : undefined,
+        cMallDozenDelta: isMergedFinalDepartment ? cMallDelta : undefined,
+        upperDozenDelta: isPressmanDepartment ? upperValue : undefined,
+        upperNextDepartment: isPressmanDepartment
+          ? (doneUpperDepartmentValue as ApiLaborDepartment)
+          : undefined,
+        ptawaDozenDelta: isPressmanDepartment ? ptawaValue : undefined,
+        ptawaNextDepartment:
+          isPressmanDepartment &&
+          donePtawaDepartmentValue === "PRINTING" &&
+          ptawaValue > 0
+            ? "PRINTING"
+            : undefined,
+      });
       toast.success("Completed quantity updated.");
       setDoneOpen(false);
       await onRefresh();
@@ -490,7 +651,9 @@ function DepartmentSection({
           </DialogHeader>
           <form onSubmit={submitAssign} className="space-y-4">
             <div>
-              <Label>Labor</Label>
+              <Label>
+                {isMergedFinalDepartment ? "Machineman Labor" : "Labor"}
+              </Label>
               <Select
                 value={assignLaborValue}
                 onValueChange={setAssignLaborValue}
@@ -523,6 +686,40 @@ function DepartmentSection({
                 required
               />
             </div>
+            {isMergedFinalDepartment && (
+              <>
+                <div>
+                  <Label>Packing Labor</Label>
+                  <Select
+                    value={assignPackingLaborValue}
+                    onValueChange={setAssignPackingLaborValue}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {packingLabors.map((labor) => (
+                        <SelectItem key={labor.id} value={labor.id}>
+                          {labor.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Packing Price Per Dozen</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={assignPackingPriceValue}
+                    onChange={(e) => setAssignPackingPriceValue(e.target.value)}
+                    required
+                  />
+                </div>
+              </>
+            )}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
@@ -546,37 +743,159 @@ function DepartmentSection({
           </DialogHeader>
           <form onSubmit={submitDone} className="space-y-4">
             <div>
-              <Label>Completed (Dozen)</Label>
+              <Label>
+                {isPressmanDepartment
+                  ? "Upper (Dozen)"
+                  : isMergedFinalDepartment
+                    ? "A-Mall (Dozen)"
+                    : "Completed (Dozen)"}
+              </Label>
               <Input
                 type="number"
                 min="0"
                 step="0.01"
                 max={
-                  selectedOrder
-                    ? Math.max(
-                        Number(selectedOrder.quantityDozen) -
-                          Number(selectedOrder.completedDozen),
-                        0,
-                      )
-                    : undefined
+                  isPressmanDepartment
+                    ? undefined
+                    : selectedOrder
+                      ? Math.max(
+                          Number(selectedOrder.quantityDozen) -
+                            getOrderProgressDozen(selectedOrder),
+                          0,
+                        )
+                      : undefined
                 }
-                value={doneQtyValue}
-                onChange={(e) => setDoneQtyValue(e.target.value)}
+                value={isPressmanDepartment ? doneUpperValue : doneQtyValue}
+                onChange={(e) =>
+                  isPressmanDepartment
+                    ? setDoneUpperValue(e.target.value)
+                    : setDoneQtyValue(e.target.value)
+                }
                 required
               />
               {selectedOrder && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Total: {selectedOrder.quantityDozen} dozen | Already done:{" "}
-                  {selectedOrder.completedDozen} dozen | Left:{" "}
-                  {Math.max(
+                  {`Total: ${selectedOrder.quantityDozen} dozen | Already done: ${
+                    isMergedFinalDepartment
+                      ? getOrderProgressDozen(selectedOrder)
+                      : selectedOrder.completedDozen
+                  } dozen | Left: ${Math.max(
                     Number(selectedOrder.quantityDozen) -
-                      Number(selectedOrder.completedDozen),
+                      getOrderProgressDozen(selectedOrder),
                     0,
-                  )}{" "}
-                  dozen
+                  )} dozen`}
                 </p>
               )}
             </div>
+            {isPressmanDepartment && (
+              <>
+                <div>
+                  <Label>Upper Department</Label>
+                  <Select
+                    value={doneUpperDepartmentValue}
+                    onValueChange={setDoneUpperDepartmentValue}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select upper department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {doneUpperDepartmentOptions
+                        .filter(
+                          (nextDepartment) => nextDepartment !== "PRINTING",
+                        )
+                        .map((nextDepartment) => (
+                          <SelectItem
+                            key={nextDepartment}
+                            value={nextDepartment}
+                          >
+                            {DEPARTMENT_TITLE[nextDepartment]}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <Label>Ptawa (Optional Dozen)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={donePtawaValue}
+                      onChange={(e) => setDonePtawaValue(e.target.value)}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <Label>Ptawa Department</Label>
+                    <Select
+                      value={donePtawaDepartmentValue}
+                      onValueChange={setDonePtawaDepartmentValue}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="SKIP">Skip</SelectItem>
+                        <SelectItem value="PRINTING">Printing</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </>
+            )}
+            {isMergedFinalDepartment && (
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <Label>B-Mall (Optional)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={doneBMallValue}
+                    onChange={(e) => setDoneBMallValue(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <Label>C-Mall (Optional)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={doneCMallValue}
+                    onChange={(e) => setDoneCMallValue(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
+            {!isMergedFinalDepartment &&
+              !isPressmanDepartment &&
+              !isPrintingDepartment &&
+              doneNextDepartmentOptions.length > 0 && (
+                <div>
+                  <Label>Next Department</Label>
+                  <Select
+                    value={doneNextDepartmentValue}
+                    onValueChange={setDoneNextDepartmentValue}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select next department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {doneNextDepartmentOptions.map((nextDepartment) => (
+                        <SelectItem key={nextDepartment} value={nextDepartment}>
+                          {DEPARTMENT_TITLE[nextDepartment]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Only departments ahead in hierarchy are shown.
+                  </p>
+                </div>
+              )}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
@@ -691,7 +1010,9 @@ function DepartmentSection({
             <TableHead>
               {department === "UPPERMAN" ? "Price / Pair" : "Price / Dozen"}
             </TableHead>
-            <TableHead>Completed Qty</TableHead>
+            <TableHead>
+              {isMergedFinalDepartment ? "A-Mall Qty" : "Completed Qty"}
+            </TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Actions</TableHead>
           </TableRow>
@@ -719,12 +1040,18 @@ function DepartmentSection({
             rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell>{row.article?.name || "-"}</TableCell>
-                <TableCell>{row.labor?.name || "-"}</TableCell>
+                <TableCell>
+                  {isMergedFinalDepartment
+                    ? `${row.labor?.name || "-"} / ${row.packingLabor?.name || "-"}`
+                    : row.labor?.name || "-"}
+                </TableCell>
                 <TableCell>{row.quantityDozen}</TableCell>
                 <TableCell>
-                  {department === "UPPERMAN"
-                    ? Number(row.pricePerDozen) / 12
-                    : row.pricePerDozen}
+                  {isMergedFinalDepartment
+                    ? `${row.pricePerDozen} / ${row.packingPricePerDozen}`
+                    : department === "UPPERMAN"
+                      ? Number(row.pricePerDozen) / 12
+                      : row.pricePerDozen}
                 </TableCell>
                 <TableCell>{row.completedDozen}</TableCell>
                 <TableCell>
@@ -742,34 +1069,47 @@ function DepartmentSection({
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
-                    {department === "PRESSMAN" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openEditDialog(row)}
-                      >
-                        Edit
-                      </Button>
-                    ) : row.laborId ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openAssignDialog(row)}
-                      >
-                        Assign Labor
-                      </Button>
-                    ) : (
-                      <></>
-                    )}
-                    {row.laborId ? (
-                      <Button size="sm" onClick={() => openDoneDialog(row)}>
-                        Done
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={() => openAssignDialog(row)}>
-                        Assign Labor
-                      </Button>
-                    )}
+                    {(() => {
+                      const canDoMerged = isMergedFinalDepartment
+                        ? !!row.laborId && !!row.packingLaborId
+                        : !!row.laborId;
+                      return (
+                        <>
+                          {department === "PRESSMAN" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditDialog(row)}
+                            >
+                              Edit
+                            </Button>
+                          ) : canDoMerged ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openAssignDialog(row)}
+                            >
+                              Assign Labor
+                            </Button>
+                          ) : null}
+                          {canDoMerged ? (
+                            <Button
+                              size="sm"
+                              onClick={() => openDoneDialog(row)}
+                            >
+                              Done
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => openAssignDialog(row)}
+                            >
+                              Assign Labor
+                            </Button>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </TableCell>
               </TableRow>
