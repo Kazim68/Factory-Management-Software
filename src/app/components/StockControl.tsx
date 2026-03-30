@@ -154,14 +154,18 @@ export function StockControl() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Article</TableHead>
-                  <TableHead>Quantity (Dozen)</TableHead>
+                  <TableHead>
+                    {mode === "PACKED" ? "A-Mall (Dozen)" : "Quantity (Dozen)"}
+                  </TableHead>
+                  {mode === "PACKED" && <TableHead>B-Mall (Dozen)</TableHead>}
+                  {mode === "PACKED" && <TableHead>C-Mall (Dozen)</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={2}
+                      colSpan={mode === "PACKED" ? 4 : 2}
                       className="text-center text-sm text-muted-foreground"
                     >
                       Loading stock rows...
@@ -170,7 +174,7 @@ export function StockControl() {
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={2}
+                      colSpan={mode === "PACKED" ? 4 : 2}
                       className="text-center text-sm text-muted-foreground"
                     >
                       No articles found for this filter.
@@ -183,6 +187,16 @@ export function StockControl() {
                       <TableCell>
                         <Badge variant="secondary">{row.quantityDozen}</Badge>
                       </TableCell>
+                      {mode === "PACKED" && (
+                        <TableCell>
+                          <Badge variant="secondary">{row.bMallDozen}</Badge>
+                        </TableCell>
+                      )}
+                      {mode === "PACKED" && (
+                        <TableCell>
+                          <Badge variant="secondary">{row.cMallDozen}</Badge>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}

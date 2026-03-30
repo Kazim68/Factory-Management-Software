@@ -1,5 +1,6 @@
 import { Router } from "express";
 import billRoutes from "./billRoutes.js";
+import chequeRoutes from "./chequeRoutes.js";
 import configRoutes from "./configRoutes.js";
 import expenseRoutes from "./expenseRoutes.js";
 import laborRoutes from "./laborRoutes.js";
@@ -19,6 +20,7 @@ router.use("/parties", partyRoutes);
 router.use("/expenses", expenseRoutes);
 router.use("/labor", laborRoutes);
 router.use("/bills", billRoutes);
+router.use("/cheques", chequeRoutes);
 router.use("/", purchaseRoutes);
 router.use("/production", productionRoutes);
 router.use("/reports", reportRoutes);

@@ -270,7 +270,7 @@ export const createPartyPayment = async (req, res) => {
   const method =
     rawMethod === "KHATA" || rawMethod === "BANK"
       ? "CREDIT"
-      : ["CASH", "CREDIT"].includes(rawMethod)
+      : ["CASH", "CREDIT", "CHEQUE"].includes(rawMethod)
         ? rawMethod
         : "CASH";
   const isCash = method === "CASH";
@@ -278,14 +278,65 @@ export const createPartyPayment = async (req, res) => {
   const normalizedDirection =
     direction === "RECEIVE" || direction === "PAY" ? direction : "PAY";
   const amount = Math.abs(Number(req.body.amount ?? 0));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: "Payment amount must be greater than 0." });
+    return;
+  }
+
+  const chequeNumber =
+    req.body.chequeNumber == null ? null : String(req.body.chequeNumber).trim();
+  const chequeNotes =
+    req.body.chequeNotes == null ? null : String(req.body.chequeNotes).trim();
   const reference =
-    req.body.reference ?? (isCash ? "Cash Payment" : "Khata Settlement");
+    req.body.reference ??
+    (method === "CHEQUE"
+      ? "Cheque Settlement"
+      : isCash
+        ? "Cash Payment"
+        : "Khata Settlement");
   const description =
-    req.body.description ?? (isCash ? "Cash payment" : "Khata settlement");
+    req.body.description ??
+    (method === "CHEQUE"
+      ? "Cheque settlement"
+      : isCash
+        ? "Cash payment"
+        : "Khata settlement");
 
   const paymentDate = new Date(req.body.date);
   const payment = await prisma
     .$transaction(async (tx) => {
+      const party = await tx.party.findUnique({
+        where: { id: req.params.partyId },
+      });
+      if (!party) {
+        throw new Error("Party not found.");
+      }
+
+      let selectedCheque = null;
+      if (method === "CHEQUE" && normalizedDirection === "PAY") {
+        const chequeId = String(req.body.chequeId ?? "").trim();
+        if (!chequeId) {
+          throw new Error("Please select an available cheque.");
+        }
+        if (!["SUPPLIER", "BOTH"].includes(party.type)) {
+          throw new Error(
+            "Cheque payment is only allowed to supplier parties.",
+          );
+        }
+
+        selectedCheque = await tx.cheque.findUnique({
+          where: { id: chequeId },
+        });
+        if (!selectedCheque || selectedCheque.status !== "AVAILABLE") {
+          throw new Error("Selected cheque is not available.");
+        }
+
+        const chequeAmount = Number(selectedCheque.amount ?? 0);
+        if (Math.abs(chequeAmount - amount) > 0.0001) {
+          throw new Error("Payment amount must match selected cheque amount.");
+        }
+      }
+
       const allocations = [];
       if (
         normalizedDirection === "RECEIVE" &&
@@ -294,6 +345,10 @@ export const createPartyPayment = async (req, res) => {
         !req.body.rexinePurchaseId &&
         !req.body.materialPurchaseId
       ) {
+        if (method === "CHEQUE") {
+          throw new Error("Please select a bill when receiving by cheque.");
+        }
+
         const bills = await tx.bill.findMany({
           where: {
             partyId: req.params.partyId,
@@ -370,6 +425,37 @@ export const createPartyPayment = async (req, res) => {
           },
         });
         createdPayments.push(created);
+      }
+
+      if (method === "CHEQUE") {
+        if (!createdPayments.length) {
+          throw new Error("Unable to create cheque payment.");
+        }
+
+        if (normalizedDirection === "PAY") {
+          await tx.cheque.update({
+            where: { id: selectedCheque.id },
+            data: {
+              status: "USED",
+              usedPaymentId: createdPayments[0].id,
+              usedPartyId: req.params.partyId,
+              notes: chequeNotes || selectedCheque.notes,
+              chequeNumber: chequeNumber || selectedCheque.chequeNumber,
+            },
+          });
+        } else {
+          await tx.cheque.create({
+            data: {
+              date: paymentDate,
+              amount,
+              chequeNumber: chequeNumber || null,
+              notes: chequeNotes || description || null,
+              sourcePartyId: req.params.partyId,
+              sourcePaymentId: createdPayments[0].id,
+              status: "AVAILABLE",
+            },
+          });
+        }
       }
 
       if (!isCash) {

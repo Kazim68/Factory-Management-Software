@@ -28,7 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Plus, Eye } from "lucide-react";
 import { formatCurrency, formatDate } from "../lib/utils";
-import { billApi, partyApi, reportsApi } from "../lib/api";
+import { billApi, chequeApi, partyApi, reportsApi } from "../lib/api";
 import {
   exportTableToExcel,
   exportTableToPdf,
@@ -36,8 +36,10 @@ import {
 } from "../lib/report";
 import type {
   ApiBill,
+  ApiCheque,
   ApiPartyLedgerEntry,
   ApiPartyMonthlyOutstandingReport,
+  ApiPaymentMethod,
   ApiPartyType,
 } from "../types/api";
 import { toast } from "sonner";
@@ -71,7 +73,9 @@ export function PartyManagement() {
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [paymentPartyId, setPaymentPartyId] = useState<string | null>(null);
   const [paymentBills, setPaymentBills] = useState<ApiBill[]>([]);
+  const [availableCheques, setAvailableCheques] = useState<ApiCheque[]>([]);
   const [isLoadingPaymentBills, setIsLoadingPaymentBills] = useState(false);
+  const [isLoadingCheques, setIsLoadingCheques] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<ApiPartyLedgerEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [activeSection, setActiveSection] = useState(() => {
@@ -94,6 +98,8 @@ export function PartyManagement() {
   const [paymentData, setPaymentData] = useState({
     date: new Date().toISOString().split("T")[0],
     amount: "",
+    method: "KHATA" as ApiPaymentMethod,
+    chequeId: "",
     billId: "",
     description: "",
   });
@@ -226,7 +232,8 @@ export function PartyManagement() {
   useEffect(() => {
     if (!isPaymentDialogOpen || !paymentPartyId) {
       setPaymentBills([]);
-      setPaymentData((prev) => ({ ...prev, billId: "" }));
+      setAvailableCheques([]);
+      setPaymentData((prev) => ({ ...prev, billId: "", chequeId: "" }));
       return;
     }
 
@@ -268,6 +275,52 @@ export function PartyManagement() {
       active = false;
     };
   }, [isPaymentDialogOpen, paymentPartyId, parties]);
+
+  useEffect(() => {
+    if (!isPaymentDialogOpen || !paymentPartyId) {
+      setAvailableCheques([]);
+      return;
+    }
+
+    const party = parties.find((p) => p.id === paymentPartyId);
+    const isReceive = (party?.currentBalance ?? 0) > 0;
+    const shouldLoadCheques = !isReceive && paymentData.method === "CHEQUE";
+    if (!shouldLoadCheques) {
+      setAvailableCheques([]);
+      setPaymentData((prev) => ({ ...prev, chequeId: "" }));
+      return;
+    }
+
+    let active = true;
+    setIsLoadingCheques(true);
+    chequeApi
+      .listAvailableCheques()
+      .then((cheques) => {
+        if (!active) return;
+        setAvailableCheques(cheques);
+        const matched = cheques.find(
+          (item) => Number(item.amount) === Number(paymentData.amount || 0),
+        );
+        const fallback = cheques[0];
+        const selected = matched ?? fallback;
+        setPaymentData((prev) => ({
+          ...prev,
+          chequeId: selected?.id ?? "",
+          amount: selected ? String(Number(selected.amount)) : prev.amount,
+        }));
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) toast.error("Failed to load available cheques.");
+      })
+      .finally(() => {
+        if (active) setIsLoadingCheques(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isPaymentDialogOpen, paymentPartyId, parties, paymentData.method]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -325,6 +378,7 @@ export function PartyManagement() {
 
     try {
       const direction = party.currentBalance > 0 ? "RECEIVE" : "PAY";
+      const method = paymentData.method;
       if (direction === "RECEIVE" && !paymentData.billId) {
         toast.error("Select a bill to receive payment against.");
         return;
@@ -336,18 +390,28 @@ export function PartyManagement() {
       ) {
         return;
       }
+      if (direction === "PAY" && method === "CHEQUE" && !paymentData.chequeId) {
+        toast.error("Select an available cheque.");
+        return;
+      }
       await partyApi.createPayment(party.id, {
         date: paymentData.date,
         amount,
-        method: "KHATA",
+        method,
         direction,
         billId: direction === "RECEIVE" ? paymentData.billId : undefined,
+        chequeId:
+          direction === "PAY" && method === "CHEQUE"
+            ? paymentData.chequeId
+            : undefined,
         description: paymentData.description || undefined,
       });
       toast.success("Payment recorded");
       setPaymentData({
         date: new Date().toISOString().split("T")[0],
         amount: "",
+        method: "KHATA",
+        chequeId: "",
         billId: "",
         description: "",
       });
@@ -363,6 +427,9 @@ export function PartyManagement() {
   const selectedPaymentBill = paymentBills.find(
     (bill) => bill.id === paymentData.billId,
   );
+  const selectedPaymentCheque = availableCheques.find(
+    (cheque) => cheque.id === paymentData.chequeId,
+  );
   const isReceivePayment =
     (parties.find((p) => p.id === paymentPartyId)?.currentBalance ?? 0) > 0;
   const selectedBillRemaining = Number(selectedPaymentBill?.remaining ?? 0);
@@ -372,6 +439,13 @@ export function PartyManagement() {
     !!selectedPaymentBill &&
     Number.isFinite(enteredPaymentAmount) &&
     enteredPaymentAmount > selectedBillRemaining;
+  const chequeAmountMismatch =
+    !isReceivePayment &&
+    paymentData.method === "CHEQUE" &&
+    !!selectedPaymentCheque &&
+    Number.isFinite(enteredPaymentAmount) &&
+    Math.abs(enteredPaymentAmount - Number(selectedPaymentCheque.amount ?? 0)) >
+      0.0001;
 
   const ledgerWithOpening = useMemo(() => {
     if (!viewingPartyId) return [];
@@ -787,6 +861,16 @@ export function PartyManagement() {
                                 variant="outline"
                                 onClick={() => {
                                   setPaymentPartyId(party.id);
+                                  setPaymentData({
+                                    date: new Date()
+                                      .toISOString()
+                                      .split("T")[0],
+                                    amount: "",
+                                    method: "KHATA",
+                                    chequeId: "",
+                                    billId: "",
+                                    description: "",
+                                  });
                                   setIsPaymentDialogOpen(true);
                                 }}
                               >
@@ -829,6 +913,30 @@ export function PartyManagement() {
                 }
                 required
               />
+            </div>
+            <div>
+              <Label>Method</Label>
+              <Select
+                value={paymentData.method}
+                onValueChange={(value) =>
+                  setPaymentData((prev) => ({
+                    ...prev,
+                    method: value as ApiPaymentMethod,
+                    chequeId: value === "CHEQUE" ? prev.chequeId : "",
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Cash</SelectItem>
+                  <SelectItem value="KHATA">Khata</SelectItem>
+                  {!isReceivePayment && (
+                    <SelectItem value="CHEQUE">Cheque</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             {isReceivePayment && (
               <div className="space-y-3">
@@ -905,6 +1013,75 @@ export function PartyManagement() {
                 )}
               </div>
             )}
+            {!isReceivePayment && paymentData.method === "CHEQUE" && (
+              <div className="space-y-3">
+                <div>
+                  <Label>Select Cheque</Label>
+                  <Select
+                    value={paymentData.chequeId}
+                    onValueChange={(value) => {
+                      const cheque = availableCheques.find(
+                        (item) => item.id === value,
+                      );
+                      setPaymentData((prev) => ({
+                        ...prev,
+                        chequeId: value,
+                        amount: cheque
+                          ? String(Number(cheque.amount))
+                          : prev.amount,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          isLoadingCheques
+                            ? "Loading cheques..."
+                            : availableCheques.length === 0
+                              ? "No available cheques"
+                              : "Select cheque"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableCheques.map((cheque) => (
+                        <SelectItem key={cheque.id} value={cheque.id}>
+                          {`${cheque.chequeNumber || "No #"} - ${formatCurrency(Number(cheque.amount))}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {selectedPaymentCheque && (
+                  <div className="rounded border p-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Cheque #</span>
+                      <span>{selectedPaymentCheque.chequeNumber || "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Date</span>
+                      <span>{formatDate(selectedPaymentCheque.date)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Source Party
+                      </span>
+                      <span>
+                        {selectedPaymentCheque.sourceParty?.name || "-"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-medium">
+                      <span className="text-muted-foreground">Amount</span>
+                      <span>
+                        {formatCurrency(
+                          Number(selectedPaymentCheque.amount ?? 0),
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <Label>Amount</Label>
               <Input
@@ -914,12 +1091,18 @@ export function PartyManagement() {
                 onChange={(e) =>
                   setPaymentData({ ...paymentData, amount: e.target.value })
                 }
+                readOnly={!isReceivePayment && paymentData.method === "CHEQUE"}
                 required
               />
               {exceedsBillAmount && (
                 <p className="mt-1 text-xs text-red-600">
                   Amount cannot exceed {formatCurrency(selectedBillRemaining)}{" "}
                   for this bill.
+                </p>
+              )}
+              {chequeAmountMismatch && (
+                <p className="mt-1 text-xs text-red-600">
+                  Amount must match selected cheque value.
                 </p>
               )}
             </div>
@@ -944,7 +1127,16 @@ export function PartyManagement() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={exceedsBillAmount}>
+              <Button
+                type="submit"
+                disabled={
+                  exceedsBillAmount ||
+                  chequeAmountMismatch ||
+                  (!isReceivePayment &&
+                    paymentData.method === "CHEQUE" &&
+                    !paymentData.chequeId)
+                }
+              >
                 Record Payment
               </Button>
             </div>
