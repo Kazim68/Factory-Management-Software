@@ -1,7 +1,11 @@
 import prisma from "../prisma.js";
 import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
 
-const buildBillNumber = () => `BILL-${Date.now()}`;
+const BILL_COUNTER_ID = "default";
+const MAX_BILL_NUMBER = 9999;
+
+const formatBillNumber = (value) => String(value).padStart(4, "0");
+
 const toDbBillType = (type) => {
   const normalized = String(type ?? "CASH").toUpperCase();
   if (normalized === "RECEIVABLE" || normalized === "KHATA") return "CREDIT";
@@ -20,6 +24,81 @@ const computePaymentStatus = (total, totalPaid) => {
   if (remaining === 0) return "PAID";
   if (totalPaid > 0) return "PARTIAL_PAID";
   return "UNPAID";
+};
+
+const computeLineTotal = ({ quantity, price, discount }) => {
+  const grossTotal = Number(quantity ?? 0) * Number(price ?? 0);
+  const discountAmount = Number(discount ?? 0) * Number(quantity ?? 0);
+  return Number((grossTotal - discountAmount).toFixed(2));
+};
+
+const normalizeBillLines = (lines) => {
+  if (!Array.isArray(lines) || lines.length === 0) {
+    const error = new Error("At least one bill line is required.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return lines.map((line, index) => {
+    const quantity = Number(line.quantity ?? 0);
+    const price = Number(line.price ?? 0);
+    const discount = Number(line.discount ?? 0);
+
+    if (!line.articleId) {
+      const error = new Error(`Article is required for line ${index + 1}.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      const error = new Error(`Quantity must be greater than 0 on line ${index + 1}.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      const error = new Error(`Price must be greater than 0 on line ${index + 1}.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!Number.isFinite(discount) || discount < 0 || discount > price) {
+      const error = new Error(
+        `Discount must be between 0 and price on line ${index + 1}.`,
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return {
+      articleId: line.articleId,
+      size: line.size ?? null,
+      quantity,
+      price,
+      discount,
+      total: computeLineTotal({ quantity, price, discount }),
+    };
+  });
+};
+
+const reserveNextBillNumber = async (tx) => {
+  const counter = await tx.billNumberCounter.upsert({
+    where: { id: BILL_COUNTER_ID },
+    update: {},
+    create: { id: BILL_COUNTER_ID, lastNumber: 0 },
+  });
+
+  const nextNumber =
+    Number(counter.lastNumber ?? 0) >= MAX_BILL_NUMBER
+      ? 1
+      : Number(counter.lastNumber ?? 0) + 1;
+
+  await tx.billNumberCounter.update({
+    where: { id: BILL_COUNTER_ID },
+    data: { lastNumber: nextNumber },
+  });
+
+  return formatBillNumber(nextNumber);
 };
 
 const toApiBill = (bill) => {
@@ -101,26 +180,31 @@ export const listBills = async (req, res) => {
 
 export const createBill = async (req, res) => {
   const { date, partyId, type, status, lines } = req.body;
-  const bill = await prisma.bill.create({
-    data: {
-      billNumber: buildBillNumber(),
-      date: new Date(date),
-      partyId,
-      type: toDbBillType(type) ?? "CASH",
-      status: status ?? "DRAFT",
-      total: lines.reduce((sum, line) => sum + Number(line.total), 0),
-      verifiedAt: null,
-      lines: {
-        create: lines.map((line) => ({
-          articleId: line.articleId,
-          size: line.size ?? null,
-          quantity: line.quantity,
-          price: line.price,
-          total: line.total,
-        })),
+  const normalizedLines = normalizeBillLines(lines);
+  const bill = await prisma.$transaction(async (tx) => {
+    const billNumber = await reserveNextBillNumber(tx);
+    return tx.bill.create({
+      data: {
+        billNumber,
+        date: new Date(date),
+        partyId,
+        type: toDbBillType(type) ?? "CASH",
+        status: status ?? "DRAFT",
+        total: normalizedLines.reduce((sum, line) => sum + Number(line.total), 0),
+        verifiedAt: null,
+        lines: {
+          create: normalizedLines.map((line) => ({
+            articleId: line.articleId,
+            size: line.size,
+            quantity: line.quantity,
+            price: line.price,
+            discount: line.discount,
+            total: line.total,
+          })),
+        },
       },
-    },
-    include: { lines: true, payments: true },
+      include: { lines: true, payments: true },
+    });
   });
 
   res.status(201).json(toApiBill(bill));
@@ -141,6 +225,7 @@ export const confirmBill = async (req, res) => {
 
 export const updateBill = async (req, res) => {
   const { date, partyId, type, status, lines } = req.body;
+  const normalizedLines = Array.isArray(lines) ? normalizeBillLines(lines) : null;
   const bill = await prisma.$transaction(async (tx) => {
     const updated = await tx.bill.update({
       where: { id: req.params.billId },
@@ -149,21 +234,22 @@ export const updateBill = async (req, res) => {
         partyId,
         type: toDbBillType(type),
         status,
-        total: lines
-          ? lines.reduce((sum, line) => sum + Number(line.total), 0)
+        total: normalizedLines
+          ? normalizedLines.reduce((sum, line) => sum + Number(line.total), 0)
           : undefined,
       },
     });
 
-    if (Array.isArray(lines)) {
+    if (normalizedLines) {
       await tx.billLine.deleteMany({ where: { billId: updated.id } });
       await tx.billLine.createMany({
-        data: lines.map((line) => ({
+        data: normalizedLines.map((line) => ({
           billId: updated.id,
           articleId: line.articleId,
-          size: line.size ?? null,
+          size: line.size,
           quantity: line.quantity,
           price: line.price,
+          discount: line.discount,
           total: line.total,
         })),
       });

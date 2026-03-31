@@ -96,6 +96,7 @@ export interface ApiBillLine {
   size?: string | null;
   quantity: number | string;
   price: number | string;
+  discount: number | string;
   total: number | string;
   article?: ApiArticle | null;
 }

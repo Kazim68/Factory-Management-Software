@@ -279,7 +279,7 @@ model LaborAdvance {
 
 model Bill {
   id         String     @id @default(uuid())
-  billNumber String     @unique
+  billNumber String
   date       DateTime
   partyId    String?
   type       BillType   @default(CASH)
@@ -304,10 +304,19 @@ model BillLine {
   size      String?
   quantity  Decimal
   price     Decimal
+  discount  Decimal  @default(0)
   total     Decimal
 
   bill    Bill    @relation(fields: [billId], references: [id])
   article Article @relation(fields: [articleId], references: [id])
+}
+
+model BillNumberCounter {
+  id         String   @id
+  lastNumber Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@map("bill_number_counter")
 }
 
 model StockEntry {

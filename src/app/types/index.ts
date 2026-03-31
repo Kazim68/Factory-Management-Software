@@ -114,6 +114,7 @@ export interface BillItem {
   articleName: string;
   quantity: number;
   price: number;
+  discount: number;
   total: number;
 }
 

@@ -217,9 +217,19 @@ CREATE TABLE "BillLine" (
     "size" TEXT,
     "quantity" DECIMAL(65,30) NOT NULL,
     "price" DECIMAL(65,30) NOT NULL,
+    "discount" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "total" DECIMAL(65,30) NOT NULL,
 
     CONSTRAINT "BillLine_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "bill_number_counter" (
+    "id" TEXT NOT NULL,
+    "lastNumber" INTEGER NOT NULL DEFAULT 0,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "bill_number_counter_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -375,9 +385,6 @@ CREATE INDEX "LaborWorkEntry_laborId_startDate_endDate_idx" ON "LaborWorkEntry"(
 
 -- CreateIndex
 CREATE INDEX "LaborAdvance_laborId_date_idx" ON "LaborAdvance"("laborId", "date");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Bill_billNumber_key" ON "Bill"("billNumber");
 
 -- CreateIndex
 CREATE INDEX "Bill_date_idx" ON "Bill"("date");

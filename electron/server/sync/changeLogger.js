@@ -9,7 +9,11 @@ const TRACKED_OPERATIONS = new Set([
   "delete",
   "deleteMany",
 ]);
-const EXCLUDED_MODELS = new Set(["ChangeLog", "SyncState"]);
+const EXCLUDED_MODELS = new Set([
+  "ChangeLog",
+  "SyncState",
+  "BillNumberCounter",
+]);
 
 const serializeRecord = (record) =>
   JSON.parse(

@@ -53,8 +53,26 @@ type BillItemForm = {
   size: string;
   quantity: number;
   price: number;
+  discount: number;
   total: number;
 };
+
+const roundMoney = (value: number) => Number(value.toFixed(2));
+
+const calculateLineDiscount = (
+  quantity: number,
+  price: number,
+  discount: number,
+) => roundMoney(discount * quantity);
+
+const calculateLineTotal = (
+  quantity: number,
+  price: number,
+  discount: number,
+) =>
+  roundMoney(
+    quantity * price - calculateLineDiscount(quantity, price, discount),
+  );
 
 const createEmptyBillItem = (): BillItemForm => ({
   articleId: "",
@@ -62,6 +80,7 @@ const createEmptyBillItem = (): BillItemForm => ({
   size: "",
   quantity: 0,
   price: 0,
+  discount: 0,
   total: 0,
 });
 
@@ -145,8 +164,12 @@ export function BillManagement() {
       }
     }
 
-    if (field === "quantity" || field === "price") {
-      newItems[index].total = newItems[index].quantity * newItems[index].price;
+    if (field === "quantity" || field === "price" || field === "discount") {
+      newItems[index].total = calculateLineTotal(
+        newItems[index].quantity,
+        newItems[index].price,
+        newItems[index].discount,
+      );
     }
 
     setItems(newItems);
@@ -157,9 +180,7 @@ export function BillManagement() {
       date: getCurrentDate(),
       partyId: "",
     });
-    setItems([
-      { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 },
-    ]);
+    setItems(ensureMinimumRows([]));
     setEditingBillId(null);
   };
 
@@ -173,7 +194,12 @@ export function BillManagement() {
     }
 
     const validItems = items.filter(
-      (item) => item.articleId && item.quantity > 0 && item.price > 0,
+      (item) =>
+        item.articleId &&
+        item.quantity > 0 &&
+        item.price > 0 &&
+        item.discount >= 0 &&
+        item.discount <= item.price,
     );
     if (validItems.length === 0) {
       toast.error("Please add at least one valid item");
@@ -191,7 +217,8 @@ export function BillManagement() {
           size: item.size.trim() || null,
           quantity: item.quantity,
           price: item.price,
-          total: item.total,
+          discount: item.discount,
+          total: calculateLineTotal(item.quantity, item.price, item.discount),
         })),
       };
 
@@ -234,6 +261,7 @@ export function BillManagement() {
           size: line.size || "",
           quantity: Number(line.quantity),
           price: Number(line.price),
+          discount: Number(line.discount ?? 0),
           total: Number(line.total),
         }))
       )
@@ -385,7 +413,21 @@ export function BillManagement() {
     printWindow.print();
   };
 
-  const grandTotal = items.reduce((sum, item) => sum + item.total, 0);
+  const grossTotal = items.reduce(
+    (sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0),
+    0,
+  );
+  const discountTotal = items.reduce(
+    (sum, item) =>
+      sum +
+      calculateLineDiscount(
+        Number(item.quantity || 0),
+        Number(item.price || 0),
+        Number(item.discount || 0),
+      ),
+    0,
+  );
+  const grandTotal = roundMoney(grossTotal - discountTotal);
 
   const getStatusLabel = (bill: ApiBill) => {
     if (bill.paymentStatus === "PAID") return "Paid";
@@ -418,7 +460,7 @@ export function BillManagement() {
                   Create New Bill
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+              <DialogContent className="w-[99vw] max-w-[99vw] sm:max-w-[99vw] max-h-[92vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
                     {editingBillId ? "Edit" : "Create New"} Bill
@@ -473,6 +515,7 @@ export function BillManagement() {
                           <TableHead>Size</TableHead>
                           <TableHead>Quantity</TableHead>
                           <TableHead>Price</TableHead>
+                          <TableHead>Discount / Pair</TableHead>
                           <TableHead>Total</TableHead>
                           <TableHead></TableHead>
                         </TableRow>
@@ -539,6 +582,21 @@ export function BillManagement() {
                                 }
                               />
                             </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={item.discount || ""}
+                                onChange={(e) =>
+                                  updateItem(
+                                    index,
+                                    "discount",
+                                    parseFloat(e.target.value) || 0,
+                                  )
+                                }
+                              />
+                            </TableCell>
                             <TableCell>{formatCurrency(item.total)}</TableCell>
                             <TableCell>
                               {items.length > 3 && (
@@ -556,13 +614,33 @@ export function BillManagement() {
                         ))}
                       </TableBody>
                     </Table>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Discount is deducted directly from the pair price.
+                      Example: <span className="font-medium">price 1200, discount 100, net 1100</span>
+                    </p>
                   </div>
 
-                  <div className="flex justify-between items-center p-4 bg-muted rounded">
-                    <span className="text-lg">Grand Total:</span>
-                    <span className="text-2xl">
-                      {formatCurrency(grandTotal)}
-                    </span>
+                  <div className="grid gap-3 rounded bg-muted p-4 md:grid-cols-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-muted-foreground">
+                        Gross Total
+                      </span>
+                      <span>{formatCurrency(grossTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-muted-foreground">
+                        Discount
+                      </span>
+                      <span>{formatCurrency(discountTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-muted-foreground">
+                        Grand Total
+                      </span>
+                      <span className="text-xl font-semibold">
+                        {formatCurrency(grandTotal)}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex justify-end gap-2">
@@ -586,7 +664,7 @@ export function BillManagement() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Bill No.</TableHead>
+                <TableHead>Bill Number</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Party</TableHead>
                 <TableHead>Grand Total</TableHead>
@@ -803,6 +881,7 @@ export function BillManagement() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
+                  <TableHead>Reference</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Amount</TableHead>
@@ -812,7 +891,7 @@ export function BillManagement() {
                 {ledgerEntries.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={4}
+                      colSpan={5}
                       className="text-center text-muted-foreground"
                     >
                       No bill ledger records
@@ -822,6 +901,7 @@ export function BillManagement() {
                   ledgerEntries.map((entry) => (
                     <TableRow key={entry.id}>
                       <TableCell>{formatDate(entry.date)}</TableCell>
+                      <TableCell>{entry.reference || "-"}</TableCell>
                       <TableCell title={entry.description || "-"}>
                         {entry.description
                           ? entry.description.slice(0, 12)

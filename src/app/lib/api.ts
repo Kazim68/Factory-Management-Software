@@ -732,6 +732,7 @@ export const billApi = {
       size?: string | null;
       quantity: number;
       price: number;
+      discount?: number;
       total: number;
     }>;
   }): Promise<ApiBill> =>
@@ -750,6 +751,7 @@ export const billApi = {
         size?: string | null;
         quantity: number;
         price: number;
+        discount?: number;
         total: number;
       }>;
     },
