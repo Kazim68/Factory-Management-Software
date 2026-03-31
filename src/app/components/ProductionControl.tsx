@@ -68,25 +68,6 @@ const getRemainingDepartments = (
   return DEPARTMENTS.slice(currentIndex + 1);
 };
 
-const getOrderProgressDozen = (order: ApiProductionOrder) => {
-  if (!MERGED_FINAL_DEPARTMENTS.includes(order.department)) {
-    return Number(order.completedDozen);
-  }
-  return (
-    Number(order.completedDozen) +
-    Number(order.bMallDozen ?? 0) +
-    Number(order.cMallDozen ?? 0)
-  );
-};
-
-const getRemainingDepartments = (
-  department: ApiLaborDepartment,
-): ApiLaborDepartment[] => {
-  const currentIndex = DEPARTMENTS.indexOf(department);
-  if (currentIndex === -1) return [];
-  return DEPARTMENTS.slice(currentIndex + 1);
-};
-
 const DEFAULT_DEPARTMENT_TITLE: Record<ApiLaborDepartment, string> = {
   PRESSMAN: "Pressman",
   UPPERMAN: "Upperman",
