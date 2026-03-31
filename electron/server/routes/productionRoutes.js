@@ -2,11 +2,15 @@ import { Router } from "express";
 import asyncHandler from "../middleware/asyncHandler.js";
 import {
   assignProductionOrderLabor,
+  createManualStockEntry,
   createProductionOrder,
+  deleteManualStockEntry,
   getStockSummary,
   listDepartmentLabors,
+  listManualStockEntries,
   listProductionOrders,
   listStockByArticle,
+  updateManualStockEntry,
   updateProductionOrder,
   updateProductionOrderCompletion,
 } from "../controllers/productionController.js";
@@ -22,5 +26,9 @@ router.patch("/orders/:orderId/completion", asyncHandler(updateProductionOrderCo
 router.get("/labors", asyncHandler(listDepartmentLabors));
 router.get("/stock/summary", asyncHandler(getStockSummary));
 router.get("/stock/articles", asyncHandler(listStockByArticle));
+router.get("/stock/manual", asyncHandler(listManualStockEntries));
+router.post("/stock/manual", asyncHandler(createManualStockEntry));
+router.patch("/stock/manual/:entryId", asyncHandler(updateManualStockEntry));
+router.delete("/stock/manual/:entryId", asyncHandler(deleteManualStockEntry));
 
 export default router;

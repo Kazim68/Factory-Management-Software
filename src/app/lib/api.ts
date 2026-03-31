@@ -27,6 +27,7 @@ import type {
   ApiLaborDepartment,
   ApiStockSummary,
   ApiStockArticleRow,
+  ApiStockEntry,
   ApiStockMode,
   ApiUnit,
   ApiLaborSummaryReport,
@@ -94,6 +95,7 @@ const ENTITY_LABELS: Record<string, string> = {
   "purchases/rexine": "rexine purchase",
   "purchases/material": "material purchase",
   "production/orders": "production order",
+  "production/stock/manual": "manual stock entry",
 };
 
 const toTitleCase = (value: string): string =>
@@ -703,8 +705,19 @@ export const laborApi = {
       method: "DELETE",
       auditMeta,
     }),
-  getLedger: (laborId: string): Promise<ApiLaborLedger> =>
-    get(`/labor/${laborId}/ledger`),
+  getLedger: (
+    laborId: string,
+    params?: {
+      start?: string;
+      end?: string;
+    },
+  ): Promise<ApiLaborLedger> =>
+    get(
+      withQuery(`/labor/${laborId}/ledger`, {
+        start: params?.start,
+        end: params?.end,
+      }),
+    ),
 };
 
 export const billApi = {
@@ -716,6 +729,7 @@ export const billApi = {
     status?: ApiBillStatus;
     lines: Array<{
       articleId: string;
+      size?: string | null;
       quantity: number;
       price: number;
       total: number;
@@ -733,6 +747,7 @@ export const billApi = {
       status?: ApiBillStatus;
       lines?: Array<{
         articleId: string;
+        size?: string | null;
         quantity: number;
         price: number;
         total: number;
@@ -1014,6 +1029,34 @@ export const productionApi = {
     const suffix = query.toString();
     return get(`/production/stock/articles${suffix ? `?${suffix}` : ""}`);
   },
+  listManualStockEntries: (): Promise<ApiStockEntry[]> =>
+    get("/production/stock/manual"),
+  createManualStockEntry: (data: {
+    articleId: string;
+    mode: ApiStockMode;
+    quantityDozen: number;
+    note?: string;
+  }): Promise<ApiStockEntry> =>
+    request({ path: "/production/stock/manual", method: "POST", body: data }),
+  updateManualStockEntry: (
+    entryId: string,
+    data: {
+      articleId?: string;
+      mode?: ApiStockMode;
+      quantityDozen?: number;
+      note?: string | null;
+    },
+  ): Promise<ApiStockEntry> =>
+    request({
+      path: `/production/stock/manual/${entryId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteManualStockEntry: (entryId: string): Promise<void> =>
+    request({
+      path: `/production/stock/manual/${entryId}`,
+      method: "DELETE",
+    }),
 };
 
 export const reportsApi = {

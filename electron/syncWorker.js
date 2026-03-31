@@ -18,6 +18,15 @@ const warn = (...args) => console.warn("[sync]", nowStamp(), ...args);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const isSchemaMismatchError = (error) => {
+  const message = String(error?.message ?? error ?? "");
+  return (
+    message.includes("does not exist in the current database") ||
+    message.includes("no such table:") ||
+    message.includes("column") && message.includes("does not exist")
+  );
+};
+
 const withRetry = async (fn, label) => {
   let attempt = 0;
   let lastError;
@@ -26,6 +35,9 @@ const withRetry = async (fn, label) => {
     try {
       return await fn();
     } catch (error) {
+      if (isSchemaMismatchError(error)) {
+        throw error;
+      }
       lastError = error;
       warn(`${label}:retry`, { attempt, error: error?.message ?? error });
       await sleep(250 * attempt);
@@ -456,6 +468,7 @@ const runSyncCycle = async () => {
 export const startSyncWorker = () => {
   let stopped = false;
   let backoffMs = 0;
+  let schemaMismatchLogged = false;
 
   const scheduleNext = () => {
     if (stopped) return;
@@ -473,6 +486,18 @@ export const startSyncWorker = () => {
       backoffMs = 0;
       log("cycle:ok");
     } catch (error) {
+      if (isSchemaMismatchError(error)) {
+        if (!schemaMismatchLogged) {
+          warn("cycle:paused", {
+            reason:
+              "Remote sync schema is behind the local schema. Apply the latest database schema remotely, then restart the app to re-enable sync.",
+            error: error?.message ?? error,
+          });
+          schemaMismatchLogged = true;
+        }
+        stopped = true;
+        return;
+      }
       warn("cycle:error", { error: error?.message ?? error });
       backoffMs = Math.min(
         backoffMs ? backoffMs * 2 : BASE_INTERVAL_MS,

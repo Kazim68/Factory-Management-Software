@@ -3,21 +3,42 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { formatCurrency, getCurrentDate } from "../lib/utils";
+import { formatCurrency } from "../lib/utils";
 import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api";
 import { DollarSign, Users, TrendingUp, TrendingDown, Package } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 type DateFilter = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
-const toStartOfDay = (value: string) => {
-  const date = new Date(value);
+const parseDateValue = (value: string | Date) => {
+  if (value instanceof Date) {
+    return new Date(value);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  return new Date(value);
+};
+
+const toLocalDateKey = (value: string | Date) => {
+  const date = parseDateValue(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toStartOfDay = (value: string | Date) => {
+  const date = parseDateValue(value);
   date.setHours(0, 0, 0, 0);
   return date;
 };
 
-const toEndOfDay = (value: string) => {
-  const date = new Date(value);
+const toEndOfDay = (value: string | Date) => {
+  const date = parseDateValue(value);
   date.setHours(23, 59, 59, 999);
   return date;
 };
@@ -28,7 +49,10 @@ const subtractDays = (value: Date, days: number) => {
   return date;
 };
 
-const toInputDate = (value: Date) => value.toISOString().slice(0, 10);
+const toMonthKey = (value: Date) =>
+  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+
+const toYearKey = (value: Date) => value.getFullYear().toString();
 
 export function Dashboard() {
   const [rawData, setRawData] = useState<{
@@ -42,8 +66,8 @@ export function Dashboard() {
   } | null>(null);
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("monthly");
-  const [customStart, setCustomStart] = useState(() => toInputDate(subtractDays(new Date(), 29)));
-  const [customEnd, setCustomEnd] = useState(() => getCurrentDate());
+  const [customStart, setCustomStart] = useState(() => toLocalDateKey(subtractDays(new Date(), 29)));
+  const [customEnd, setCustomEnd] = useState(() => toLocalDateKey(new Date()));
 
   useEffect(() => {
     const loadStats = async () => {
@@ -78,26 +102,38 @@ export function Dashboard() {
 
   const selectedRange = useMemo(() => {
     const now = new Date();
-    const end = toEndOfDay(toInputDate(now));
-
-    if (dateFilter === "weekly") {
-      return { start: toStartOfDay(toInputDate(subtractDays(now, 6))), end };
-    }
+    const todayKey = toLocalDateKey(now);
+    const todayEnd = toEndOfDay(todayKey);
 
     if (dateFilter === "daily") {
-      return { start: toStartOfDay(toInputDate(now)), end };
+      return { start: toStartOfDay(todayKey), end: todayEnd };
+    }
+
+    if (dateFilter === "weekly") {
+      return {
+        start: toStartOfDay(toLocalDateKey(subtractDays(now, 6))),
+        end: todayEnd,
+      };
     }
 
     if (dateFilter === "monthly") {
-      return { start: toStartOfDay(toInputDate(subtractDays(now, 29))), end };
+      const monthsToShow = 12;
+      const firstMonth = new Date(
+        now.getFullYear(),
+        now.getMonth() - (monthsToShow - 1),
+        1,
+      );
+      return { start: toStartOfDay(firstMonth), end: todayEnd };
     }
 
     if (dateFilter === "yearly") {
-      return { start: toStartOfDay(toInputDate(subtractDays(now, 364))), end };
+      const yearsToShow = 5;
+      const firstYear = new Date(now.getFullYear() - (yearsToShow - 1), 0, 1);
+      return { start: toStartOfDay(firstYear), end: todayEnd };
     }
 
-    const safeStart = customStart || getCurrentDate();
-    const safeEnd = customEnd || getCurrentDate();
+    const safeStart = customStart || toLocalDateKey(new Date());
+    const safeEnd = customEnd || toLocalDateKey(new Date());
     const start = toStartOfDay(safeStart <= safeEnd ? safeStart : safeEnd);
     const customRangeEnd = toEndOfDay(safeEnd >= safeStart ? safeEnd : safeStart);
     return { start, end: customRangeEnd };
@@ -123,7 +159,7 @@ export function Dashboard() {
     }
 
     const inRange = (value: string | Date) => {
-      const date = new Date(value);
+      const date = parseDateValue(value);
       return date >= selectedRange.start && date <= selectedRange.end;
     };
 
@@ -178,35 +214,130 @@ export function Dashboard() {
 
     const laborPendingPayable = Math.max(laborCost - laborPaid, 0);
 
-    const daySeries = new Map<string, { revenue: number; expenses: number }>();
-    const cursor = new Date(selectedRange.start);
-    while (cursor <= selectedRange.end) {
-      const key = toInputDate(cursor);
-      daySeries.set(key, { revenue: 0, expenses: 0 });
-      cursor.setDate(cursor.getDate() + 1);
+    type TrendBucket = { label: string; revenue: number; expenses: number };
+    const trendBuckets = new Map<string, TrendBucket>();
+
+    const buildDailyBuckets = () => {
+      const cursor = new Date(selectedRange.start);
+      while (cursor <= selectedRange.end) {
+        const key = toLocalDateKey(cursor);
+        const label =
+          dateFilter === "weekly"
+            ? cursor.toLocaleDateString([], { weekday: "short" })
+            : cursor.toLocaleDateString([], { month: "short", day: "numeric" });
+        trendBuckets.set(key, { label, revenue: 0, expenses: 0 });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    };
+
+    const buildMonthlyBuckets = () => {
+      const cursor = new Date(
+        selectedRange.start.getFullYear(),
+        selectedRange.start.getMonth(),
+        1,
+      );
+      while (cursor <= selectedRange.end) {
+        const key = toMonthKey(cursor);
+        trendBuckets.set(key, {
+          label: cursor.toLocaleDateString([], { month: "short", year: "numeric" }),
+          revenue: 0,
+          expenses: 0,
+        });
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+    };
+
+    const buildYearlyBuckets = () => {
+      const startYear = selectedRange.start.getFullYear();
+      const endYear = selectedRange.end.getFullYear();
+      for (let year = startYear; year <= endYear; year += 1) {
+        const key = toYearKey(new Date(year, 0, 1));
+        trendBuckets.set(key, { label: key, revenue: 0, expenses: 0 });
+      }
+    };
+
+    if (dateFilter === "monthly") {
+      buildMonthlyBuckets();
+    } else if (dateFilter === "yearly") {
+      buildYearlyBuckets();
+    } else {
+      buildDailyBuckets();
     }
 
-    bills.forEach((bill) => {
-      const key = toInputDate(new Date(bill.date));
-      const bucket = daySeries.get(key);
-      if (!bucket) return;
-      bucket.revenue += Number(bill.total ?? 0);
-    });
-
-    expenses.forEach((entry) => {
-      const key = toInputDate(new Date(entry.date));
-      const bucket = daySeries.get(key);
-      if (!bucket) return;
-      const amount = Number(entry.amount ?? 0);
-      if (amount > 0) {
-        bucket.expenses += amount;
+    const addToBucket = (
+      value: Date,
+      amount: number,
+      target: "revenue" | "expenses",
+    ) => {
+      const key =
+        dateFilter === "monthly"
+          ? toMonthKey(value)
+          : dateFilter === "yearly"
+          ? toYearKey(value)
+          : toLocalDateKey(value);
+      const bucket = trendBuckets.get(key);
+      if (!bucket) {
+        return;
       }
+      bucket[target] += amount;
+    };
+
+    bills.forEach((bill) => {
+      addToBucket(parseDateValue(bill.date), Number(bill.total ?? 0), "revenue");
     });
 
-    const profitLossTrend = Array.from(daySeries.entries()).map(([key, row]) => ({
-      label: new Date(key).toLocaleDateString([], { month: "short", day: "numeric" }),
-      profitLoss: row.revenue - row.expenses,
-    }));
+    expenses
+      .filter((entry) => entry.module === "MISC")
+      .forEach((entry) => {
+        const amount = Number(entry.amount ?? 0);
+        if (amount <= 0) {
+          return;
+        }
+        addToBucket(parseDateValue(entry.date), amount, "expenses");
+      });
+
+    expenses
+      .filter((entry) => entry.module === "LABOR")
+      .forEach((entry) => {
+        const amount = Math.max(Number(entry.amount ?? 0), 0);
+        if (amount === 0) {
+          return;
+        }
+        addToBucket(parseDateValue(entry.date), amount, "expenses");
+      });
+
+    chemicals.forEach((item) => {
+      const amount = Number(item.totalAmount ?? 0);
+      if (amount === 0) {
+        return;
+      }
+      addToBucket(parseDateValue(item.date), amount, "expenses");
+    });
+
+    rexine.forEach((item) => {
+      const amount = Number(item.totalAmount ?? 0);
+      if (amount === 0) {
+        return;
+      }
+      addToBucket(parseDateValue(item.date), amount, "expenses");
+    });
+
+    materials.forEach((item) => {
+      const amount = Number(item.totalAmount ?? 0);
+      if (amount === 0) {
+        return;
+      }
+      addToBucket(parseDateValue(item.date), amount, "expenses");
+    });
+
+    let runningProfitLoss = 0;
+    const profitLossTrend = Array.from(trendBuckets.values()).map((bucket) => {
+      runningProfitLoss += bucket.revenue - bucket.expenses;
+      return {
+        label: bucket.label,
+        profitLoss: runningProfitLoss,
+      };
+    });
 
     return {
       totalParties: rawData.parties.length,
@@ -295,9 +426,20 @@ export function Dashboard() {
               <LineChart data={stats.profitLossTrend}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
-                <YAxis />
-                <Tooltip formatter={(value: number) => formatCurrency(Number(value))} />
-                <Line type="monotone" dataKey="profitLoss" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
+                <YAxis domain={["dataMin", "dataMax"]} />
+                <Tooltip
+                  formatter={(value: number) => formatCurrency(Number(value))}
+                  labelFormatter={(label: string) => label}
+                />
+                <Line
+                  type="linear"
+                  dataKey="profitLoss"
+                  name="Profit / Loss"
+                  stroke="#0ea5e9"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>

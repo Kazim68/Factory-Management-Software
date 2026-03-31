@@ -31,6 +31,9 @@ CREATE TYPE "ProductionStage" AS ENUM ('STAGE_PRESSMAN', 'STAGE_UPPERMAN', 'STAG
 -- CreateEnum
 CREATE TYPE "ProductionOrderSource" AS ENUM ('MANUAL', 'PRESSMAN_FLOW', 'UPPER_PRINT_PARALLEL', 'STAGE_FLOW');
 
+-- CreateEnum
+CREATE TYPE "StockEntryMode" AS ENUM ('IN_STOCK', 'PACKED');
+
 -- CreateTable
 CREATE TABLE "Unit" (
     "id" TEXT NOT NULL,
@@ -61,6 +64,17 @@ CREATE TABLE "ExpenseCategory" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "ExpenseCategory_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "LaborDepartmentName" (
+    "id" TEXT NOT NULL,
+    "department" "LaborDepartment" NOT NULL,
+    "name" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "LaborDepartmentName_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -200,6 +214,7 @@ CREATE TABLE "BillLine" (
     "id" TEXT NOT NULL,
     "billId" TEXT NOT NULL,
     "articleId" TEXT NOT NULL,
+    "size" TEXT,
     "quantity" DECIMAL(65,30) NOT NULL,
     "price" DECIMAL(65,30) NOT NULL,
     "total" DECIMAL(65,30) NOT NULL,
@@ -290,6 +305,19 @@ CREATE TABLE "ProductionOrder" (
 );
 
 -- CreateTable
+CREATE TABLE "StockEntry" (
+    "id" TEXT NOT NULL,
+    "articleId" TEXT NOT NULL,
+    "mode" "StockEntryMode" NOT NULL DEFAULT 'IN_STOCK',
+    "quantityDozen" DECIMAL(65,30) NOT NULL,
+    "note" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "StockEntry_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "change_log" (
     "id" TEXT NOT NULL,
     "entity" TEXT NOT NULL,
@@ -320,6 +348,9 @@ CREATE UNIQUE INDEX "Article_name_key" ON "Article"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ExpenseCategory_name_key" ON "ExpenseCategory"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "LaborDepartmentName_department_key" ON "LaborDepartmentName"("department");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "PaymentCalculationType_name_key" ON "PaymentCalculationType"("name");
@@ -368,6 +399,9 @@ CREATE INDEX "ProductionOrder_department_isClosed_updatedAt_idx" ON "ProductionO
 
 -- CreateIndex
 CREATE INDEX "ProductionOrder_articleId_department_idx" ON "ProductionOrder"("articleId", "department");
+
+-- CreateIndex
+CREATE INDEX "StockEntry_mode_articleId_idx" ON "StockEntry"("mode", "articleId");
 
 -- CreateIndex
 CREATE INDEX "change_log_synced_created_at_idx" ON "change_log"("synced", "created_at");
@@ -476,4 +510,7 @@ ALTER TABLE "ProductionOrder" ADD CONSTRAINT "ProductionOrder_articleId_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "ProductionOrder" ADD CONSTRAINT "ProductionOrder_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StockEntry" ADD CONSTRAINT "StockEntry_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 

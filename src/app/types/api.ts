@@ -93,6 +93,7 @@ export interface ApiBillLine {
   id: string;
   billId: string;
   articleId: string;
+  size?: string | null;
   quantity: number | string;
   price: number | string;
   total: number | string;
@@ -335,6 +336,17 @@ export interface ApiProductionOrder {
 }
 
 export type ApiStockMode = "IN_STOCK" | "PACKED";
+
+export interface ApiStockEntry {
+  id: string;
+  articleId: string;
+  mode: ApiStockMode;
+  quantityDozen: number;
+  note?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  article?: ApiArticle | null;
+}
 
 export interface ApiStockSummary {
   activeOrders: number;

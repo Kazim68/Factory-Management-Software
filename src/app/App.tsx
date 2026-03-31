@@ -75,25 +75,25 @@ const navigation: NavItem[] = [
     name: "Dashboard",
     page: "dashboard",
     icon: LayoutDashboard,
-    roles: ["admin", "munshi"],
+    roles: ["admin", "super_admin", "sub_admin"],
   },
   {
     name: "Roznamcha",
     page: "roznamcha",
     icon: BookOpen,
-    roles: ["admin", "munshi"],
+    roles: ["admin", "super_admin", "sub_admin"],
   },
   {
     name: "Stock Control",
     page: "stock_control",
     icon: Package,
-    roles: ["admin", "munshi"],
+    roles: ["admin", "super_admin", "sub_admin"],
   },
   {
     name: "Production Control",
     page: "production_control",
     icon: Factory,
-    roles: ["admin", "munshi"],
+    roles: ["admin", "super_admin", "sub_admin"],
   },
   { name: "Bills", page: "bills", icon: FileText, roles: ["admin"] },
   { name: "Cheques", page: "cheques", icon: Landmark, roles: ["admin"] },
@@ -106,10 +106,10 @@ const navigation: NavItem[] = [
     name: "Configuration",
     page: "configuration",
     icon: Settings,
-    roles: ["admin"],
+    roles: ["admin", "super_admin"],
   },
-  { name: "Users", page: "users", icon: ShieldCheck, roles: ["admin"] },
-  { name: "Audit Logs", page: "audit_logs", icon: History, roles: ["admin"] },
+  { name: "Users", page: "users", icon: ShieldCheck, roles: ["admin", "super_admin"] },
+  { name: "Audit Logs", page: "audit_logs", icon: History, roles: ["admin", "super_admin"] },
 ];
 
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
@@ -214,7 +214,7 @@ export default function App() {
       case "labor":
         return <LaborManagement />;
       case "stock_control":
-        return <StockControl />;
+        return <StockControl currentUserRole={currentUser.role} />;
       case "production_control":
         return <ProductionControl />;
       case "bills":
@@ -260,7 +260,7 @@ export default function App() {
         <div className="p-6">
           <h1 className="text-xl mb-2">Factory Management</h1>
           <p className="text-xs text-muted-foreground mb-6">
-            Role: {currentUser.role}
+            Role: {auth.formatRoleLabel(currentUser.role)}
           </p>
           <nav className="space-y-2">
             {allowedNavigation.map((item) => {

@@ -113,6 +113,7 @@ export const createBill = async (req, res) => {
       lines: {
         create: lines.map((line) => ({
           articleId: line.articleId,
+          size: line.size ?? null,
           quantity: line.quantity,
           price: line.price,
           total: line.total,
@@ -160,6 +161,7 @@ export const updateBill = async (req, res) => {
         data: lines.map((line) => ({
           billId: updated.id,
           articleId: line.articleId,
+          size: line.size ?? null,
           quantity: line.quantity,
           price: line.price,
           total: line.total,

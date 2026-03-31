@@ -32,7 +32,7 @@ const initialForm = {
   name: '',
   username: '',
   password: '',
-  role: 'munshi' as UserRole,
+  role: 'sub_admin' as UserRole,
 };
 
 export function UserManagement({ currentUserId }: UserManagementProps) {
@@ -197,7 +197,8 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="munshi">Munshi</SelectItem>
+                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      <SelectItem value="sub_admin">Sub Admin</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -234,8 +235,10 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                     </TableCell>
                     <TableCell>{user.username}</TableCell>
                     <TableCell>
-                      <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                        {user.role}
+                      <Badge
+                        variant={user.role === 'sub_admin' ? 'secondary' : 'default'}
+                      >
+                        {auth.formatRoleLabel(user.role)}
                       </Badge>
                     </TableCell>
                     <TableCell className="space-x-2 text-right">

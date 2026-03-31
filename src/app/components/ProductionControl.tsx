@@ -30,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { configApi, productionApi } from "../lib/api";
 import type {
   ApiArticle,
+  ApiLaborCategory,
   ApiLaborDepartment,
   ApiProductionOrder,
 } from "../types/api";
@@ -67,7 +68,26 @@ const getRemainingDepartments = (
   return DEPARTMENTS.slice(currentIndex + 1);
 };
 
-const DEPARTMENT_TITLE: Record<ApiLaborDepartment, string> = {
+const getOrderProgressDozen = (order: ApiProductionOrder) => {
+  if (!MERGED_FINAL_DEPARTMENTS.includes(order.department)) {
+    return Number(order.completedDozen);
+  }
+  return (
+    Number(order.completedDozen) +
+    Number(order.bMallDozen ?? 0) +
+    Number(order.cMallDozen ?? 0)
+  );
+};
+
+const getRemainingDepartments = (
+  department: ApiLaborDepartment,
+): ApiLaborDepartment[] => {
+  const currentIndex = DEPARTMENTS.indexOf(department);
+  if (currentIndex === -1) return [];
+  return DEPARTMENTS.slice(currentIndex + 1);
+};
+
+const DEFAULT_DEPARTMENT_TITLE: Record<ApiLaborDepartment, string> = {
   PRESSMAN: "Pressman",
   UPPERMAN: "Upperman",
   PRINTING: "Printing",
@@ -85,6 +105,7 @@ const statusLabel = (status: ApiProductionOrder["status"]) => {
 export function ProductionControl() {
   const [orders, setOrders] = useState<ApiProductionOrder[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
+  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>([]);
   const [departmentLabors, setDepartmentLabors] = useState<
     Record<ApiLaborDepartment, Array<{ id: string; name: string }>>
   >({
@@ -101,13 +122,15 @@ export function ProductionControl() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [orderData, articleData, laborData] = await Promise.all([
+      const [orderData, articleData, laborData, laborCategoryData] = await Promise.all([
         productionApi.listOrders(),
         configApi.listArticles(),
         productionApi.listDepartmentLabors(),
+        configApi.listLaborCategories(),
       ]);
       setOrders(orderData);
       setArticles(articleData);
+      setLaborCategories(laborCategoryData);
 
       const grouped: Record<
         ApiLaborDepartment,
@@ -158,6 +181,19 @@ export function ProductionControl() {
     [orders],
   );
 
+  const departmentTitle = useMemo(
+    () =>
+      laborCategories.reduce(
+        (acc, category) => {
+          acc[category.id as ApiLaborDepartment] =
+            category.name || DEFAULT_DEPARTMENT_TITLE[category.id as ApiLaborDepartment];
+          return acc;
+        },
+        { ...DEFAULT_DEPARTMENT_TITLE },
+      ),
+    [laborCategories],
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -178,7 +214,7 @@ export function ProductionControl() {
             <TabsList className="w-full justify-start overflow-x-auto">
               {DEPARTMENTS.map((department) => (
                 <TabsTrigger key={department} value={department}>
-                  {DEPARTMENT_TITLE[department]}
+                  {departmentTitle[department]}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -191,6 +227,7 @@ export function ProductionControl() {
                   articles={articles}
                   departmentLabors={departmentLabors[department] ?? []}
                   packingLabors={departmentLabors.PACKING ?? []}
+                  departmentLabel={departmentTitle[department]}
                   isLoading={isLoading}
                   onRefresh={loadData}
                 />
@@ -208,6 +245,7 @@ function DepartmentSection({
   rows,
   articles,
   departmentLabors,
+  departmentLabel,
   packingLabors,
   isLoading,
   onRefresh,
@@ -216,6 +254,7 @@ function DepartmentSection({
   rows: ApiProductionOrder[];
   articles: ApiArticle[];
   departmentLabors: Array<{ id: string; name: string }>;
+  departmentLabel: string;
   packingLabors: Array<{ id: string; name: string }>;
   isLoading: boolean;
   onRefresh: () => Promise<void>;
@@ -548,7 +587,7 @@ function DepartmentSection({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3>{DEPARTMENT_TITLE[department]} Orders</h3>
+        <h3>{departmentLabel} Orders</h3>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm">Add Order</Button>
@@ -556,7 +595,7 @@ function DepartmentSection({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>
-                Add {DEPARTMENT_TITLE[department]} Order
+                Add {departmentLabel} Order
               </DialogTitle>
             </DialogHeader>
             <form onSubmit={submit} className="space-y-4">

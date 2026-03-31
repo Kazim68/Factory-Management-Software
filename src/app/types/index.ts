@@ -182,7 +182,7 @@ export interface Payment {
   createdAt: string;
 }
 
-export type UserRole = 'admin' | 'munshi';
+export type UserRole = 'admin' | 'super_admin' | 'sub_admin';
 
 export interface AppUser {
   id: string;

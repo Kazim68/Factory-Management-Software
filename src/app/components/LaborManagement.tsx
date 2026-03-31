@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -26,7 +26,7 @@ import {
 } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Plus, Eye, Wallet, Banknote, X } from "lucide-react";
+import { ArrowLeft, Banknote, Eye, Plus, Wallet, X } from "lucide-react";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
 import { configApi, expenseApi, laborApi, reportsApi } from "../lib/api";
 import {
@@ -57,6 +57,35 @@ type UiAdvance = ApiLaborAdvance & {
   laborName: string;
 };
 
+type LedgerTransactionRow = {
+  date: string;
+  type: "Work" | "Kharcha" | "Paid Cash";
+  description: string;
+  quantity: number | null;
+  rate: number | null;
+  earned: number;
+  advance: number;
+  paidCash: number;
+  balance: number;
+};
+
+const toDateKey = (value: string) => value.slice(0, 10);
+
+const isWithinDateRange = (
+  value: string,
+  start?: string,
+  end?: string,
+) => {
+  const dateKey = toDateKey(value);
+  if (start && dateKey < start) {
+    return false;
+  }
+  if (end && dateKey > end) {
+    return false;
+  }
+  return true;
+};
+
 export function LaborManagement() {
   const [profiles, setProfiles] = useState<ApiLaborProfile[]>([]);
   const [allProfiles, setAllProfiles] = useState<ApiLaborProfile[]>([]);
@@ -76,19 +105,26 @@ export function LaborManagement() {
     ApiExpenseEntry[]
   >([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingLedgerView, setIsLoadingLedgerView] = useState(false);
 
   const [laborDialog, setLaborDialog] = useState(false);
   const [kharchaDialog, setKharchaDialog] = useState(false);
-  const [ledgerDialog, setLedgerDialog] = useState(false);
   const [payDialog, setPayDialog] = useState(false);
 
   const [viewingLaborId, setViewingLaborId] = useState<string | null>(null);
+  const [viewingLedger, setViewingLedger] = useState<ApiLaborLedger | null>(
+    null,
+  );
   const [editingLaborId, setEditingLaborId] = useState<string | null>(null);
   const [editingAdvanceId, setEditingAdvanceId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("labors");
   const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [laborSearchQuery, setLaborSearchQuery] = useState("");
+  const [workEntryStart, setWorkEntryStart] = useState("");
+  const [workEntryEnd, setWorkEntryEnd] = useState(getCurrentDate());
   const [payingLaborId, setPayingLaborId] = useState<string | null>(null);
+  const [ledgerRangeStart, setLedgerRangeStart] = useState("");
+  const [ledgerRangeEnd, setLedgerRangeEnd] = useState(getCurrentDate());
   const [laborReportPeriod, setLaborReportPeriod] = useState<
     "weekly" | "monthly"
   >("weekly");
@@ -265,6 +301,48 @@ export function LaborManagement() {
     localStorage.setItem("labor.activeSection", activeSection);
   }, [activeSection]);
 
+  useEffect(() => {
+    if (activeTab === "labor-paid-today" || activeTab === "kharcha") {
+      setActiveTab("labors");
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!viewingLaborId) {
+      setViewingLedger(null);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingLedgerView(true);
+
+    laborApi
+      .getLedger(viewingLaborId, {
+        start: ledgerRangeStart || undefined,
+        end: ledgerRangeEnd || undefined,
+      })
+      .then((ledger) => {
+        if (active) {
+          setViewingLedger(ledger);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) {
+          toast.error("Failed to load labor ledger.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingLedgerView(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [viewingLaborId, ledgerRangeStart, ledgerRangeEnd]);
+
   const buildLaborReportPayload = (
     report: ApiLaborSummaryReport,
   ): ReportExportPayload => ({
@@ -313,6 +391,66 @@ export function LaborManagement() {
       return;
     }
     toast.success(`${type.toUpperCase()} report generated.`);
+  };
+
+  const buildLedgerExportPayload = (): ReportExportPayload | null => {
+    if (!viewingLabor || !viewingLedger) {
+      return null;
+    }
+
+    return {
+      title: `Labor Ledger - ${viewingLabor.name}`,
+      table: {
+        columns: [
+          "Date",
+          "Type",
+          "Description",
+          "Quantity",
+          "Rate",
+          "Earned",
+          "Advance",
+          "Paid Cash",
+          "Balance",
+        ],
+        rows: ledgerRows.map((row) => [
+          formatDate(row.date),
+          row.type,
+          row.description,
+          row.quantity == null ? "-" : String(row.quantity),
+          row.rate == null ? "-" : formatCurrency(row.rate),
+          row.earned ? formatCurrency(row.earned) : "-",
+          row.advance ? formatCurrency(row.advance) : "-",
+          row.paidCash ? formatCurrency(row.paidCash) : "-",
+          formatCurrency(row.balance),
+        ]),
+      },
+      metadata: {
+        generatedAt: new Date().toLocaleString(),
+        filters: [
+          `Labor: ${viewingLabor.name}`,
+          `Range: ${ledgerRangeStart || "All"} - ${ledgerRangeEnd || "Today"}`,
+        ],
+      },
+    };
+  };
+
+  const exportLedger = (type: "excel" | "pdf") => {
+    const payload = buildLedgerExportPayload();
+    if (!payload) {
+      toast.error("Load a ledger first.");
+      return;
+    }
+
+    const ok =
+      type === "excel"
+        ? exportTableToExcel(payload)
+        : exportTableToPdf(payload);
+    if (!ok) {
+      toast.error(`Failed to export ${type.toUpperCase()} ledger.`);
+      return;
+    }
+
+    toast.success(`${type.toUpperCase()} ledger generated.`);
   };
 
   const handleLaborSubmit = async (e: React.FormEvent) => {
@@ -585,16 +723,10 @@ export function LaborManagement() {
     }
   };
 
-  const openFilteredLaborTabFromLedger = (
-    laborId: string,
-    tab: "work" | "kharcha" | "labor-paid-today",
-  ) => {
-    const laborName =
-      allProfiles.find((item) => item.id === laborId)?.name ?? "";
-    setLaborSearchQuery(laborName);
-    setActiveTab(tab);
-    setViewingLaborId(null);
-    setLedgerDialog(false);
+  const openLedgerScreen = (laborId: string) => {
+    setViewingLaborId(laborId);
+    setLedgerRangeStart("");
+    setLedgerRangeEnd(getCurrentDate());
   };
 
   const getLaborSummary = (laborId: string) =>
@@ -637,15 +769,294 @@ export function LaborManagement() {
   const filteredProfiles = profiles.filter((labor) =>
     filteredLaborIds.has(labor.id),
   );
-  const filteredWorkEntries = workEntries.filter((entry) =>
-    filteredLaborIds.has(entry.laborId),
-  );
+  const filteredWorkEntries = workEntries
+    .filter(
+      (entry) =>
+        filteredLaborIds.has(entry.laborId) &&
+        isWithinDateRange(entry.startDate, workEntryStart, workEntryEnd),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.startDate).getTime() - new Date(a.startDate).getTime(),
+    );
   const filteredPaidTodayEntries = paidTodayEntries.filter(
     (entry) => entry.laborId && filteredLaborIds.has(entry.laborId),
   );
   const filteredAdvanceEntries = advanceEntries.filter((entry) =>
     filteredLaborIds.has(entry.laborId),
   );
+
+  const viewingLabor = viewingLaborId
+    ? allProfiles.find((labor) => labor.id === viewingLaborId) ?? null
+    : null;
+
+  const ledgerPaidEntries = useMemo(
+    () =>
+      viewingLaborId
+        ? paidEntries
+            .filter(
+              (entry) =>
+                entry.laborId === viewingLaborId &&
+                isWithinDateRange(entry.date, ledgerRangeStart, ledgerRangeEnd),
+            )
+            .sort(
+              (a, b) =>
+                new Date(a.date).getTime() - new Date(b.date).getTime(),
+            )
+        : [],
+    [viewingLaborId, paidEntries, ledgerRangeStart, ledgerRangeEnd],
+  );
+
+  const ledgerRows = useMemo(() => {
+    if (!viewingLedger) {
+      return [] as LedgerTransactionRow[];
+    }
+
+    const workRows = viewingLedger.workEntries.map((work) => ({
+      date: work.startDate,
+      type: "Work" as const,
+      description:
+        articles.find((article) => article.id === work.articleId)?.name ??
+        "Unknown",
+      quantity: Number(work.quantity ?? 0),
+      rate: Number(work.rate ?? 0),
+      earned: Number(work.total ?? 0),
+      advance: 0,
+      paidCash: 0,
+    }));
+
+    const advanceRows = viewingLedger.advances.map((advance) => ({
+      date: advance.date,
+      type: "Kharcha" as const,
+      description: advance.reason || "-",
+      quantity: null,
+      rate: null,
+      earned: 0,
+      advance: Number(advance.amount ?? 0),
+      paidCash: 0,
+    }));
+
+    const paymentRows = ledgerPaidEntries.map((payment) => ({
+      date: payment.date,
+      type: "Paid Cash" as const,
+      description: payment.description || "-",
+      quantity: null,
+      rate: null,
+      earned: 0,
+      advance: 0,
+      paidCash: Number(payment.amount ?? 0),
+    }));
+
+    const rows = [...workRows, ...advanceRows, ...paymentRows].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+    );
+
+    let runningBalance = 0;
+    return rows.map((row) => {
+      runningBalance += row.earned - row.advance - row.paidCash;
+      return {
+        ...row,
+        balance: runningBalance,
+      };
+    });
+  }, [viewingLedger, ledgerPaidEntries, articles]);
+
+  const ledgerTotals = useMemo(() => {
+    if (!viewingLedger) {
+      return {
+        totalEarnings: 0,
+        totalAdvances: 0,
+        totalPaidCash: 0,
+        netPayable: 0,
+      };
+    }
+
+    const totalPaidCash = ledgerPaidEntries.reduce(
+      (sum, entry) => sum + Number(entry.amount ?? 0),
+      0,
+    );
+
+    return {
+      totalEarnings: viewingLedger.totalEarnings,
+      totalAdvances: viewingLedger.totalAdvances,
+      totalPaidCash,
+      netPayable: viewingLedger.totalEarnings - viewingLedger.totalAdvances - totalPaidCash,
+    };
+  }, [viewingLedger, ledgerPaidEntries]);
+
+  if (viewingLaborId) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <Button
+              variant="ghost"
+              className="mb-2 px-0"
+              onClick={() => setViewingLaborId(null)}
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back To Labor Management
+            </Button>
+            <h2 className="mb-1">Labor Ledger</h2>
+            <p className="text-sm text-muted-foreground">
+              {viewingLabor?.name || "Unknown labor"}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Start Date
+              </Label>
+              <Input
+                type="date"
+                value={ledgerRangeStart}
+                onChange={(e) => setLedgerRangeStart(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                End Date
+              </Label>
+              <Input
+                type="date"
+                value={ledgerRangeEnd}
+                onChange={(e) => setLedgerRangeEnd(e.target.value)}
+              />
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => exportLedger("excel")}
+              disabled={!viewingLedger}
+            >
+              Excel
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => exportLedger("pdf")}
+              disabled={!viewingLedger}
+            >
+              PDF
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Total Earned</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl">
+                {formatCurrency(ledgerTotals.totalEarnings)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Total Kharcha</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl">
+                {formatCurrency(ledgerTotals.totalAdvances)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Paid Cash</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl">
+                {formatCurrency(ledgerTotals.totalPaidCash)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Net Payable</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p
+                className={`text-2xl ${
+                  ledgerTotals.netPayable >= 0 ? "text-green-600" : "text-red-600"
+                }`}
+              >
+                {formatCurrency(ledgerTotals.netPayable)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Ledger Entries</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Rate</TableHead>
+                  <TableHead>Earned</TableHead>
+                  <TableHead>Advance</TableHead>
+                  <TableHead>Paid Cash</TableHead>
+                  <TableHead>Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoadingLedgerView ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={9}
+                      className="text-center text-muted-foreground"
+                    >
+                      Loading labor ledger...
+                    </TableCell>
+                  </TableRow>
+                ) : ledgerRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={9}
+                      className="text-center text-muted-foreground"
+                    >
+                      No ledger entries found for the selected range.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  ledgerRows.map((row, index) => (
+                    <TableRow key={`${row.type}-${row.date}-${index}`}>
+                      <TableCell>{formatDate(row.date)}</TableCell>
+                      <TableCell>{row.type}</TableCell>
+                      <TableCell>{row.description}</TableCell>
+                      <TableCell>
+                        {row.quantity == null ? "-" : row.quantity}
+                      </TableCell>
+                      <TableCell>
+                        {row.rate == null ? "-" : formatCurrency(row.rate)}
+                      </TableCell>
+                      <TableCell>
+                        {row.earned ? formatCurrency(row.earned) : "-"}
+                      </TableCell>
+                      <TableCell>
+                        {row.advance ? formatCurrency(row.advance) : "-"}
+                      </TableCell>
+                      <TableCell>
+                        {row.paidCash ? formatCurrency(row.paidCash) : "-"}
+                      </TableCell>
+                      <TableCell>{formatCurrency(row.balance)}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -822,15 +1233,15 @@ export function LaborManagement() {
                 onValueChange={setActiveTab}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <TabsList className="grid w-full grid-cols-4">
+                  <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="labors">Labor Profiles</TabsTrigger>
                     <TabsTrigger value="work">Work Entries</TabsTrigger>
-                    <TabsTrigger value="labor-paid-today">
+                    {/* <TabsTrigger value="labor-paid-today">
                       Labor Paid Today
                     </TabsTrigger>
                     <TabsTrigger value="kharcha">
                       Kharcha (Advances)
-                    </TabsTrigger>
+                    </TabsTrigger> */}
                   </TabsList>
                 </div>
                 <div className="mt-3 flex flex-wrap items-end gap-3">
@@ -882,6 +1293,30 @@ export function LaborManagement() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {activeTab === "work" && (
+                    <>
+                      <div className="min-w-[180px]">
+                        <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                          Work Start Date
+                        </Label>
+                        <Input
+                          type="date"
+                          value={workEntryStart}
+                          onChange={(e) => setWorkEntryStart(e.target.value)}
+                        />
+                      </div>
+                      <div className="min-w-[180px]">
+                        <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                          Work End Date
+                        </Label>
+                        <Input
+                          type="date"
+                          value={workEntryEnd}
+                          onChange={(e) => setWorkEntryEnd(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
                   <div className="ml-auto flex items-center gap-2">
                     {activeTab === "labors" && (
                       <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
@@ -990,7 +1425,7 @@ export function LaborManagement() {
                         </DialogContent>
                       </Dialog>
                     )}
-                    {activeTab === "kharcha" && (
+                    {/* {activeTab === "kharcha" && (
                       <Dialog
                         open={kharchaDialog}
                         onOpenChange={setKharchaDialog}
@@ -1119,7 +1554,7 @@ export function LaborManagement() {
                           </form>
                         </DialogContent>
                       </Dialog>
-                    )}
+                    )} */}
                   </div>
                 </div>
 
@@ -1200,10 +1635,7 @@ export function LaborManagement() {
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => {
-                                      setViewingLaborId(labor.id);
-                                      setLedgerDialog(true);
-                                    }}
+                                    onClick={() => openLedgerScreen(labor.id)}
                                   >
                                     <Eye className="h-4 w-4" />
                                   </Button>
@@ -1293,7 +1725,7 @@ export function LaborManagement() {
                   </Table>
                 </TabsContent>
 
-                <TabsContent
+                {/* <TabsContent
                   value="labor-paid-today"
                   className="space-y-4"
                   data-report-tab="labor-paid-today"
@@ -1410,249 +1842,12 @@ export function LaborManagement() {
                     </TableBody>
                   </Table>
                 </TabsContent>
+                </TabsContent> */}
               </Tabs>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-
-      <Dialog open={ledgerDialog} onOpenChange={setLedgerDialog}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              Labor Ledger -{" "}
-              {allProfiles.find((l) => l.id === viewingLaborId)?.name}
-            </DialogTitle>
-          </DialogHeader>
-          {viewingLaborId &&
-            (() => {
-              const summary = getLaborSummary(viewingLaborId);
-              const totalPaid = paidByLabor[viewingLaborId] ?? 0;
-              const adjustedNetPayable = summary.netPayable - totalPaid;
-              const workRows = summary.workEntries.map((work) => ({
-                ...work,
-                articleName:
-                  articles.find((article) => article.id === work.articleId)
-                    ?.name ?? "Unknown",
-              }));
-              const paymentRows = paidEntries.filter(
-                (entry) => entry.laborId === viewingLaborId,
-              );
-              const sortedWorkRows = [...workRows].sort(
-                (a, b) =>
-                  new Date(b.startDate).getTime() -
-                  new Date(a.startDate).getTime(),
-              );
-              const sortedKharchaRows = [...summary.advances].sort(
-                (a, b) =>
-                  new Date(b.date).getTime() - new Date(a.date).getTime(),
-              );
-              const sortedPaymentRows = [...paymentRows].sort(
-                (a, b) =>
-                  new Date(b.date).getTime() - new Date(a.date).getTime(),
-              );
-              const latestWorkRows = sortedWorkRows.slice(0, 5);
-              const latestKharchaRows = sortedKharchaRows.slice(0, 5);
-              const latestPaymentRows = sortedPaymentRows.slice(0, 5);
-              return (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm">Total Earned</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-2xl">
-                          {formatCurrency(summary.totalEarnings)}
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm">Total Kharcha</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-2xl">
-                          {formatCurrency(summary.totalAdvances)}
-                        </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm">Net Payable</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-2xl text-green-600">
-                          {formatCurrency(adjustedNetPayable)}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  </div>
-                  <div>
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3>Work History</h3>
-                      {sortedWorkRows.length > 5 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            openFilteredLaborTabFromLedger(
-                              viewingLaborId,
-                              "work",
-                            )
-                          }
-                        >
-                          See More
-                        </Button>
-                      )}
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Article</TableHead>
-                          <TableHead>Quantity</TableHead>
-                          <TableHead>Rate</TableHead>
-                          <TableHead>Total</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {latestWorkRows.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={5}
-                              className="text-center text-muted-foreground"
-                            >
-                              No work history yet
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          latestWorkRows.map((work) => (
-                            <TableRow key={work.id}>
-                              <TableCell>
-                                {formatDate(work.startDate)}
-                              </TableCell>
-                              <TableCell>{work.articleName}</TableCell>
-                              <TableCell>{Number(work.quantity)}</TableCell>
-                              <TableCell>
-                                {formatCurrency(Number(work.rate))}
-                              </TableCell>
-                              <TableCell>
-                                {formatCurrency(Number(work.total))}
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div>
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3>Kharcha History</h3>
-                      {sortedKharchaRows.length > 5 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            openFilteredLaborTabFromLedger(
-                              viewingLaborId,
-                              "kharcha",
-                            )
-                          }
-                        >
-                          See More
-                        </Button>
-                      )}
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Amount</TableHead>
-                          <TableHead>Reason</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {latestKharchaRows.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={3}
-                              className="text-center text-muted-foreground"
-                            >
-                              No kharcha history yet
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          latestKharchaRows.map((kharcha) => (
-                            <TableRow key={kharcha.id}>
-                              <TableCell>{formatDate(kharcha.date)}</TableCell>
-                              <TableCell>
-                                {formatCurrency(Number(kharcha.amount))}
-                              </TableCell>
-                              <TableCell>{kharcha.reason || "-"}</TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div>
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3>Labor Payments</h3>
-                      {sortedPaymentRows.length > 5 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            openFilteredLaborTabFromLedger(
-                              viewingLaborId,
-                              "labor-paid-today",
-                            )
-                          }
-                        >
-                          See More
-                        </Button>
-                      )}
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Amount</TableHead>
-                          <TableHead>Description</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {latestPaymentRows.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={3}
-                              className="text-center text-muted-foreground"
-                            >
-                              No labor payments yet
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          latestPaymentRows.map((payment) => (
-                            <TableRow key={payment.id}>
-                              <TableCell>{formatDate(payment.date)}</TableCell>
-                              <TableCell>
-                                {formatCurrency(Number(payment.amount))}
-                              </TableCell>
-                              <TableCell>
-                                {payment.description || "-"}
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              );
-            })()}
-        </DialogContent>
-      </Dialog>
 
       <Dialog
         open={payDialog}

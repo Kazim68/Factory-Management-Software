@@ -8,6 +8,26 @@ const AUDIT_LOGS_KEY = 'factory_audit_logs';
 type SessionUser = Omit<AppUser, 'password'>;
 
 const normalizeUsername = (username: string) => username.trim().toLowerCase();
+const PRIVILEGED_ROLES = new Set<UserRole>(['admin', 'super_admin']);
+
+const normalizeRole = (role: unknown): UserRole => {
+  const normalized = String(role ?? '').trim().toLowerCase();
+  if (normalized === 'admin') return 'admin';
+  if (normalized === 'super_admin' || normalized === 'super admin') return 'super_admin';
+  if (normalized === 'munshi') return 'sub_admin';
+  return 'sub_admin';
+};
+
+const normalizeStoredUser = (user: AppUser): AppUser => ({
+  ...user,
+  role: normalizeRole(user.role),
+});
+
+const formatRoleLabel = (role: UserRole): string => {
+  if (role === 'super_admin') return 'Super Admin';
+  if (role === 'sub_admin') return 'Sub Admin';
+  return 'Admin';
+};
 
 export const auth = {
   listAuditLogs(): AuditLog[] {
@@ -28,8 +48,13 @@ export const auth = {
   },
 
   ensureSeedAdmin(): void {
-    const users = storage.get<AppUser>(USERS_KEY);
+    const users = storage.get<AppUser>(USERS_KEY).map(normalizeStoredUser);
     if (users.length > 0) {
+      storage.set<AppUser>(USERS_KEY, users);
+      const session = this.getSessionUser();
+      if (session) {
+        this.setSessionUser(session);
+      }
       return;
     }
 
@@ -46,7 +71,9 @@ export const auth = {
   },
 
   listUsers(): AppUser[] {
-    return storage.get<AppUser>(USERS_KEY);
+    const users = storage.get<AppUser>(USERS_KEY).map(normalizeStoredUser);
+    storage.set<AppUser>(USERS_KEY, users);
+    return users;
   },
 
   createUser(user: Omit<AppUser, 'id' | 'createdAt'>): AppUser {
@@ -60,6 +87,7 @@ export const auth = {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       ...user,
+      role: normalizeRole(user.role),
       username: user.username.trim(),
     };
     storage.set<AppUser>(USERS_KEY, [...users, newUser]);
@@ -101,6 +129,7 @@ export const auth = {
     const updatedUser = {
       ...users[index],
       ...updates,
+      role: updates.role ? normalizeRole(updates.role) : users[index].role,
       username: updates.username ? updates.username.trim() : users[index].username,
     };
 
@@ -132,10 +161,12 @@ export const auth = {
       throw new Error('User not found');
     }
 
-    if (toDelete.role === 'admin') {
-      const adminCount = users.filter((user) => user.role === 'admin').length;
-      if (adminCount <= 1) {
-        throw new Error('At least one admin user is required');
+    if (PRIVILEGED_ROLES.has(normalizeRole(toDelete.role))) {
+      const privilegedCount = users.filter((user) =>
+        PRIVILEGED_ROLES.has(normalizeRole(user.role)),
+      ).length;
+      if (privilegedCount <= 1) {
+        throw new Error('At least one admin or super admin user is required');
       }
     }
 
@@ -201,14 +232,25 @@ export const auth = {
   getSessionUser(): SessionUser | null {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? (JSON.parse(raw) as SessionUser) : null;
+      if (!raw) return null;
+      const sessionUser = JSON.parse(raw) as SessionUser;
+      return {
+        ...sessionUser,
+        role: normalizeRole(sessionUser.role),
+      };
     } catch {
       return null;
     }
   },
 
   setSessionUser(user: AppUser | SessionUser): void {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(this.toSessionUser(user)));
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({
+        ...this.toSessionUser(user),
+        role: normalizeRole(user.role),
+      }),
+    );
   },
 
   toSessionUser(user: AppUser | SessionUser): SessionUser {
@@ -217,8 +259,13 @@ export const auth = {
   },
 
   canAccess(role: UserRole, pageRoles: UserRole[]): boolean {
+    if (PRIVILEGED_ROLES.has(role)) {
+      return true;
+    }
     return pageRoles.includes(role);
   },
+
+  formatRoleLabel,
 };
 
 export type { SessionUser };

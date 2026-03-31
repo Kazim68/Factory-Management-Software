@@ -1,9 +1,8 @@
 import prisma from "../prisma.js";
 import {
-  LABOR_DEPARTMENTS,
-  getLaborDepartmentLabel,
   normalizeLaborDepartment,
 } from "../constants/laborDepartments.js";
+import { listLaborDepartments } from "../services/laborDepartmentService.js";
 
 export const listUnits = async (req, res) => {
   const units = await prisma.unit.findMany({ orderBy: { name: "asc" } });
@@ -68,35 +67,59 @@ export const deleteArticle = async (req, res) => {
 };
 
 export const listLaborCategories = async (req, res) => {
-  const now = new Date().toISOString();
+  const rows = await listLaborDepartments();
+  const overrides = await prisma.laborDepartmentName.findMany();
+  const overrideMap = new Map(
+    overrides.map((row) => [row.department, row])
+  );
+
   res.json(
-    LABOR_DEPARTMENTS.map((department) => ({
-      id: department.id,
-      name: department.name,
-      createdAt: now,
-      updatedAt: now,
-    }))
+    rows.map((department) => {
+      const existing = overrideMap.get(department.id);
+      return {
+        id: department.id,
+        name: department.name,
+        createdAt: existing?.createdAt ?? new Date(),
+        updatedAt: existing?.updatedAt ?? new Date(),
+      };
+    })
   );
 };
 
 export const createLaborCategory = async (req, res) => {
-  const department = normalizeLaborDepartment(req.body.name, "");
-  if (!department) {
-    res.status(400).json({ error: "Invalid department." });
-    return;
-  }
-  const now = new Date().toISOString();
-  res.status(201).json({
-    id: department,
-    name: getLaborDepartmentLabel(department),
-    createdAt: now,
-    updatedAt: now,
+  res.status(405).json({
+    error: "Labor departments are fixed. Edit existing department names instead.",
   });
 };
 
 export const updateLaborCategory = async (req, res) => {
-  res.status(405).json({
-    error: "Labor departments are fixed and cannot be edited.",
+  const department = normalizeLaborDepartment(req.params.categoryId, "");
+  const nextName = String(req.body.name ?? "").trim();
+
+  if (!department) {
+    res.status(400).json({ error: "Invalid department." });
+    return;
+  }
+
+  if (!nextName) {
+    res.status(400).json({ error: "Department name is required." });
+    return;
+  }
+
+  const category = await prisma.laborDepartmentName.upsert({
+    where: { department },
+    update: { name: nextName },
+    create: {
+      department,
+      name: nextName,
+    },
+  });
+
+  res.json({
+    id: department,
+    name: category.name,
+    createdAt: category.createdAt,
+    updatedAt: category.updatedAt,
   });
 };
 

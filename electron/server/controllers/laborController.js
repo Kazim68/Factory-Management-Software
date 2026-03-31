@@ -1,16 +1,19 @@
 import prisma from "../prisma.js";
 import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
 import {
-  getLaborDepartmentLabel,
   normalizeLaborDepartment,
 } from "../constants/laborDepartments.js";
+import {
+  getLaborDepartmentLabelFromMap,
+  getLaborDepartmentLabelMap,
+} from "../services/laborDepartmentService.js";
 
-const withCategory = (profile) => ({
+const withCategory = (profile, labelMap) => ({
   ...profile,
   categoryId: profile.department,
   category: {
     id: profile.department,
-    name: getLaborDepartmentLabel(profile.department),
+    name: getLaborDepartmentLabelFromMap(profile.department, labelMap),
   },
 });
 
@@ -23,18 +26,22 @@ export const listLaborProfiles = async (req, res) => {
           status: status === "FIRED" ? "FIRED" : "ACTIVE",
         };
 
-  const profiles = await prisma.laborProfile.findMany({
-    where,
-    include: { paymentType: true },
-    orderBy: { name: "asc" },
-  });
-  res.json(profiles.map(withCategory));
+  const [profiles, labelMap] = await Promise.all([
+    prisma.laborProfile.findMany({
+      where,
+      include: { paymentType: true },
+      orderBy: { name: "asc" },
+    }),
+    getLaborDepartmentLabelMap(),
+  ]);
+  res.json(profiles.map((profile) => withCategory(profile, labelMap)));
 };
 
 export const createLaborProfile = async (req, res) => {
   const department = normalizeLaborDepartment(
     req.body.department ?? req.body.categoryId
   );
+  const labelMap = await getLaborDepartmentLabelMap();
   const profile = await prisma.laborProfile.create({
     data: {
       name: req.body.name,
@@ -45,11 +52,12 @@ export const createLaborProfile = async (req, res) => {
     },
     include: { paymentType: true },
   });
-  res.status(201).json(withCategory(profile));
+  res.status(201).json(withCategory(profile, labelMap));
 };
 
 export const updateLaborProfile = async (req, res) => {
   const departmentValue = req.body.department ?? req.body.categoryId;
+  const labelMap = await getLaborDepartmentLabelMap();
   const profile = await prisma.laborProfile.update({
     where: { id: req.params.laborId },
     data: {
@@ -64,7 +72,7 @@ export const updateLaborProfile = async (req, res) => {
     },
     include: { paymentType: true },
   });
-  res.json(withCategory(profile));
+  res.json(withCategory(profile, labelMap));
 };
 
 export const fireLaborProfile = async (req, res) => {

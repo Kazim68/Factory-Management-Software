@@ -66,6 +66,11 @@ enum LaborDepartment {
   PACKING
 }
 
+enum StockEntryMode {
+  IN_STOCK
+  PACKED
+}
+
 enum ProductionStage {
   STAGE_PRESSMAN
   STAGE_UPPERMAN
@@ -107,6 +112,15 @@ model Article {
   billLines  BillLine[]
   materials  MaterialPurchase[]
   productionOrders ProductionOrder[]
+  stockEntries      StockEntry[]
+}
+
+model LaborDepartmentName {
+  id         String          @id @default(uuid())
+  department LaborDepartment @unique
+  name       String
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 }
 
 model ExpenseCategory {
@@ -289,12 +303,27 @@ model BillLine {
   id        String   @id @default(uuid())
   billId    String
   articleId String
+  size      String?
   quantity  Decimal
   price     Decimal
   total     Decimal
 
   bill    Bill    @relation(fields: [billId], references: [id])
   article Article @relation(fields: [articleId], references: [id])
+}
+
+model StockEntry {
+  id            String         @id @default(uuid())
+  articleId     String
+  mode          StockEntryMode @default(IN_STOCK)
+  quantityDozen Decimal
+  note          String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  article Article @relation(fields: [articleId], references: [id])
+
+  @@index([mode, articleId])
 }
 
 model ChemicalPurchase {

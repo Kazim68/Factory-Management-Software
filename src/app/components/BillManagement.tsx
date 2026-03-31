@@ -50,9 +50,27 @@ import { toast } from "sonner";
 type BillItemForm = {
   articleId: string;
   articleName: string;
+  size: string;
   quantity: number;
   price: number;
   total: number;
+};
+
+const createEmptyBillItem = (): BillItemForm => ({
+  articleId: "",
+  articleName: "",
+  size: "",
+  quantity: 0,
+  price: 0,
+  total: 0,
+});
+
+const ensureMinimumRows = (rows: BillItemForm[], minimum = 3) => {
+  const nextRows = [...rows];
+  while (nextRows.length < minimum) {
+    nextRows.push(createEmptyBillItem());
+  }
+  return nextRows;
 };
 
 export function BillManagement() {
@@ -81,9 +99,7 @@ export function BillManagement() {
     partyId: "",
   });
 
-  const [items, setItems] = useState<BillItemForm[]>([
-    { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 },
-  ]);
+  const [items, setItems] = useState<BillItemForm[]>(ensureMinimumRows([]));
 
   const loadData = async () => {
     setIsLoading(true);
@@ -109,14 +125,11 @@ export function BillManagement() {
   }, []);
 
   const addItem = () => {
-    setItems([
-      ...items,
-      { articleId: "", articleName: "", quantity: 0, price: 0, total: 0 },
-    ]);
+    setItems([...items, createEmptyBillItem()]);
   };
 
   const removeItem = (index: number) => {
-    if (items.length > 1) {
+    if (items.length > 3) {
       setItems(items.filter((_, i) => i !== index));
     }
   };
@@ -175,6 +188,7 @@ export function BillManagement() {
         status: "CONFIRMED" as const,
         lines: validItems.map((item) => ({
           articleId: item.articleId,
+          size: item.size.trim() || null,
           quantity: item.quantity,
           price: item.price,
           total: item.total,
@@ -210,16 +224,19 @@ export function BillManagement() {
       partyId: bill.partyId || "",
     });
     setItems(
-      bill.lines.map((line) => ({
-        articleId: line.articleId,
-        articleName:
-          line.article?.name ||
-          articles.find((article) => article.id === line.articleId)?.name ||
-          "",
-        quantity: Number(line.quantity),
-        price: Number(line.price),
-        total: Number(line.total),
-      })),
+      ensureMinimumRows(
+        bill.lines.map((line) => ({
+          articleId: line.articleId,
+          articleName:
+            line.article?.name ||
+            articles.find((article) => article.id === line.articleId)?.name ||
+            "",
+          size: line.size || "",
+          quantity: Number(line.quantity),
+          price: Number(line.price),
+          total: Number(line.total),
+        }))
+      )
     );
     setIsDialogOpen(true);
   };
@@ -310,6 +327,7 @@ export function BillManagement() {
         return `
                 <tr>
                   <td>${articleName}</td>
+                  <td>${line.size ?? "-"}</td>
                   <td>${line.quantity}</td>
                   <td>${formatCurrency(Number(line.price))}</td>
                   <td>${formatCurrency(Number(line.total))}</td>
@@ -348,6 +366,7 @@ export function BillManagement() {
             <thead>
               <tr>
                 <th>Article</th>
+                <th>Size</th>
                 <th>Quantity</th>
                 <th>Price</th>
                 <th>Total</th>
@@ -451,6 +470,7 @@ export function BillManagement() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Article</TableHead>
+                          <TableHead>Size</TableHead>
                           <TableHead>Quantity</TableHead>
                           <TableHead>Price</TableHead>
                           <TableHead>Total</TableHead>
@@ -484,6 +504,15 @@ export function BillManagement() {
                             </TableCell>
                             <TableCell>
                               <Input
+                                value={item.size}
+                                onChange={(e) =>
+                                  updateItem(index, "size", e.target.value)
+                                }
+                                placeholder="Size"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
                                 type="number"
                                 min="1"
                                 value={item.quantity || ""}
@@ -512,7 +541,7 @@ export function BillManagement() {
                             </TableCell>
                             <TableCell>{formatCurrency(item.total)}</TableCell>
                             <TableCell>
-                              {items.length > 1 && (
+                              {items.length > 3 && (
                                 <Button
                                   type="button"
                                   size="sm"

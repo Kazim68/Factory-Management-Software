@@ -1,9 +1,12 @@
 import prisma from "../prisma.js";
 import {
   LABOR_DEPARTMENT_IDS,
-  getLaborDepartmentLabel,
   normalizeLaborDepartment,
 } from "../constants/laborDepartments.js";
+import {
+  getLaborDepartmentLabelFromMap,
+  getLaborDepartmentLabelMap,
+} from "../services/laborDepartmentService.js";
 
 const STAGE_BY_DEPARTMENT = {
   PRESSMAN: "STAGE_PRESSMAN",
@@ -47,7 +50,7 @@ const getOrderProgressDozen = (order) => {
   return aMall + toNumber(order.bMallDozen) + toNumber(order.cMallDozen);
 };
 
-const toApiOrder = (order) => {
+const toApiOrder = (order, labelMap) => {
   const quantityDozen = toNumber(order.quantityDozen);
   const completedDozen = toNumber(order.completedDozen);
   const bMallDozen = toNumber(order.bMallDozen);
@@ -56,7 +59,7 @@ const toApiOrder = (order) => {
   const progressDozen = getOrderProgressDozen(order);
   return {
     ...order,
-    departmentLabel: getLaborDepartmentLabel(order.department),
+    departmentLabel: getLaborDepartmentLabelFromMap(order.department, labelMap),
     quantityDozen,
     completedDozen,
     bMallDozen,
@@ -66,6 +69,11 @@ const toApiOrder = (order) => {
     packingPricePerDozen: toNumber(order.packingPricePerDozen),
     status: computeStatus(progressDozen, quantityDozen),
   };
+};
+
+const normalizeStockMode = (value, fallback = "IN_STOCK") => {
+  const normalized = String(value ?? fallback).toUpperCase();
+  return normalized === "PACKED" ? "PACKED" : fallback;
 };
 
 const createOrExpandQueueOrder = async (
@@ -132,22 +140,25 @@ export const listProductionOrders = async (req, res) => {
     ? normalizeLaborDepartment(req.query.department, "")
     : "";
 
-  const rows = await prisma.productionOrder.findMany({
-    where: {
-      ...(departmentQuery ? { department: departmentQuery } : {}),
-      isClosed: false,
-    },
-    include: {
-      article: true,
-      labor: true,
+  const [rows, labelMap] = await Promise.all([
+    prisma.productionOrder.findMany({
+      where: {
+        ...(departmentQuery ? { department: departmentQuery } : {}),
+        isClosed: false,
+      },
+      include: {
+        article: true,
+        labor: true,
       packingLabor: true,
-    },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-  });
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    getLaborDepartmentLabelMap(),
+  ]);
 
   res.json(
     rows
-      .map(toApiOrder)
+      .map((row) => toApiOrder(row, labelMap))
       .filter((row) => getOrderProgressDozen(row) < row.quantityDozen),
   );
 };
@@ -193,7 +204,8 @@ export const createProductionOrder = async (req, res) => {
     },
   });
 
-  res.status(201).json(toApiOrder(order));
+  const labelMap = await getLaborDepartmentLabelMap();
+  res.status(201).json(toApiOrder(order, labelMap));
 };
 
 export const updateProductionOrder = async (req, res) => {
@@ -246,7 +258,8 @@ export const updateProductionOrder = async (req, res) => {
     },
   });
 
-  res.json(toApiOrder(updated));
+  const labelMap = await getLaborDepartmentLabelMap();
+  res.json(toApiOrder(updated, labelMap));
 };
 
 export const assignProductionOrderLabor = async (req, res) => {
@@ -366,7 +379,8 @@ export const assignProductionOrderLabor = async (req, res) => {
     },
   });
 
-  res.json(toApiOrder(order));
+  const labelMap = await getLaborDepartmentLabelMap();
+  res.json(toApiOrder(order, labelMap));
 };
 
 export const updateProductionOrderCompletion = async (req, res) => {
@@ -625,21 +639,30 @@ export const updateProductionOrderCompletion = async (req, res) => {
     });
 
   if (!result) return;
-  res.json(toApiOrder(result));
+  const labelMap = await getLaborDepartmentLabelMap();
+  res.json(toApiOrder(result, labelMap));
 };
 
 export const getStockSummary = async (req, res) => {
-  const orders = await prisma.productionOrder.findMany({
-    select: {
-      department: true,
-      quantityDozen: true,
-      completedDozen: true,
+  const [orders, stockEntries] = await Promise.all([
+    prisma.productionOrder.findMany({
+      select: {
+        department: true,
+        quantityDozen: true,
+        completedDozen: true,
       bMallDozen: true,
       cMallDozen: true,
-      forwardedDozen: true,
-      isClosed: true,
-    },
-  });
+        forwardedDozen: true,
+        isClosed: true,
+      },
+    }),
+    prisma.stockEntry.findMany({
+      select: {
+        mode: true,
+        quantityDozen: true,
+      },
+    }),
+  ]);
 
   let wipDozen = 0;
   let readyStockDozen = 0;
@@ -664,6 +687,20 @@ export const getStockSummary = async (req, res) => {
       readyStockDozen += Math.max(quantity - progress, 0);
       continue;
     }
+
+    // Stock starts when rows reach Machineman queue from DC completion.
+    if (row.department === "MACHINEMAN") {
+      readyStockDozen += Math.max(quantity - forwarded, 0);
+    }
+  }
+
+  for (const entry of stockEntries) {
+    const quantity = toNumber(entry.quantityDozen);
+    if (entry.mode === "PACKED") {
+      packedStockDozen += quantity;
+    } else {
+      readyStockDozen += quantity;
+    }
   }
 
   res.json({
@@ -675,23 +712,32 @@ export const getStockSummary = async (req, res) => {
 };
 
 export const listStockByArticle = async (req, res) => {
-  const mode = String(req.query.mode ?? "IN_STOCK").toUpperCase();
+  const mode = normalizeStockMode(req.query.mode);
   const search = String(req.query.q ?? "")
     .trim()
     .toLowerCase();
   const isPackedMode = mode === "PACKED";
 
-  const orders = await prisma.productionOrder.findMany({
-    select: {
-      department: true,
-      articleId: true,
-      quantityDozen: true,
-      completedDozen: true,
-      bMallDozen: true,
-      cMallDozen: true,
-      article: { select: { id: true, name: true, code: true } },
-    },
-  });
+  const [orders, stockEntries] = await Promise.all([
+    prisma.productionOrder.findMany({
+      select: {
+        department: true,
+        articleId: true,
+        quantityDozen: true,
+        completedDozen: true,
+        forwardedDozen: true,
+        article: { select: { id: true, name: true, code: true } },
+      },
+    }),
+    prisma.stockEntry.findMany({
+      select: {
+        articleId: true,
+        mode: true,
+        quantityDozen: true,
+        article: { select: { id: true, name: true, code: true } },
+      },
+    }),
+  ]);
 
   const quantityByArticle = new Map();
   for (const row of orders) {
@@ -734,6 +780,22 @@ export const listStockByArticle = async (req, res) => {
     quantityByArticle.set(row.articleId, prev);
   }
 
+  for (const entry of stockEntries) {
+    if (entry.mode !== mode) continue;
+
+    const contribution = toNumber(entry.quantityDozen);
+    if (contribution <= 0) continue;
+
+    const prev = quantityByArticle.get(entry.articleId) ?? {
+      articleId: entry.articleId,
+      articleName: entry.article?.name ?? "-",
+      articleCode: entry.article?.code ?? null,
+      quantityDozen: 0,
+    };
+    prev.quantityDozen += contribution;
+    quantityByArticle.set(entry.articleId, prev);
+  }
+
   const rows = Array.from(quantityByArticle.values())
     .filter((row) => {
       if (!search) return true;
@@ -744,6 +806,104 @@ export const listStockByArticle = async (req, res) => {
     .sort((a, b) => a.articleName.localeCompare(b.articleName));
 
   res.json(rows);
+};
+
+export const listManualStockEntries = async (req, res) => {
+  const rows = await prisma.stockEntry.findMany({
+    include: {
+      article: {
+        select: { id: true, name: true, code: true },
+      },
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+  });
+
+  res.json(
+    rows.map((row) => ({
+      ...row,
+      quantityDozen: toNumber(row.quantityDozen),
+    }))
+  );
+};
+
+export const createManualStockEntry = async (req, res) => {
+  const quantityDozen = Math.abs(toNumber(req.body.quantityDozen));
+  const mode = normalizeStockMode(req.body.mode);
+  const note = String(req.body.note ?? "").trim();
+
+  if (!req.body.articleId) {
+    res.status(400).json({ error: "Article is required." });
+    return;
+  }
+
+  if (quantityDozen <= 0) {
+    res.status(400).json({ error: "Quantity must be greater than 0." });
+    return;
+  }
+
+  const entry = await prisma.stockEntry.create({
+    data: {
+      articleId: req.body.articleId,
+      mode,
+      quantityDozen,
+      note: note || null,
+    },
+    include: {
+      article: {
+        select: { id: true, name: true, code: true },
+      },
+    },
+  });
+
+  res.status(201).json({
+    ...entry,
+    quantityDozen: toNumber(entry.quantityDozen),
+  });
+};
+
+export const updateManualStockEntry = async (req, res) => {
+  const quantityDozen =
+    req.body.quantityDozen === undefined
+      ? undefined
+      : Math.abs(toNumber(req.body.quantityDozen));
+
+  if (quantityDozen !== undefined && quantityDozen <= 0) {
+    res.status(400).json({ error: "Quantity must be greater than 0." });
+    return;
+  }
+
+  const entry = await prisma.stockEntry.update({
+    where: { id: req.params.entryId },
+    data: {
+      articleId: req.body.articleId,
+      mode:
+        req.body.mode === undefined
+          ? undefined
+          : normalizeStockMode(req.body.mode),
+      quantityDozen,
+      note:
+        req.body.note === undefined
+          ? undefined
+          : String(req.body.note).trim() || null,
+    },
+    include: {
+      article: {
+        select: { id: true, name: true, code: true },
+      },
+    },
+  });
+
+  res.json({
+    ...entry,
+    quantityDozen: toNumber(entry.quantityDozen),
+  });
+};
+
+export const deleteManualStockEntry = async (req, res) => {
+  await prisma.stockEntry.delete({
+    where: { id: req.params.entryId },
+  });
+  res.status(204).end();
 };
 
 export const listDepartmentLabors = async (req, res) => {

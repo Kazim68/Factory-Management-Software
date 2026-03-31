@@ -55,6 +55,7 @@ export function Configuration() {
   const [articleDialog, setArticleDialog] = useState(false);
   const [paymentDialog, setPaymentDialog] = useState(false);
   const [expenseDialog, setExpenseDialog] = useState(false);
+  const [laborDialog, setLaborDialog] = useState(false);
 
   const [editingUnit, setEditingUnit] = useState<ApiUnit | null>(null);
   const [editingArticle, setEditingArticle] = useState<ApiArticle | null>(null);
@@ -63,6 +64,8 @@ export function Configuration() {
   );
   const [editingExpense, setEditingExpense] =
     useState<ApiExpenseCategory | null>(null);
+  const [editingLaborCategory, setEditingLaborCategory] =
+    useState<ApiLaborCategory | null>(null);
 
   const [unitForm, setUnitForm] = useState({ name: "", symbol: "" });
   const [articleForm, setArticleForm] = useState({ name: "", code: "" });
@@ -71,6 +74,7 @@ export function Configuration() {
     unitId: "none",
   });
   const [expenseForm, setExpenseForm] = useState({ name: "" });
+  const [laborForm, setLaborForm] = useState({ name: "" });
   const [activeTab, setActiveTab] = useState("units");
 
   const loadConfig = async () => {
@@ -210,6 +214,25 @@ export function Configuration() {
     }
   };
 
+  const handleLaborSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingLaborCategory) return;
+
+    try {
+      await configApi.updateLaborCategory(editingLaborCategory.id, {
+        name: laborForm.name.trim(),
+      });
+      toast.success("Department name updated");
+      setLaborForm({ name: "" });
+      setEditingLaborCategory(null);
+      setLaborDialog(false);
+      await loadConfig();
+    } catch (error) {
+      console.error(error);
+      toast.error("Unable to save department name.");
+    }
+  };
+
   const startUnitEdit = (unit: ApiUnit) => {
     setEditingUnit(unit);
     setUnitForm({ name: unit.name, symbol: unit.symbol || "" });
@@ -232,6 +255,12 @@ export function Configuration() {
     setEditingExpense(category);
     setExpenseForm({ name: category.name });
     setExpenseDialog(true);
+  };
+
+  const startLaborEdit = (category: ApiLaborCategory) => {
+    setEditingLaborCategory(category);
+    setLaborForm({ name: category.name });
+    setLaborDialog(true);
   };
 
   const handleUnitDelete = async (unit: ApiUnit) => {
@@ -776,23 +805,73 @@ export function Configuration() {
               className="space-y-4"
               data-report-tab="labor-categories"
             >
+              <Dialog
+                open={laborDialog}
+                onOpenChange={(open) => {
+                  setLaborDialog(open);
+                  if (!open) {
+                    setEditingLaborCategory(null);
+                    setLaborForm({ name: "" });
+                  }
+                }}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Edit Department Name</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleLaborSubmit} className="space-y-4">
+                    <div>
+                      <Label>Department Name</Label>
+                      <Input
+                        value={laborForm.name}
+                        onChange={(event) =>
+                          setLaborForm({ name: event.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setLaborDialog(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button type="submit">Save</Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
               <p className="text-sm text-muted-foreground">
-                Departments are fixed by system and used as labor categories.
+                Department ids stay fixed, but their display names can be edited.
               </p>
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Department Id</TableHead>
                     <TableHead>Name</TableHead>
+                    <TableHead className="w-[140px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading
-                    ? renderEmpty(1, "Loading labor categories...")
+                    ? renderEmpty(3, "Loading labor categories...")
                     : laborCategories.length === 0
-                      ? renderEmpty(1, "No labor categories yet")
+                      ? renderEmpty(3, "No labor categories yet")
                       : laborCategories.map((category) => (
                           <TableRow key={category.id}>
+                            <TableCell>{category.id}</TableCell>
                             <TableCell>{category.name}</TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startLaborEdit(category)}
+                              >
+                                Edit
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                 </TableBody>
