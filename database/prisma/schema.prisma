@@ -13,7 +13,6 @@ datasource db {
 enum PartyType {
   CUSTOMER
   SUPPLIER
-  BOTH
 }
 
 enum BillType {
@@ -121,13 +120,6 @@ model LaborDepartmentName {
   name       String
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
-}
-
-model ExpenseCategory {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
 
 model PaymentCalculationType {
@@ -447,6 +439,7 @@ model ProductionOrder {
   department    LaborDepartment
   stage         ProductionStage
   articleId     String
+  size          String                @default("")
   laborId       String?
   packingLaborId String?
   quantityDozen Decimal

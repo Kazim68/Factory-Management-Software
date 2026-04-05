@@ -32,6 +32,102 @@ const computeLineTotal = ({ quantity, price, discount }) => {
   return Number((grossTotal - discountAmount).toFixed(2));
 };
 
+const toNumber = (value) => {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const normalizeSize = (value) => {
+  const normalized = String(value ?? "").trim();
+  return normalized || "-";
+};
+
+const getStockVariantKey = (articleId, size) =>
+  `${articleId}::${normalizeSize(size)}`;
+
+const MERGED_FINAL_DEPARTMENTS = ["MACHINEMAN", "PACKING"];
+
+const getAvailableStockByVariant = async (tx) => {
+  const [orders, stockEntries] = await Promise.all([
+    tx.productionOrder.findMany({
+      select: {
+        department: true,
+        articleId: true,
+        size: true,
+        quantityDozen: true,
+        completedDozen: true,
+        bMallDozen: true,
+        cMallDozen: true,
+      },
+    }),
+    tx.stockEntry.findMany({
+      where: { mode: "PACKED" },
+      select: {
+        articleId: true,
+        quantityDozen: true,
+      },
+    }),
+  ]);
+
+  const availableByVariant = new Map();
+
+  for (const row of orders) {
+    const completed = toNumber(row.completedDozen);
+
+    if (!MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
+      continue;
+    }
+
+    const contribution = completed;
+    if (contribution <= 0) continue;
+    const variantKey = getStockVariantKey(row.articleId, row.size);
+    availableByVariant.set(
+      variantKey,
+      (availableByVariant.get(variantKey) ?? 0) + contribution,
+    );
+  }
+
+  for (const entry of stockEntries) {
+    const contribution = toNumber(entry.quantityDozen);
+    if (contribution <= 0) continue;
+    const variantKey = getStockVariantKey(entry.articleId, "-");
+    availableByVariant.set(
+      variantKey,
+      (availableByVariant.get(variantKey) ?? 0) + contribution,
+    );
+  }
+
+  return availableByVariant;
+};
+
+const assertSufficientStockForBillLines = async (tx, lines) => {
+  const requestedByVariant = lines.reduce((acc, line) => {
+    const variantKey = getStockVariantKey(line.articleId, line.size);
+    acc[variantKey] = (acc[variantKey] ?? 0) + toNumber(line.quantity);
+    return acc;
+  }, {});
+
+  const availableByVariant = await getAvailableStockByVariant(tx);
+
+  for (const [variantKey, requestedQty] of Object.entries(requestedByVariant)) {
+    const [articleId] = variantKey.split("::");
+    const availableQty = toNumber(availableByVariant.get(variantKey) ?? 0);
+    if (requestedQty > availableQty) {
+      const article = await tx.article.findUnique({
+        where: { id: articleId },
+        select: { name: true },
+      });
+      const articleName = article?.name || "Selected article";
+      const size = variantKey.slice(variantKey.indexOf("::") + 2) || "-";
+      const error = new Error(
+        `${articleName} (${size}) has only ${availableQty} dozen available in packed stock.`,
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+};
+
 const normalizeBillLines = (lines) => {
   if (!Array.isArray(lines) || lines.length === 0) {
     const error = new Error("At least one bill line is required.");
@@ -51,13 +147,17 @@ const normalizeBillLines = (lines) => {
     }
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      const error = new Error(`Quantity must be greater than 0 on line ${index + 1}.`);
+      const error = new Error(
+        `Quantity must be greater than 0 on line ${index + 1}.`,
+      );
       error.statusCode = 400;
       throw error;
     }
 
     if (!Number.isFinite(price) || price <= 0) {
-      const error = new Error(`Price must be greater than 0 on line ${index + 1}.`);
+      const error = new Error(
+        `Price must be greater than 0 on line ${index + 1}.`,
+      );
       error.statusCode = 400;
       throw error;
     }
@@ -182,6 +282,7 @@ export const createBill = async (req, res) => {
   const { date, partyId, type, status, lines } = req.body;
   const normalizedLines = normalizeBillLines(lines);
   const bill = await prisma.$transaction(async (tx) => {
+    await assertSufficientStockForBillLines(tx, normalizedLines);
     const billNumber = await reserveNextBillNumber(tx);
     return tx.bill.create({
       data: {
@@ -190,7 +291,10 @@ export const createBill = async (req, res) => {
         partyId,
         type: toDbBillType(type) ?? "CASH",
         status: status ?? "DRAFT",
-        total: normalizedLines.reduce((sum, line) => sum + Number(line.total), 0),
+        total: normalizedLines.reduce(
+          (sum, line) => sum + Number(line.total),
+          0,
+        ),
         verifiedAt: null,
         lines: {
           create: normalizedLines.map((line) => ({
@@ -225,8 +329,14 @@ export const confirmBill = async (req, res) => {
 
 export const updateBill = async (req, res) => {
   const { date, partyId, type, status, lines } = req.body;
-  const normalizedLines = Array.isArray(lines) ? normalizeBillLines(lines) : null;
+  const normalizedLines = Array.isArray(lines)
+    ? normalizeBillLines(lines)
+    : null;
   const bill = await prisma.$transaction(async (tx) => {
+    if (normalizedLines) {
+      await assertSufficientStockForBillLines(tx, normalizedLines);
+    }
+
     const updated = await tx.bill.update({
       where: { id: req.params.billId },
       data: {
@@ -341,14 +451,14 @@ export const receiveBillPayment = async (req, res) => {
         0,
       );
       const remaining = Math.max(total - totalPaid, 0);
+      const method = toDbPaymentMethod(req.body.method ?? "KHATA");
       if (remaining <= 0) {
         throw new Error("Bill is already fully paid.");
       }
-      if (amount > remaining) {
+      if (amount > remaining && method !== "CHEQUE") {
         throw new Error("Payment exceeds remaining amount.");
       }
 
-      const method = toDbPaymentMethod(req.body.method ?? "KHATA");
       const paymentDate = req.body.date ? new Date(req.body.date) : new Date();
       const chequeNumber =
         req.body.chequeNumber == null

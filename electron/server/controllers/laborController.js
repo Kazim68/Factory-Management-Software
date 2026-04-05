@@ -1,8 +1,6 @@
 import prisma from "../prisma.js";
 import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
-import {
-  normalizeLaborDepartment,
-} from "../constants/laborDepartments.js";
+import { normalizeLaborDepartment } from "../constants/laborDepartments.js";
 import {
   getLaborDepartmentLabelFromMap,
   getLaborDepartmentLabelMap,
@@ -16,6 +14,26 @@ const withCategory = (profile, labelMap) => ({
     name: getLaborDepartmentLabelFromMap(profile.department, labelMap),
   },
 });
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+const formatDateText = (value) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("en-GB");
+};
+
+const formatNumberText = (value) => {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+};
 
 export const listLaborProfiles = async (req, res) => {
   const { status = "ACTIVE" } = req.query;
@@ -39,7 +57,7 @@ export const listLaborProfiles = async (req, res) => {
 
 export const createLaborProfile = async (req, res) => {
   const department = normalizeLaborDepartment(
-    req.body.department ?? req.body.categoryId
+    req.body.department ?? req.body.categoryId,
   );
   const labelMap = await getLaborDepartmentLabelMap();
   const profile = await prisma.laborProfile.create({
@@ -145,6 +163,129 @@ export const deleteLaborWorkEntry = async (req, res) => {
   res.status(204).end();
 };
 
+export const getPrintableLaborWorkEntries = async (req, res) => {
+  const start = toDate(req.query.start);
+  const end = toDate(req.query.end);
+  const departmentRaw = String(req.query.department ?? "ALL").trim();
+  const department =
+    departmentRaw && departmentRaw !== "ALL"
+      ? normalizeLaborDepartment(departmentRaw, "")
+      : "ALL";
+  if (departmentRaw !== "ALL" && !department) {
+    res.status(400).json({ error: "Invalid department filter." });
+    return;
+  }
+
+  const search = String(req.query.search ?? "")
+    .trim()
+    .toLowerCase();
+
+  const [entries, labelMap] = await Promise.all([
+    prisma.laborWorkEntry.findMany({
+      where: {
+        startDate: withDateRange(start, end),
+      },
+      include: {
+        labor: true,
+        article: true,
+      },
+      orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+    }),
+    getLaborDepartmentLabelMap(),
+  ]);
+
+  const filteredEntries = entries.filter((entry) => {
+    const departmentOk =
+      department === "ALL" || entry.labor?.department === department;
+    const searchOk =
+      !search ||
+      String(entry.labor?.name ?? "")
+        .toLowerCase()
+        .includes(search);
+    return departmentOk && searchOk;
+  });
+
+  const totalAmount = filteredEntries.reduce(
+    (sum, entry) => sum + Number(entry.total ?? 0),
+    0,
+  );
+
+  const rowsHtml = filteredEntries
+    .map((entry) => {
+      const departmentLabel = getLaborDepartmentLabelFromMap(
+        entry.labor?.department,
+        labelMap,
+      );
+      return `
+        <tr>
+          <td>${escapeHtml(formatDateText(entry.startDate))}</td>
+          <td>${escapeHtml(entry.labor?.name || "-")}</td>
+          <td>${escapeHtml(departmentLabel || "-")}</td>
+          <td>${escapeHtml(entry.article?.name || "-")}</td>
+          <td>${escapeHtml(formatNumberText(entry.quantity))}</td>
+          <td>${escapeHtml(formatNumberText(entry.rate))}</td>
+          <td>${escapeHtml(formatNumberText(entry.total))}</td>
+        </tr>`;
+    })
+    .join("");
+
+  const html = `<!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Labor Work Entries</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 18px; color: #111; }
+        h1 { margin: 0 0 8px; font-size: 22px; }
+        .meta { margin-bottom: 14px; font-size: 13px; }
+        .meta p { margin: 3px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: left; font-size: 12px; }
+        th { background: #f5f5f5; }
+        .totals { margin-top: 12px; font-size: 13px; }
+        @media print { body { padding: 8px; } }
+      </style>
+    </head>
+    <body>
+      <h1>Labor Work Entries</h1>
+      <div class="meta">
+        <p><strong>Generated At:</strong> ${escapeHtml(new Date().toLocaleString("en-GB"))}</p>
+        <p><strong>Department:</strong> ${escapeHtml(
+          department === "ALL"
+            ? "All Departments"
+            : getLaborDepartmentLabelFromMap(department, labelMap),
+        )}</p>
+        <p><strong>Search:</strong> ${escapeHtml(search || "All")}</p>
+        <p><strong>Date Range:</strong> ${escapeHtml(start ? formatDateText(start) : "All")} - ${escapeHtml(end ? formatDateText(end) : "All")}</p>
+        <p><strong>Total Rows:</strong> ${filteredEntries.length}</p>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Labor</th>
+            <th>Department</th>
+            <th>Article</th>
+            <th>Quantity</th>
+            <th>Rate</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml || '<tr><td colspan="7">No work entries for selected filters.</td></tr>'}
+        </tbody>
+      </table>
+      <div class="totals">
+        <p><strong>Total Amount:</strong> ${escapeHtml(formatNumberText(totalAmount))}</p>
+      </div>
+      <script>window.onload = () => { window.focus(); window.print(); };</script>
+    </body>
+  </html>`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+};
+
 export const createLaborAdvance = async (req, res) => {
   const advance = await prisma.laborAdvance.create({
     data: {
@@ -242,11 +383,11 @@ export const getLaborLedger = async (req, res) => {
 
   const totalEarnings = workEntries.reduce(
     (sum, entry) => sum + Number(entry.total),
-    0
+    0,
   );
   const totalAdvances = advances.reduce(
     (sum, entry) => sum + Number(entry.amount),
-    0
+    0,
   );
 
   res.json({
@@ -286,7 +427,7 @@ export const getMonthlyLaborSummary = async (req, res) => {
   });
 
   const grouped = groupByPeriod(entries, (entry) =>
-    entry.startDate.toISOString().slice(0, 7)
+    entry.startDate.toISOString().slice(0, 7),
   );
 
   res.json(Object.values(grouped));

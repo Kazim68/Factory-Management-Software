@@ -1,7 +1,6 @@
 import type {
   ApiArticle,
   ApiExpenseEntry,
-  ApiExpenseCategory,
   ApiExpenseModule,
   ApiLaborCategory,
   ApiLaborLedger,
@@ -84,7 +83,6 @@ const ENTITY_LABELS: Record<string, string> = {
   "config/articles": "article",
   "config/labor-categories": "labor category",
   "config/payment-types": "payment type",
-  "config/expense-categories": "expense category",
   parties: "party",
   expenses: "expense",
   bills: "bill",
@@ -452,31 +450,15 @@ export const configApi = {
       path: `/config/payment-types/${paymentTypeId}`,
       method: "DELETE",
     }),
-
-  listExpenseCategories: (): Promise<ApiExpenseCategory[]> =>
-    get("/config/expense-categories"),
-  createExpenseCategory: (data: {
-    name: string;
-  }): Promise<ApiExpenseCategory> =>
-    request({ path: "/config/expense-categories", method: "POST", body: data }),
-  updateExpenseCategory: (
-    expenseCategoryId: string,
-    data: { name: string },
-  ): Promise<ApiExpenseCategory> =>
-    request({
-      path: `/config/expense-categories/${expenseCategoryId}`,
-      method: "PATCH",
-      body: data,
-    }),
-  deleteExpenseCategory: (expenseCategoryId: string): Promise<void> =>
-    request({
-      path: `/config/expense-categories/${expenseCategoryId}`,
-      method: "DELETE",
-    }),
 };
 
 export const partyApi = {
-  listParties: (): Promise<ApiParty[]> => get("/parties"),
+  listParties: (params?: { type?: ApiPartyType }): Promise<ApiParty[]> =>
+    get(
+      withQuery("/parties", {
+        type: params?.type,
+      }),
+    ),
   listSupplierPendingDues: (params?: {
     asOf?: string;
   }): Promise<ApiSupplierPendingDuesResponse> =>
@@ -548,6 +530,9 @@ export const expenseApi = {
     laborId?: string;
     module?: ApiExpenseModule;
     paymentType?: ApiPaymentMethod;
+    chequeId?: string;
+    chequeNumber?: string;
+    chequeNotes?: string;
     amount: number;
     description?: string;
     actorUsername?: string;
@@ -563,6 +548,9 @@ export const expenseApi = {
       laborId?: string;
       module?: ApiExpenseModule;
       paymentType?: ApiPaymentMethod;
+      chequeId?: string;
+      chequeNumber?: string;
+      chequeNotes?: string;
       amount?: number;
       description?: string;
     },
@@ -648,6 +636,20 @@ export const laborApi = {
     auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborWorkEntry> =>
     request({ path: "/labor/work", method: "POST", body: data, auditMeta }),
+  getPrintableWorkEntries: (params?: {
+    start?: string;
+    end?: string;
+    department?: string;
+    search?: string;
+  }): Promise<string> =>
+    get(
+      withQuery("/labor/work/printable", {
+        start: params?.start,
+        end: params?.end,
+        department: params?.department,
+        search: params?.search,
+      }),
+    ),
   updateWorkEntry: (
     workId: string,
     data: {
@@ -676,7 +678,6 @@ export const laborApi = {
       date: string;
       amount: number;
       reason: string;
-      categoryId?: string;
       partyId?: string;
     },
     auditMeta?: ApiAuditMeta,
@@ -689,7 +690,6 @@ export const laborApi = {
       date?: string;
       amount?: number;
       reason?: string;
-      categoryId?: string;
     },
     auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborAdvance> =>
@@ -811,12 +811,49 @@ export const chequeApi = {
 };
 
 export const purchaseApi = {
+  createCombined: (data: {
+    date: string;
+    partyId: string;
+    paymentType: ApiPaymentMethod;
+    amountPaid: number;
+    chequeId?: string;
+    rows: Array<{
+      type: "CHEMICAL" | "REXINE" | "MATERIAL";
+      quantity: number;
+      rate: number;
+      articleId?: string;
+    }>;
+  }): Promise<{
+    grossTotal: number;
+    amountPaid: number;
+    paymentType: ApiPaymentMethod;
+    created: Array<{ type: string; id: string }>;
+  }> => request({ path: "/purchases/combined", method: "POST", body: data }),
+  getPrintableSupplierPurchases: (params: {
+    types: Array<"CHEMICAL" | "REXINE" | "MATERIAL">;
+    timePreset:
+      | "DAILY"
+      | "WEEKLY"
+      | "MONTHLY"
+      | "YEARLY"
+      | "CUSTOM"
+      | "THIS_MONTH";
+    start?: string;
+    end?: string;
+  }): Promise<string> =>
+    get(
+      withQuery("/purchases/printable", {
+        types: params.types.join(","),
+        timePreset: params.timePreset,
+        start: params.start,
+        end: params.end,
+      }),
+    ),
   listChemicals: (): Promise<ApiChemicalPurchase[]> => get("/chemicals"),
   createChemical: (
     data: {
       date: string;
       partyId?: string;
-      categoryId?: string;
       quantityKg: number;
       ratePerKg: number;
       totalAmount: number;
@@ -831,7 +868,6 @@ export const purchaseApi = {
     data: {
       date?: string;
       partyId?: string;
-      categoryId?: string;
       quantityKg?: number;
       ratePerKg?: number;
       totalAmount?: number;
@@ -857,7 +893,6 @@ export const purchaseApi = {
     data: {
       date: string;
       partyId?: string;
-      categoryId?: string;
       quantityMeter: number;
       ratePerMeter: number;
       totalAmount: number;
@@ -872,7 +907,6 @@ export const purchaseApi = {
     data: {
       date?: string;
       partyId?: string;
-      categoryId?: string;
       quantityMeter?: number;
       ratePerMeter?: number;
       totalAmount?: number;
@@ -895,7 +929,6 @@ export const purchaseApi = {
     data: {
       date: string;
       partyId?: string;
-      categoryId?: string;
       articleId?: string;
       unitId?: string;
       quantity: number;
@@ -912,7 +945,6 @@ export const purchaseApi = {
     data: {
       date?: string;
       partyId?: string;
-      categoryId?: string;
       articleId?: string;
       unitId?: string;
       quantity?: number;
@@ -945,9 +977,12 @@ export const productionApi = {
     const suffix = query.toString();
     return get(`/production/orders${suffix ? `?${suffix}` : ""}`);
   },
+  getPrintableOrders: (): Promise<string> =>
+    get("/production/orders/printable"),
   createOrder: (data: {
     department: ApiLaborDepartment;
     articleId: string;
+    size: string;
     laborId?: string;
     quantityDozen: number;
     pricePerDozen: number;
@@ -957,6 +992,7 @@ export const productionApi = {
     orderId: string,
     data: {
       articleId?: string;
+      size?: string;
       quantityDozen?: number;
       pricePerDozen?: number;
     },

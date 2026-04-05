@@ -1,6 +1,7 @@
 import { Router } from "express";
 import asyncHandler from "../middleware/asyncHandler.js";
 import {
+  createCombinedSupplierPurchase,
   createChemicalPurchase,
   createMaterialPurchase,
   createRexinePurchase,
@@ -10,6 +11,7 @@ import {
   listChemicalPurchases,
   listMaterialPurchases,
   listRexinePurchases,
+  getPrintableSupplierPurchases,
   updateChemicalPurchase,
   updateMaterialPurchase,
   updateRexinePurchase,
@@ -17,6 +19,11 @@ import {
 
 const router = Router();
 
+router.post(
+  "/purchases/combined",
+  asyncHandler(createCombinedSupplierPurchase),
+);
+router.get("/purchases/printable", asyncHandler(getPrintableSupplierPurchases));
 router.post("/chemicals", asyncHandler(createChemicalPurchase));
 router.post("/rexine", asyncHandler(createRexinePurchase));
 router.post("/materials", asyncHandler(createMaterialPurchase));

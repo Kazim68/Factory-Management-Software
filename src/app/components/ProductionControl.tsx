@@ -34,6 +34,7 @@ import type {
   ApiLaborDepartment,
   ApiProductionOrder,
 } from "../types/api";
+import { Printer } from "lucide-react";
 import { toast } from "sonner";
 
 const DEPARTMENTS: ApiLaborDepartment[] = [
@@ -86,7 +87,9 @@ const statusLabel = (status: ApiProductionOrder["status"]) => {
 export function ProductionControl() {
   const [orders, setOrders] = useState<ApiProductionOrder[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
-  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>([]);
+  const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>(
+    [],
+  );
   const [departmentLabors, setDepartmentLabors] = useState<
     Record<ApiLaborDepartment, Array<{ id: string; name: string }>>
   >({
@@ -103,12 +106,13 @@ export function ProductionControl() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [orderData, articleData, laborData, laborCategoryData] = await Promise.all([
-        productionApi.listOrders(),
-        configApi.listArticles(),
-        productionApi.listDepartmentLabors(),
-        configApi.listLaborCategories(),
-      ]);
+      const [orderData, articleData, laborData, laborCategoryData] =
+        await Promise.all([
+          productionApi.listOrders(),
+          configApi.listArticles(),
+          productionApi.listDepartmentLabors(),
+          configApi.listLaborCategories(),
+        ]);
       setOrders(orderData);
       setArticles(articleData);
       setLaborCategories(laborCategoryData);
@@ -167,7 +171,8 @@ export function ProductionControl() {
       laborCategories.reduce(
         (acc, category) => {
           acc[category.id as ApiLaborDepartment] =
-            category.name || DEFAULT_DEPARTMENT_TITLE[category.id as ApiLaborDepartment];
+            category.name ||
+            DEFAULT_DEPARTMENT_TITLE[category.id as ApiLaborDepartment];
           return acc;
         },
         { ...DEFAULT_DEPARTMENT_TITLE },
@@ -246,9 +251,11 @@ function DepartmentSection({
   const [editOpen, setEditOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const [formData, setFormData] = useState({
     articleId: "",
+    size: "",
     laborId: "unassigned",
     quantityDozen: "",
     pricePerDozen: "",
@@ -269,6 +276,7 @@ function DepartmentSection({
     useState("SKIP");
   const [editForm, setEditForm] = useState({
     articleId: "",
+    size: "",
     laborId: "unassigned",
     quantityDozen: "",
     pricePerDozen: "",
@@ -303,12 +311,14 @@ function DepartmentSection({
     if (!Number.isFinite(quantityDozen) || quantityDozen <= 0) return;
     if (!Number.isFinite(pricePerDozen) || pricePerDozen <= 0) return;
     if (!formData.articleId) return;
+    if (!formData.size.trim()) return;
 
     try {
       setSaving(true);
       await productionApi.createOrder({
         department,
         articleId: formData.articleId,
+        size: formData.size.trim(),
         laborId:
           formData.laborId === "unassigned" ? undefined : formData.laborId,
         quantityDozen,
@@ -317,6 +327,7 @@ function DepartmentSection({
       toast.success("Order added.");
       setFormData({
         articleId: articles[0]?.id ?? "",
+        size: "",
         laborId: "unassigned",
         quantityDozen: "",
         pricePerDozen: "",
@@ -377,6 +388,7 @@ function DepartmentSection({
     setSelectedOrderId(row.id);
     setEditForm({
       articleId: row.articleId,
+      size: row.size,
       laborId: row.laborId || "unassigned",
       quantityDozen: String(row.quantityDozen),
       pricePerDozen: String(row.pricePerDozen),
@@ -537,10 +549,12 @@ function DepartmentSection({
     const pricePerDozen = Number(editForm.pricePerDozen);
     if (!Number.isFinite(quantityDozen) || quantityDozen <= 0) return;
     if (!Number.isFinite(pricePerDozen) || pricePerDozen <= 0) return;
+    if (!editForm.size.trim()) return;
     try {
       setSaving(true);
       await productionApi.updateOrder(selectedOrderId, {
         articleId: editForm.articleId,
+        size: editForm.size.trim(),
         quantityDozen,
         pricePerDozen,
       });
@@ -565,103 +579,149 @@ function DepartmentSection({
     }
   };
 
+  const printDepartmentOrders = async () => {
+    try {
+      setPrinting(true);
+      const html = await productionApi.getPrintableOrders();
+      const printWindow = window.open("", "", "width=1000,height=700");
+      if (!printWindow) {
+        toast.error("Unable to open print window.");
+        return;
+      }
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to generate printable department report.");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3>{departmentLabel} Orders</h3>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">Add Order</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                Add {departmentLabel} Order
-              </DialogTitle>
-            </DialogHeader>
-            <form onSubmit={submit} className="space-y-4">
-              <div>
-                <Label>Article</Label>
-                <Select
-                  value={formData.articleId}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, articleId: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {articles.map((article) => (
-                      <SelectItem key={article.id} value={article.id}>
-                        {article.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Labor</Label>
-                <Select
-                  value={formData.laborId}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, laborId: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                    {departmentLabors.map((labor) => (
-                      <SelectItem key={labor.id} value={labor.id}>
-                        {labor.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Quantity (Dozen)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formData.quantityDozen}
-                  onChange={(e) =>
-                    setFormData({ ...formData, quantityDozen: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <Label>Price Per Dozen</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formData.pricePerDozen}
-                  onChange={(e) =>
-                    setFormData({ ...formData, pricePerDozen: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={saving}>
-                  Add
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={printDepartmentOrders}
+            disabled={printing}
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            {printing ? "Preparing..." : "Print"}
+          </Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm">Add Order</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add {departmentLabel} Order</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={submit} className="space-y-4">
+                <div>
+                  <Label>Article</Label>
+                  <Select
+                    value={formData.articleId}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, articleId: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {articles.map((article) => (
+                        <SelectItem key={article.id} value={article.id}>
+                          {article.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Size</Label>
+                  <Input
+                    value={formData.size}
+                    onChange={(e) =>
+                      setFormData({ ...formData, size: e.target.value })
+                    }
+                    placeholder="Enter size"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label>Labor</Label>
+                  <Select
+                    value={formData.laborId}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, laborId: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {departmentLabors.map((labor) => (
+                        <SelectItem key={labor.id} value={labor.id}>
+                          {labor.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Quantity (Dozen)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.quantityDozen}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        quantityDozen: e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </div>
+                <div>
+                  <Label>Price Per Dozen</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.pricePerDozen}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        pricePerDozen: e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={saving}>
+                    Add
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
@@ -819,18 +879,11 @@ function DepartmentSection({
                       <SelectValue placeholder="Select upper department" />
                     </SelectTrigger>
                     <SelectContent>
-                      {doneUpperDepartmentOptions
-                        .filter(
-                          (nextDepartment) => nextDepartment !== "PRINTING",
-                        )
-                        .map((nextDepartment) => (
-                          <SelectItem
-                            key={nextDepartment}
-                            value={nextDepartment}
-                          >
-                            {DEPARTMENT_TITLE[nextDepartment]}
-                          </SelectItem>
-                        ))}
+                      {doneUpperDepartmentOptions.map((nextDepartment) => (
+                        <SelectItem key={nextDepartment} value={nextDepartment}>
+                          {DEFAULT_DEPARTMENT_TITLE[nextDepartment]}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -906,7 +959,7 @@ function DepartmentSection({
                     <SelectContent>
                       {doneNextDepartmentOptions.map((nextDepartment) => (
                         <SelectItem key={nextDepartment} value={nextDepartment}>
-                          {DEPARTMENT_TITLE[nextDepartment]}
+                          {DEFAULT_DEPARTMENT_TITLE[nextDepartment]}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -957,6 +1010,17 @@ function DepartmentSection({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Size</Label>
+              <Input
+                value={editForm.size}
+                onChange={(e) =>
+                  setEditForm({ ...editForm, size: e.target.value })
+                }
+                placeholder="Enter size"
+                required
+              />
             </div>
             <div>
               <Label>Labor</Label>
@@ -1025,6 +1089,7 @@ function DepartmentSection({
         <TableHeader>
           <TableRow>
             <TableHead>Article</TableHead>
+            <TableHead>Size</TableHead>
             <TableHead>Labor</TableHead>
             <TableHead>Quantity (Dozen)</TableHead>
             <TableHead>
@@ -1041,7 +1106,7 @@ function DepartmentSection({
           {isLoading ? (
             <TableRow>
               <TableCell
-                colSpan={7}
+                colSpan={8}
                 className="text-center text-muted-foreground"
               >
                 Loading orders...
@@ -1050,7 +1115,7 @@ function DepartmentSection({
           ) : rows.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={7}
+                colSpan={8}
                 className="text-center text-muted-foreground"
               >
                 No orders in this department.
@@ -1060,6 +1125,7 @@ function DepartmentSection({
             rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell>{row.article?.name || "-"}</TableCell>
+                <TableCell>{row.size || "-"}</TableCell>
                 <TableCell>
                   {isMergedFinalDepartment
                     ? `${row.labor?.name || "-"} / ${row.packingLabor?.name || "-"}`

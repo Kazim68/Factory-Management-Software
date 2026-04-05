@@ -196,13 +196,6 @@ export interface ApiMaterialPurchase {
   expenses?: ApiExpenseEntry[];
 }
 
-export interface ApiExpenseCategory {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export type ApiExpenseModule =
   | "CHEMICAL"
   | "REXINE"
@@ -215,7 +208,6 @@ export type ApiExpenseSource = "MANUAL" | "SYSTEM";
 export interface ApiExpenseEntry {
   id: string;
   date: string;
-  categoryId?: string | null;
   partyId?: string | null;
   laborId?: string | null;
   module: ApiExpenseModule;
@@ -229,13 +221,12 @@ export interface ApiExpenseEntry {
   source?: ApiExpenseSource;
   sourceSystem?: string | null;
   createdAt: string;
-  category?: ApiExpenseCategory | null;
   party?: ApiParty | null;
   labor?: ApiLaborProfile | null;
   laborAdvance?: ApiLaborAdvance | null;
 }
 
-export type ApiPartyType = "CUSTOMER" | "SUPPLIER" | "BOTH";
+export type ApiPartyType = "CUSTOMER" | "SUPPLIER";
 
 export interface ApiParty {
   id: string;
@@ -280,7 +271,7 @@ export interface ApiPartyPayment {
 export interface ApiSupplierPendingDue {
   partyId: string;
   partyName: string;
-  partyType: Extract<ApiPartyType, "SUPPLIER" | "BOTH">;
+  partyType: Extract<ApiPartyType, "SUPPLIER">;
   netBalance: number;
   remainingDue: number;
 }
@@ -316,6 +307,7 @@ export interface ApiProductionOrder {
   departmentLabel: string;
   stage: ApiProductionStage;
   articleId: string;
+  size: string;
   laborId?: string | null;
   packingLaborId?: string | null;
   quantityDozen: number;
@@ -359,6 +351,7 @@ export interface ApiStockSummary {
 export interface ApiStockArticleRow {
   articleId: string;
   articleName: string;
+  size: string;
   articleCode?: string | null;
   quantityDozen: number;
   bMallDozen: number;

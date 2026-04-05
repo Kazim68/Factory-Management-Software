@@ -36,7 +36,7 @@ import {
   BadgeCheck,
   CheckCircle2,
 } from "lucide-react";
-import { billApi, configApi, partyApi } from "../lib/api";
+import { billApi, configApi, partyApi, productionApi } from "../lib/api";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
 import type {
   ApiArticle,
@@ -44,10 +44,12 @@ import type {
   ApiBillLedgerEntry,
   ApiPaymentMethod,
   ApiParty,
+  ApiStockArticleRow,
 } from "../types/api";
 import { toast } from "sonner";
 
 type BillItemForm = {
+  stockVariantKey: string;
   articleId: string;
   articleName: string;
   size: string;
@@ -55,6 +57,27 @@ type BillItemForm = {
   price: number;
   discount: number;
   total: number;
+};
+
+type StockVariantOption = {
+  key: string;
+  articleId: string;
+  articleName: string;
+  size: string;
+  quantityDozen: number;
+};
+
+const normalizeSize = (value?: string | null) => {
+  const normalized = String(value ?? "").trim();
+  return normalized || "-";
+};
+
+const getStockVariantKey = (articleId: string, size: string) =>
+  `${articleId}::${normalizeSize(size)}`;
+
+const toBillLineSize = (size: string) => {
+  const normalized = normalizeSize(size);
+  return normalized === "-" ? null : normalized;
 };
 
 const roundMoney = (value: number) => Number(value.toFixed(2));
@@ -75,6 +98,7 @@ const calculateLineTotal = (
   );
 
 const createEmptyBillItem = (): BillItemForm => ({
+  stockVariantKey: "",
   articleId: "",
   articleName: "",
   size: "",
@@ -99,6 +123,12 @@ export function BillManagement() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [stockVariantOptions, setStockVariantOptions] = useState<
+    StockVariantOption[]
+  >([]);
+  const [availableStockByVariant, setAvailableStockByVariant] = useState<
+    Record<string, number>
+  >({});
 
   const [ledgerBill, setLedgerBill] = useState<ApiBill | null>(null);
   const [ledgerEntries, setLedgerEntries] = useState<ApiBillLedgerEntry[]>([]);
@@ -123,14 +153,46 @@ export function BillManagement() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [billData, partyData, articleData] = await Promise.all([
+      const [billData, partyData, articleData, stockRows] = await Promise.all([
         billApi.listBills(),
-        partyApi.listParties(),
+        partyApi.listParties({ type: "CUSTOMER" }),
         configApi.listArticles(),
+        productionApi.listStockByArticle({ mode: "PACKED" }),
       ]);
       setBills(billData);
       setParties(partyData);
       setArticles(articleData);
+      const rows = (stockRows ?? []) as ApiStockArticleRow[];
+      const byVariant = rows.reduce<Record<string, number>>((acc, row) => {
+        const key = getStockVariantKey(row.articleId, row.size);
+        acc[key] = (acc[key] ?? 0) + Number(row.quantityDozen ?? 0);
+        return acc;
+      }, {});
+
+      const options = rows
+        .map((row) => {
+          const key = getStockVariantKey(row.articleId, row.size);
+          return {
+            key,
+            articleId: row.articleId,
+            articleName: row.articleName,
+            size: normalizeSize(row.size),
+            quantityDozen: Number(byVariant[key] ?? 0),
+          };
+        })
+        .filter(
+          (row, index, all) =>
+            all.findIndex((r) => r.key === row.key) === index,
+        )
+        .filter((row) => row.quantityDozen > 0)
+        .sort((a, b) => {
+          const byName = a.articleName.localeCompare(b.articleName);
+          if (byName !== 0) return byName;
+          return a.size.localeCompare(b.size);
+        });
+
+      setStockVariantOptions(options);
+      setAvailableStockByVariant(byVariant);
     } catch (error) {
       console.error(error);
       toast.error("Failed to load bills.");
@@ -161,6 +223,21 @@ export function BillManagement() {
       const article = articles.find((a) => a.id === value);
       if (article) {
         newItems[index].articleName = article.name;
+      }
+    }
+
+    if (field === "stockVariantKey") {
+      const selected = stockVariantOptions.find(
+        (option) => option.key === value,
+      );
+      if (selected) {
+        newItems[index].articleId = selected.articleId;
+        newItems[index].articleName = selected.articleName;
+        newItems[index].size = selected.size;
+      } else {
+        newItems[index].articleId = "";
+        newItems[index].articleName = "";
+        newItems[index].size = "";
       }
     }
 
@@ -206,6 +283,29 @@ export function BillManagement() {
       return;
     }
 
+    const requestedByVariant = validItems.reduce<Record<string, number>>(
+      (acc, item) => {
+        const key = getStockVariantKey(item.articleId, item.size);
+        acc[key] = (acc[key] ?? 0) + Number(item.quantity);
+        return acc;
+      },
+    );
+
+    for (const [variantKey, requested] of Object.entries(requestedByVariant)) {
+      const available = Number(availableStockByVariant[variantKey] ?? 0);
+      if (requested > available) {
+        const selected = stockVariantOptions.find(
+          (option) => option.key === variantKey,
+        );
+        const articleName = selected?.articleName || "Selected article";
+        const sizeLabel = selected?.size || "-";
+        toast.error(
+          `${articleName} (${sizeLabel}) has only ${available} dozen available in packed stock.`,
+        );
+        return;
+      }
+    }
+
     try {
       const payload = {
         date: formData.date,
@@ -214,7 +314,7 @@ export function BillManagement() {
         status: "CONFIRMED" as const,
         lines: validItems.map((item) => ({
           articleId: item.articleId,
-          size: item.size.trim() || null,
+          size: toBillLineSize(item.size),
           quantity: item.quantity,
           price: item.price,
           discount: item.discount,
@@ -253,18 +353,22 @@ export function BillManagement() {
     setItems(
       ensureMinimumRows(
         bill.lines.map((line) => ({
+          stockVariantKey: getStockVariantKey(
+            line.articleId,
+            normalizeSize(line.size),
+          ),
           articleId: line.articleId,
           articleName:
             line.article?.name ||
             articles.find((article) => article.id === line.articleId)?.name ||
             "",
-          size: line.size || "",
+          size: normalizeSize(line.size),
           quantity: Number(line.quantity),
           price: Number(line.price),
           discount: Number(line.discount ?? 0),
           total: Number(line.total),
-        }))
-      )
+        })),
+      ),
     );
     setIsDialogOpen(true);
   };
@@ -429,6 +533,9 @@ export function BillManagement() {
   );
   const grandTotal = roundMoney(grossTotal - discountTotal);
 
+  const getAvailableQuantity = (stockVariantKey: string) =>
+    Number(availableStockByVariant[stockVariantKey] ?? 0);
+
   const getStatusLabel = (bill: ApiBill) => {
     if (bill.paymentStatus === "PAID") return "Paid";
     if (bill.paymentStatus === "PARTIAL_PAID") return "Partial Paid";
@@ -524,40 +631,53 @@ export function BillManagement() {
                         {items.map((item, index) => (
                           <TableRow key={index}>
                             <TableCell>
-                              <Select
-                                value={item.articleId}
-                                onValueChange={(value) =>
-                                  updateItem(index, "articleId", value)
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select article" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {articles.map((article) => (
-                                    <SelectItem
-                                      key={article.id}
-                                      value={article.id}
-                                    >
-                                      {article.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <div className="space-y-1.5">
+                                <Select
+                                  value={item.stockVariantKey}
+                                  onValueChange={(value) =>
+                                    updateItem(index, "stockVariantKey", value)
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select stock variant" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {stockVariantOptions.map((variant) => (
+                                      <SelectItem
+                                        key={variant.key}
+                                        value={variant.key}
+                                      >
+                                        {variant.articleName} ({variant.size})
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {item.stockVariantKey && (
+                                  <p className="text-xs text-muted-foreground">
+                                    Available packed stock:{" "}
+                                    {getAvailableQuantity(item.stockVariantKey)}{" "}
+                                    dozen
+                                  </p>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <Input
                                 value={item.size}
-                                onChange={(e) =>
-                                  updateItem(index, "size", e.target.value)
-                                }
-                                placeholder="Size"
+                                placeholder="Auto-selected"
+                                readOnly
+                                disabled
                               />
                             </TableCell>
                             <TableCell>
                               <Input
                                 type="number"
                                 min="1"
+                                max={
+                                  item.stockVariantKey
+                                    ? getAvailableQuantity(item.stockVariantKey)
+                                    : undefined
+                                }
                                 value={item.quantity || ""}
                                 onChange={(e) =>
                                   updateItem(
@@ -616,30 +736,37 @@ export function BillManagement() {
                     </Table>
                     <p className="mt-2 text-sm text-muted-foreground">
                       Discount is deducted directly from the pair price.
-                      Example: <span className="font-medium">price 1200, discount 100, net 1100</span>
+                      Example:{" "}
+                      <span className="font-medium">
+                        price 1200, discount 100, net 1100
+                      </span>
                     </p>
                   </div>
 
                   <div className="grid gap-3 rounded bg-muted p-4 md:grid-cols-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-muted-foreground">
+                    <div className="rounded bg-background/70 p-3">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
                         Gross Total
-                      </span>
-                      <span>{formatCurrency(grossTotal)}</span>
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {formatCurrency(grossTotal)}
+                      </p>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-muted-foreground">
+                    <div className="rounded bg-background/70 p-3">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
                         Discount
-                      </span>
-                      <span>{formatCurrency(discountTotal)}</span>
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {formatCurrency(discountTotal)}
+                      </p>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-muted-foreground">
+                    <div className="rounded bg-background/70 p-3">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
                         Grand Total
-                      </span>
-                      <span className="text-xl font-semibold">
+                      </p>
+                      <p className="mt-1 text-xl font-semibold">
                         {formatCurrency(grandTotal)}
-                      </span>
+                      </p>
                     </div>
                   </div>
 

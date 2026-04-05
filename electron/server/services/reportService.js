@@ -427,7 +427,7 @@ export const getPartyMonthlyOutstandingSummary = async ({
         return {
           partyId,
           partyName: party?.name ?? "Unknown",
-          partyType: party?.type ?? "BOTH",
+          partyType: party?.type ?? "CUSTOMER",
           outstanding: numericOutstanding,
           receivable: numericOutstanding > 0 ? numericOutstanding : 0,
           payable: numericOutstanding < 0 ? Math.abs(numericOutstanding) : 0,

@@ -17,55 +17,33 @@ import {
   TableHeader,
   TableRow,
 } from "./ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "./ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Plus, Eye } from "lucide-react";
 import { formatCurrency, formatDate } from "../lib/utils";
-import { billApi, chequeApi, partyApi, reportsApi } from "../lib/api";
-import {
-  exportTableToExcel,
-  exportTableToPdf,
-  type ReportExportPayload,
-} from "../lib/report";
+import { billApi, chequeApi, partyApi } from "../lib/api";
+import { SupplierCombinedPurchase } from "./SupplierPurchaseSection";
 import type {
   ApiBill,
   ApiCheque,
   ApiPartyLedgerEntry,
-  ApiPartyMonthlyOutstandingReport,
   ApiPaymentMethod,
-  ApiPartyType,
 } from "../types/api";
 import { toast } from "sonner";
 
 type UiParty = {
   id: string;
   name: string;
-  type: "customer" | "supplier" | "both";
+  type: "customer" | "supplier";
   currentBalance: number;
   createdAt: string;
 };
 
-const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
-
-const monthToDateRange = (month: string) => {
-  if (!month) return { start: undefined, end: undefined };
-  const [year, monthNumber] = month.split("-").map(Number);
-  if (!year || !monthNumber) return { start: undefined, end: undefined };
-
-  const start = `${month}-01`;
-  const endDay = new Date(year, monthNumber, 0).getDate();
-  const end = `${month}-${String(endDay).padStart(2, "0")}`;
-  return { start, end };
-};
-
-export function PartyManagement() {
+export function PartyManagement({
+  partyType,
+}: {
+  partyType: "customer" | "supplier";
+}) {
   const [parties, setParties] = useState<UiParty[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -78,21 +56,12 @@ export function PartyManagement() {
   const [isLoadingCheques, setIsLoadingCheques] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<ApiPartyLedgerEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState(() => {
-    if (typeof window === "undefined") return "entries";
-    return localStorage.getItem("party.activeSection") || "entries";
-  });
-  const [partyReportStartMonth, setPartyReportStartMonth] =
-    useState(getCurrentMonth());
-  const [partyReportEndMonth, setPartyReportEndMonth] =
-    useState(getCurrentMonth());
-  const [partyReport, setPartyReport] =
-    useState<ApiPartyMonthlyOutstandingReport | null>(null);
-  const [isLoadingPartyReport, setIsLoadingPartyReport] = useState(false);
+  const [partyDialogType, setPartyDialogType] = useState<
+    "customer" | "supplier"
+  >(partyType);
 
   const [formData, setFormData] = useState({
     name: "",
-    type: "customer" as "customer" | "supplier" | "both",
   });
 
   const [paymentData, setPaymentData] = useState({
@@ -104,19 +73,8 @@ export function PartyManagement() {
     description: "",
   });
 
-  const mapPartyType = (type: ApiPartyType): UiParty["type"] => {
-    switch (type) {
-      case "SUPPLIER":
-        return "supplier";
-      case "BOTH":
-        return "both";
-      default:
-        return "customer";
-    }
-  };
-
-  const toApiPartyType = (type: UiParty["type"]): ApiPartyType =>
-    type.toUpperCase() as ApiPartyType;
+  const mapPartyType = (type: string): UiParty["type"] =>
+    String(type).toUpperCase() === "SUPPLIER" ? "supplier" : "customer";
 
   const computeBalance = (entries: ApiPartyLedgerEntry[]) => {
     let balance = 0;
@@ -135,7 +93,9 @@ export function PartyManagement() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const apiParties = await partyApi.listParties();
+      const apiParties = await partyApi.listParties({
+        type: partyType === "supplier" ? "SUPPLIER" : "CUSTOMER",
+      });
       const ledgers = await Promise.all(
         apiParties.map((party) => partyApi.getLedger(party.id).catch(() => [])),
       );
@@ -159,49 +119,7 @@ export function PartyManagement() {
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem("party.activeSection", activeSection);
-  }, [activeSection]);
-
-  useEffect(() => {
-    let active = true;
-    const startRange = monthToDateRange(partyReportStartMonth).start;
-    const endRange = monthToDateRange(partyReportEndMonth).end;
-
-    setIsLoadingPartyReport(true);
-    const timer = window.setTimeout(() => {
-      reportsApi
-        .getPartyMonthlyOutstanding({
-          period: "monthly",
-          start: startRange,
-          end: endRange,
-        })
-        .then((report) => {
-          if (active) {
-            setPartyReport(report);
-          }
-        })
-        .catch((error) => {
-          console.error(error);
-          if (active) {
-            toast.error("Failed to load party report.");
-          }
-        })
-        .finally(() => {
-          if (active) {
-            setIsLoadingPartyReport(false);
-          }
-        });
-    }, 150);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [partyReportStartMonth, partyReportEndMonth]);
+  }, [partyType]);
 
   useEffect(() => {
     if (!viewingPartyId) {
@@ -324,18 +242,19 @@ export function PartyManagement() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const nextType = partyDialogType === "supplier" ? "SUPPLIER" : "CUSTOMER";
 
     try {
       if (editingId) {
         await partyApi.updateParty(editingId, {
           name: formData.name.trim(),
-          type: toApiPartyType(formData.type),
+          type: nextType,
         });
         toast.success("Party updated");
       } else {
         await partyApi.createParty({
           name: formData.name.trim(),
-          type: toApiPartyType(formData.type),
+          type: nextType,
         });
         toast.success("Party added");
       }
@@ -351,17 +270,23 @@ export function PartyManagement() {
   const resetForm = () => {
     setFormData({
       name: "",
-      type: "customer",
     });
     setEditingId(null);
   };
 
   const handleEdit = (party: UiParty) => {
     setEditingId(party.id);
+    setPartyDialogType(party.type);
     setFormData({
       name: party.name,
-      type: party.type,
     });
+    setIsDialogOpen(true);
+  };
+
+  const openAddPartyDialog = (type: "customer" | "supplier") => {
+    setEditingId(null);
+    setPartyDialogType(type);
+    setFormData({ name: "" });
     setIsDialogOpen(true);
   };
 
@@ -483,418 +408,152 @@ export function PartyManagement() {
     return withRunning.reverse();
   }, [ledgerEntries, parties, viewingPartyId]);
 
-  const selectedReportBucket = useMemo(() => {
-    if (!partyReport || partyReport.buckets.length === 0) return null;
-    return (
-      partyReport.buckets.find(
-        (bucket) => bucket.key === partyReportEndMonth,
-      ) || partyReport.buckets[partyReport.buckets.length - 1]
-    );
-  }, [partyReport, partyReportEndMonth]);
-
-  const buildPartyReportPayload = (
-    report: ApiPartyMonthlyOutstandingReport,
-  ): ReportExportPayload => ({
-    title: "Party monthly outstanding summary",
-    table: {
-      columns: [
-        "Month",
-        "Party",
-        "Type",
-        "Outstanding",
-        "Receivable",
-        "Payable",
-      ],
-      rows: report.buckets.flatMap((bucket) =>
-        bucket.parties.map((row) => [
-          bucket.key,
-          row.partyName,
-          row.partyType,
-          row.outstanding.toFixed(2),
-          row.receivable.toFixed(2),
-          row.payable.toFixed(2),
-        ]),
-      ),
-    },
-    metadata: {
-      generatedAt: new Date().toLocaleString(),
-      filters: [
-        `Period: ${report.period}`,
-        `Range: ${new Date(report.range.start).toLocaleDateString()} - ${new Date(report.range.end).toLocaleDateString()}`,
-      ],
-    },
-  });
-
-  const exportPartyReport = (type: "excel" | "pdf") => {
-    if (!partyReport || partyReport.buckets.length === 0) {
-      toast.error("No report data available for export.");
-      return;
-    }
-
-    const payload = buildPartyReportPayload(partyReport);
-    const ok =
-      type === "excel"
-        ? exportTableToExcel(payload)
-        : exportTableToPdf(payload);
-
-    if (!ok) {
-      toast.error(`Failed to export ${type.toUpperCase()} report.`);
-      return;
-    }
-
-    toast.success(`${type.toUpperCase()} report generated.`);
-  };
-
   return (
     <div className="space-y-6">
-      <Tabs value={activeSection} onValueChange={setActiveSection}>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <TabsList className="grid w-full max-w-[320px] grid-cols-2">
-            <TabsTrigger value="entries">Party Entries</TabsTrigger>
-            <TabsTrigger value="reports">Reports</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="reports" className="space-y-0">
-          <Card>
-            <CardHeader>
-              <CardTitle>Party Reports</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div>
-                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
-                    Start Month
-                  </Label>
-                  <Input
-                    type="month"
-                    value={partyReportStartMonth}
-                    onChange={(e) => setPartyReportStartMonth(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
-                    End Month
-                  </Label>
-                  <Input
-                    type="month"
-                    value={partyReportEndMonth}
-                    onChange={(e) => setPartyReportEndMonth(e.target.value)}
-                  />
-                </div>
-                <div className="md:col-span-2 flex items-end gap-2">
-                  {isLoadingPartyReport && (
-                    <p className="text-xs text-muted-foreground">Loading...</p>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => exportPartyReport("excel")}
-                    disabled={!partyReport || partyReport.buckets.length === 0}
-                  >
-                    Excel
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => exportPartyReport("pdf")}
-                    disabled={!partyReport || partyReport.buckets.length === 0}
-                  >
-                    PDF
-                  </Button>
-                </div>
-              </div>
-
-              {partyReport && (
-                <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Total Receivable
-                      </p>
-                      <p className="text-lg text-green-600">
-                        {formatCurrency(partyReport.totals.totalReceivable)}
-                      </p>
-                    </div>
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Total Payable
-                      </p>
-                      <p className="text-lg text-red-600">
-                        {formatCurrency(partyReport.totals.totalPayable)}
-                      </p>
-                    </div>
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Net Outstanding
-                      </p>
-                      <p className="text-lg">
-                        {formatCurrency(partyReport.totals.totalOutstanding)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Month</TableHead>
-                        <TableHead>Receivable</TableHead>
-                        <TableHead>Payable</TableHead>
-                        <TableHead>Net Outstanding</TableHead>
-                        <TableHead>Parties</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {partyReport.buckets.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={5}
-                            className="text-center text-muted-foreground"
-                          >
-                            No report data found.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        partyReport.buckets.map((bucket) => (
-                          <TableRow key={bucket.key}>
-                            <TableCell>{bucket.key}</TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.totalReceivable)}
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.totalPayable)}
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.totalOutstanding)}
-                            </TableCell>
-                            <TableCell>{bucket.partyCount}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-
-                  {selectedReportBucket && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">
-                        Outstanding Parties for {selectedReportBucket.key}
-                      </p>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Party</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead>Receivable</TableHead>
-                            <TableHead>Payable</TableHead>
-                            <TableHead>Outstanding</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {selectedReportBucket.parties.length === 0 ? (
-                            <TableRow>
-                              <TableCell
-                                colSpan={5}
-                                className="text-center text-muted-foreground"
-                              >
-                                No outstanding parties for this month.
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            selectedReportBucket.parties.map((row) => (
-                              <TableRow
-                                key={`${selectedReportBucket.key}-${row.partyId}`}
-                              >
-                                <TableCell>{row.partyName}</TableCell>
-                                <TableCell>{row.partyType}</TableCell>
-                                <TableCell>
-                                  {formatCurrency(row.receivable)}
-                                </TableCell>
-                                <TableCell>
-                                  {formatCurrency(row.payable)}
-                                </TableCell>
-                                <TableCell>
-                                  {formatCurrency(row.outstanding)}
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="entries" className="space-y-0">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Party Management</CardTitle>
-                <Dialog
-                  open={isDialogOpen}
-                  onOpenChange={(open) => {
-                    setIsDialogOpen(open);
-                    if (!open) resetForm();
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Party
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingId ? "Edit" : "Add"} Party
-                      </DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                      <div>
-                        <Label>Party Name</Label>
-                        <Input
-                          value={formData.name}
-                          onChange={(e) =>
-                            setFormData({ ...formData, name: e.target.value })
-                          }
-                          placeholder="Enter party name"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label>Type</Label>
-                        <Select
-                          value={formData.type}
-                          onValueChange={(
-                            value: "customer" | "supplier" | "both",
-                          ) => setFormData({ ...formData, type: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="customer">Customer</SelectItem>
-                            <SelectItem value="supplier">Supplier</SelectItem>
-                            <SelectItem value="both">Both</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setIsDialogOpen(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">
-                          {editingId ? "Update" : "Add"} Party
-                        </Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
+      {partyType === "customer" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Party (Customers)</CardTitle>
+              <Button onClick={() => openAddPartyDialog("customer")}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Customer
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Current Balance</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Current Balance</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableCell
+                      colSpan={3}
+                      className="text-center text-muted-foreground"
+                    >
+                      Loading parties...
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        Loading parties...
+                ) : parties.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={3}
+                      className="text-center text-muted-foreground"
+                    >
+                      No parties yet
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  parties.map((party) => (
+                    <TableRow key={party.id}>
+                      <TableCell>{party.name}</TableCell>
+                      <TableCell>
+                        <span
+                          className={
+                            party.currentBalance > 0
+                              ? "text-green-600"
+                              : party.currentBalance < 0
+                                ? "text-red-600"
+                                : ""
+                          }
+                        >
+                          {formatCurrency(party.currentBalance)}
+                        </span>
                       </TableCell>
-                    </TableRow>
-                  ) : parties.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground"
-                      >
-                        No parties yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    parties.map((party) => (
-                      <TableRow key={party.id}>
-                        <TableCell>{party.name}</TableCell>
-                        <TableCell className="capitalize">
-                          {party.type}
-                        </TableCell>
-                        <TableCell>
-                          <span
-                            className={
-                              party.currentBalance > 0
-                                ? "text-green-600"
-                                : party.currentBalance < 0
-                                  ? "text-red-600"
-                                  : ""
-                            }
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setViewingPartyId(party.id)}
                           >
-                            {formatCurrency(party.currentBalance)}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setViewingPartyId(party.id)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {party.currentBalance !== 0 && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setPaymentPartyId(party.id);
-                                  setPaymentData({
-                                    date: new Date()
-                                      .toISOString()
-                                      .split("T")[0],
-                                    amount: "",
-                                    method: "KHATA",
-                                    chequeId: "",
-                                    billId: "",
-                                    description: "",
-                                  });
-                                  setIsPaymentDialogOpen(true);
-                                }}
-                              >
-                                {party.currentBalance > 0 ? "Receive" : "Pay"}
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEdit(party)}
-                            >
-                              Edit
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleEdit(party)}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {partyType === "supplier" && (
+        <SupplierCombinedPurchase
+          suppliers={parties.map((party) => ({
+            id: party.id,
+            name: party.name,
+            currentBalance: party.currentBalance,
+          }))}
+          isLoadingSuppliers={isLoading}
+          onAddSupplier={() => openAddPartyDialog("supplier")}
+          onEditSupplier={(supplierId: string) => {
+            const supplier = parties.find((party) => party.id === supplierId);
+            if (!supplier) return;
+            handleEdit(supplier);
+          }}
+          onViewSupplierLedger={(supplierId: string) =>
+            setViewingPartyId(supplierId)
+          }
+        />
+      )}
+
+      <Dialog
+        open={isDialogOpen}
+        onOpenChange={(open) => {
+          setIsDialogOpen(open);
+          if (!open) resetForm();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editingId ? "Edit" : "Add"}{" "}
+              {partyDialogType === "customer" ? "Customer" : "Supplier"}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label>Party Name</Label>
+              <Input
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                placeholder="Enter party name"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit">
+                {editingId ? "Update" : "Add"} Party
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Payment Dialog */}
       <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>

@@ -31,7 +31,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { configApi } from "../lib/api";
 import type {
   ApiArticle,
-  ApiExpenseCategory,
   ApiLaborCategory,
   ApiPaymentType,
   ApiUnit,
@@ -43,9 +42,6 @@ export function Configuration() {
   const [units, setUnits] = useState<ApiUnit[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<
-    ApiExpenseCategory[]
-  >([]);
   const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>(
     [],
   );
@@ -54,7 +50,6 @@ export function Configuration() {
   const [unitDialog, setUnitDialog] = useState(false);
   const [articleDialog, setArticleDialog] = useState(false);
   const [paymentDialog, setPaymentDialog] = useState(false);
-  const [expenseDialog, setExpenseDialog] = useState(false);
   const [laborDialog, setLaborDialog] = useState(false);
 
   const [editingUnit, setEditingUnit] = useState<ApiUnit | null>(null);
@@ -62,8 +57,6 @@ export function Configuration() {
   const [editingPayment, setEditingPayment] = useState<ApiPaymentType | null>(
     null,
   );
-  const [editingExpense, setEditingExpense] =
-    useState<ApiExpenseCategory | null>(null);
   const [editingLaborCategory, setEditingLaborCategory] =
     useState<ApiLaborCategory | null>(null);
 
@@ -73,31 +66,23 @@ export function Configuration() {
     name: "",
     unitId: "none",
   });
-  const [expenseForm, setExpenseForm] = useState({ name: "" });
   const [laborForm, setLaborForm] = useState({ name: "" });
   const [activeTab, setActiveTab] = useState("units");
 
   const loadConfig = async () => {
     setStatus("loading");
     try {
-      const [
-        unitsData,
-        articlesData,
-        paymentData,
-        expenseData,
-        laborCategoryData,
-      ] = await Promise.all([
-        configApi.listUnits(),
-        configApi.listArticles(),
-        configApi.listPaymentTypes(),
-        configApi.listExpenseCategories(),
-        configApi.listLaborCategories(),
-      ]);
+      const [unitsData, articlesData, paymentData, laborCategoryData] =
+        await Promise.all([
+          configApi.listUnits(),
+          configApi.listArticles(),
+          configApi.listPaymentTypes(),
+          configApi.listLaborCategories(),
+        ]);
 
       setUnits(unitsData);
       setArticles(articlesData);
       setPaymentTypes(paymentData);
-      setExpenseCategories(expenseData);
       setLaborCategories(laborCategoryData);
       setStatus("idle");
     } catch (error) {
@@ -190,30 +175,6 @@ export function Configuration() {
     }
   };
 
-  const handleExpenseSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    try {
-      if (editingExpense) {
-        await configApi.updateExpenseCategory(editingExpense.id, {
-          name: expenseForm.name.trim(),
-        });
-        toast.success("Expense category updated");
-      } else {
-        await configApi.createExpenseCategory({
-          name: expenseForm.name.trim(),
-        });
-        toast.success("Expense category added");
-      }
-      setExpenseForm({ name: "" });
-      setEditingExpense(null);
-      setExpenseDialog(false);
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to save expense category.");
-    }
-  };
-
   const handleLaborSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editingLaborCategory) return;
@@ -249,12 +210,6 @@ export function Configuration() {
     setEditingPayment(payment);
     setPaymentForm({ name: payment.name, unitId: payment.unitId || "none" });
     setPaymentDialog(true);
-  };
-
-  const startExpenseEdit = (category: ApiExpenseCategory) => {
-    setEditingExpense(category);
-    setExpenseForm({ name: category.name });
-    setExpenseDialog(true);
   };
 
   const startLaborEdit = (category: ApiLaborCategory) => {
@@ -299,18 +254,6 @@ export function Configuration() {
     }
   };
 
-  const handleExpenseDelete = async (category: ApiExpenseCategory) => {
-    if (!confirm(`Delete expense category "${category.name}"?`)) return;
-    try {
-      await configApi.deleteExpenseCategory(category.id);
-      toast.success("Expense category deleted");
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to delete expense category.");
-    }
-  };
-
   const renderEmpty = (colSpan: number, message: string) => (
     <TableRow>
       <TableCell
@@ -337,11 +280,10 @@ export function Configuration() {
             onValueChange={setActiveTab}
           >
             <div className="flex items-center justify-between gap-3">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="units">Units</TabsTrigger>
                 <TabsTrigger value="articles">Articles</TabsTrigger>
                 <TabsTrigger value="payment">Payment Types</TabsTrigger>
-                <TabsTrigger value="expenses">Expense Categories</TabsTrigger>
                 <TabsTrigger value="labor-categories">
                   Labor Categories
                 </TabsTrigger>
@@ -702,105 +644,6 @@ export function Configuration() {
             </TabsContent>
 
             <TabsContent
-              value="expenses"
-              className="space-y-4"
-              data-report-tab="expenses"
-            >
-              <div className="flex justify-end">
-                <Dialog
-                  open={expenseDialog}
-                  onOpenChange={(open) => {
-                    setExpenseDialog(open);
-                    if (!open) {
-                      setEditingExpense(null);
-                      setExpenseForm({ name: "" });
-                    }
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button
-                      onClick={() => {
-                        setEditingExpense(null);
-                        setExpenseForm({ name: "" });
-                      }}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Expense Category
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingExpense
-                          ? "Edit Expense Category"
-                          : "Add Expense Category"}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handleExpenseSubmit} className="space-y-4">
-                      <div>
-                        <Label>Category Name</Label>
-                        <Input
-                          value={expenseForm.name}
-                          onChange={(event) =>
-                            setExpenseForm({ name: event.target.value })
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setExpenseDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">Save</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[140px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading
-                    ? renderEmpty(2, "Loading expense categories...")
-                    : expenseCategories.length === 0
-                      ? renderEmpty(2, "No expense categories yet")
-                      : expenseCategories.map((category) => (
-                          <TableRow key={category.id}>
-                            <TableCell>{category.name}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => startExpenseEdit(category)}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleExpenseDelete(category)}
-                                >
-                                  Delete
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                </TableBody>
-              </Table>
-            </TabsContent>
-
-            <TabsContent
               value="labor-categories"
               className="space-y-4"
               data-report-tab="labor-categories"
@@ -844,7 +687,8 @@ export function Configuration() {
                 </DialogContent>
               </Dialog>
               <p className="text-sm text-muted-foreground">
-                Department ids stay fixed, but their display names can be edited.
+                Department ids stay fixed, but their display names can be
+                edited.
               </p>
               <Table>
                 <TableHeader>

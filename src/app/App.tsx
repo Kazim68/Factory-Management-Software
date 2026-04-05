@@ -7,9 +7,6 @@ import {
 } from "react";
 import { Dashboard } from "./components/Dashboard";
 import { PartyManagement } from "./components/PartyManagement";
-import { ChemicalManagement } from "./components/ChemicalManagement";
-import { RexineManagement } from "./components/RexineManagement";
-import { MaterialManagement } from "./components/MaterialManagement";
 import { LaborManagement } from "./components/LaborManagement";
 import { BillManagement } from "./components/BillManagement";
 import { ChequeManagement } from "./components/ChequeManagement";
@@ -49,10 +46,8 @@ import {
 
 type Page =
   | "dashboard"
-  | "parties"
-  | "chemicals"
-  | "rexine"
-  | "materials"
+  | "party_customers"
+  | "party_suppliers"
   | "labor"
   | "stock_control"
   | "production_control"
@@ -98,18 +93,36 @@ const navigation: NavItem[] = [
   { name: "Bills", page: "bills", icon: FileText, roles: ["admin"] },
   { name: "Cheques", page: "cheques", icon: Landmark, roles: ["admin"] },
   { name: "Labor", page: "labor", icon: UserCog, roles: ["admin"] },
-  { name: "Chemicals", page: "chemicals", icon: Beaker, roles: ["admin"] },
-  { name: "Rexine", page: "rexine", icon: Shirt, roles: ["admin"] },
-  { name: "Materials", page: "materials", icon: Package, roles: ["admin"] },
-  { name: "Parties", page: "parties", icon: Users, roles: ["admin"] },
+  {
+    name: "Party (Customers)",
+    page: "party_customers",
+    icon: Users,
+    roles: ["admin"],
+  },
+  {
+    name: "Party (Suppliers)",
+    page: "party_suppliers",
+    icon: Users,
+    roles: ["admin"],
+  },
   {
     name: "Configuration",
     page: "configuration",
     icon: Settings,
     roles: ["admin", "super_admin"],
   },
-  { name: "Users", page: "users", icon: ShieldCheck, roles: ["admin", "super_admin"] },
-  { name: "Audit Logs", page: "audit_logs", icon: History, roles: ["admin", "super_admin"] },
+  {
+    name: "Users",
+    page: "users",
+    icon: ShieldCheck,
+    roles: ["admin", "super_admin"],
+  },
+  {
+    name: "Audit Logs",
+    page: "audit_logs",
+    icon: History,
+    roles: ["admin", "super_admin"],
+  },
 ];
 
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
@@ -203,14 +216,10 @@ export default function App() {
     switch (currentPage) {
       case "dashboard":
         return <Dashboard />;
-      case "parties":
-        return <PartyManagement />;
-      case "chemicals":
-        return <ChemicalManagement />;
-      case "rexine":
-        return <RexineManagement />;
-      case "materials":
-        return <MaterialManagement />;
+      case "party_customers":
+        return <PartyManagement partyType="customer" />;
+      case "party_suppliers":
+        return <PartyManagement partyType="supplier" />;
       case "labor":
         return <LaborManagement />;
       case "stock_control":

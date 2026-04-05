@@ -1,0 +1,1 @@
+-- no-op: size column is already introduced by an earlier migration

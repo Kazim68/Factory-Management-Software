@@ -5,6 +5,7 @@ import {
   createManualStockEntry,
   createProductionOrder,
   deleteManualStockEntry,
+  getPrintableProductionOrders,
   getStockSummary,
   listDepartmentLabors,
   listManualStockEntries,
@@ -18,10 +19,17 @@ import {
 const router = Router();
 
 router.get("/orders", asyncHandler(listProductionOrders));
+router.get("/orders/printable", asyncHandler(getPrintableProductionOrders));
 router.post("/orders", asyncHandler(createProductionOrder));
 router.patch("/orders/:orderId", asyncHandler(updateProductionOrder));
-router.patch("/orders/:orderId/assign-labor", asyncHandler(assignProductionOrderLabor));
-router.patch("/orders/:orderId/completion", asyncHandler(updateProductionOrderCompletion));
+router.patch(
+  "/orders/:orderId/assign-labor",
+  asyncHandler(assignProductionOrderLabor),
+);
+router.patch(
+  "/orders/:orderId/completion",
+  asyncHandler(updateProductionOrderCompletion),
+);
 
 router.get("/labors", asyncHandler(listDepartmentLabors));
 router.get("/stock/summary", asyncHandler(getStockSummary));

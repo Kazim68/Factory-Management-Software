@@ -27,6 +27,14 @@ const DEPARTMENT_FLOW = [
 
 const MERGED_FINAL_DEPARTMENTS = ["MACHINEMAN", "PACKING"];
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 const getAllowedNextDepartments = (department) => {
   const currentIndex = DEPARTMENT_FLOW.indexOf(department);
   if (currentIndex === -1) return [];
@@ -42,6 +50,12 @@ const computeStatus = (completedDozen, quantityDozen) => {
   if (completedDozen <= 0) return "INCOMPLETE";
   if (completedDozen >= quantityDozen) return "COMPLETE";
   return "PARTIALLY_COMPLETE";
+};
+
+const statusLabel = (status) => {
+  if (status === "PARTIALLY_COMPLETE") return "Partially Complete";
+  if (status === "COMPLETE") return "Complete";
+  return "Incomplete";
 };
 
 const getOrderProgressDozen = (order) => {
@@ -78,13 +92,14 @@ const normalizeStockMode = (value, fallback = "IN_STOCK") => {
 
 const createOrExpandQueueOrder = async (
   tx,
-  { department, articleId, quantityDozen, source, pricePerDozen = 0 },
+  { department, articleId, size, quantityDozen, source, pricePerDozen = 0 },
 ) => {
   if (quantityDozen <= 0) return;
 
   const where = {
     department,
     articleId,
+    size,
     laborId: null,
     isClosed: false,
     ...(source ? { source } : {}),
@@ -110,6 +125,7 @@ const createOrExpandQueueOrder = async (
       department,
       stage: STAGE_BY_DEPARTMENT[department],
       articleId,
+      size,
       quantityDozen,
       pricePerDozen,
       completedDozen: 0,
@@ -149,7 +165,7 @@ export const listProductionOrders = async (req, res) => {
       include: {
         article: true,
         labor: true,
-      packingLabor: true,
+        packingLabor: true,
       },
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     }),
@@ -163,13 +179,133 @@ export const listProductionOrders = async (req, res) => {
   );
 };
 
+export const getPrintableProductionOrders = async (req, res) => {
+  const [rows, labelMap] = await Promise.all([
+    prisma.productionOrder.findMany({
+      where: {
+        isClosed: false,
+      },
+      include: {
+        article: true,
+        labor: true,
+        packingLabor: true,
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    getLaborDepartmentLabelMap(),
+  ]);
+
+  const apiRows = rows
+    .map((row) => toApiOrder(row, labelMap))
+    .filter((row) => getOrderProgressDozen(row) < Number(row.quantityDozen));
+
+  const sectionDepartments = DEPARTMENT_FLOW;
+
+  const sectionHtml = sectionDepartments
+    .map((department) => {
+      const departmentLabel = getLaborDepartmentLabelFromMap(
+        department,
+        labelMap,
+      );
+      const sectionRows = apiRows.filter((row) => {
+        const belongsToMergedFinal =
+          department === "MACHINEMAN" &&
+          MERGED_FINAL_DEPARTMENTS.includes(row.department);
+        return row.department === department || belongsToMergedFinal;
+      });
+
+      const rowHtml = sectionRows
+        .map((row) => {
+          const laborText = MERGED_FINAL_DEPARTMENTS.includes(department)
+            ? `${row.labor?.name || "-"} / ${row.packingLabor?.name || "-"}`
+            : row.labor?.name || "-";
+          const priceText = MERGED_FINAL_DEPARTMENTS.includes(department)
+            ? `${row.pricePerDozen} / ${row.packingPricePerDozen}`
+            : department === "UPPERMAN"
+              ? Number(row.pricePerDozen) / 12
+              : row.pricePerDozen;
+
+          return `
+            <tr>
+              <td>${escapeHtml(row.article?.name || "-")}</td>
+              <td>${escapeHtml(row.size || "-")}</td>
+              <td>${escapeHtml(laborText)}</td>
+              <td>${escapeHtml(row.quantityDozen)}</td>
+              <td>${escapeHtml(priceText)}</td>
+              <td>${escapeHtml(row.completedDozen)}</td>
+              <td>${escapeHtml(statusLabel(row.status))}</td>
+            </tr>`;
+        })
+        .join("");
+
+      return `
+        <section class="section">
+          <h2>${escapeHtml(departmentLabel)} Orders</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Article</th>
+                <th>Size</th>
+                <th>Labor</th>
+                <th>Quantity (Dozen)</th>
+                <th>${department === "UPPERMAN" ? "Price / Pair" : "Price / Dozen"}</th>
+                <th>${MERGED_FINAL_DEPARTMENTS.includes(department) ? "A-Mall Qty" : "Completed Qty"}</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowHtml || '<tr><td colspan="7">No orders in this subsection.</td></tr>'}
+            </tbody>
+          </table>
+        </section>`;
+    })
+    .join("");
+
+  const html = `<!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>Production Control Orders</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 18px; color: #111; }
+        h1 { margin: 0 0 8px; font-size: 22px; }
+        h2 { margin: 18px 0 8px; font-size: 17px; }
+        .meta { margin-bottom: 14px; font-size: 13px; }
+        .meta p { margin: 3px 0; }
+        .section { margin-bottom: 16px; break-inside: avoid; page-break-inside: avoid; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: left; font-size: 12px; }
+        th { background: #f5f5f5; }
+        @media print { body { padding: 8px; } }
+      </style>
+    </head>
+    <body>
+      <h1>Production Control Orders</h1>
+      <div class="meta">
+        <p><strong>Generated At:</strong> ${escapeHtml(new Date().toLocaleString("en-GB"))}</p>
+        <p><strong>Total Rows:</strong> ${apiRows.length}</p>
+      </div>
+      ${sectionHtml}
+      <script>window.onload = () => { window.focus(); window.print(); };</script>
+    </body>
+  </html>`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+};
+
 export const createProductionOrder = async (req, res) => {
   const department = normalizeLaborDepartment(req.body.department);
   const quantityDozen = Math.abs(toNumber(req.body.quantityDozen));
   const pricePerDozen = Math.abs(toNumber(req.body.pricePerDozen));
+  const size = String(req.body.size ?? "").trim();
 
   if (!req.body.articleId) {
     res.status(400).json({ error: "Article is required." });
+    return;
+  }
+  if (!size) {
+    res.status(400).json({ error: "Size is required." });
     return;
   }
   if (quantityDozen <= 0) {
@@ -189,6 +325,7 @@ export const createProductionOrder = async (req, res) => {
       department,
       stage: STAGE_BY_DEPARTMENT[department],
       articleId: req.body.articleId,
+      size,
       laborId: req.body.laborId || null,
       quantityDozen,
       pricePerDozen,
@@ -225,10 +362,18 @@ export const updateProductionOrder = async (req, res) => {
     req.body.quantityDozen === undefined
       ? undefined
       : Math.abs(toNumber(req.body.quantityDozen));
+  const size =
+    req.body.size === undefined
+      ? undefined
+      : String(req.body.size ?? "").trim();
   const pricePerDozen =
     req.body.pricePerDozen === undefined
       ? undefined
       : Math.abs(toNumber(req.body.pricePerDozen));
+  if (size !== undefined && !size) {
+    res.status(400).json({ error: "Size is required." });
+    return;
+  }
 
   const nextQuantity = quantityDozen ?? toNumber(existing.quantityDozen);
   if (nextQuantity <= 0) {
@@ -240,6 +385,7 @@ export const updateProductionOrder = async (req, res) => {
     where: { id: req.params.orderId },
     data: {
       articleId: req.body.articleId,
+      size,
       quantityDozen,
       pricePerDozen,
       completedDozen:
@@ -588,6 +734,7 @@ export const updateProductionOrderCompletion = async (req, res) => {
           await createOrExpandQueueOrder(tx, {
             department: upperNextDepartment,
             articleId: row.articleId,
+            size: row.size,
             quantityDozen: upperForwarded,
             source: "STAGE_FLOW",
           });
@@ -597,6 +744,7 @@ export const updateProductionOrderCompletion = async (req, res) => {
           await createOrExpandQueueOrder(tx, {
             department: "PRINTING",
             articleId: row.articleId,
+            size: row.size,
             quantityDozen: ptawaForwarded,
             source: "STAGE_FLOW",
           });
@@ -613,6 +761,7 @@ export const updateProductionOrderCompletion = async (req, res) => {
         await createOrExpandQueueOrder(tx, {
           department: requestedNextDepartment,
           articleId: row.articleId,
+          size: row.size,
           quantityDozen: releasable,
           source: "STAGE_FLOW",
         });
@@ -650,8 +799,8 @@ export const getStockSummary = async (req, res) => {
         department: true,
         quantityDozen: true,
         completedDozen: true,
-      bMallDozen: true,
-      cMallDozen: true,
+        bMallDozen: true,
+        cMallDozen: true,
         forwardedDozen: true,
         isClosed: true,
       },
@@ -717,14 +866,21 @@ export const listStockByArticle = async (req, res) => {
     .trim()
     .toLowerCase();
   const isPackedMode = mode === "PACKED";
+  const normalizeSize = (value) => {
+    const normalized = String(value ?? "").trim();
+    return normalized || "-";
+  };
 
   const [orders, stockEntries] = await Promise.all([
     prisma.productionOrder.findMany({
       select: {
         department: true,
         articleId: true,
+        size: true,
         quantityDozen: true,
         completedDozen: true,
+        bMallDozen: true,
+        cMallDozen: true,
         forwardedDozen: true,
         article: { select: { id: true, name: true, code: true } },
       },
@@ -766,9 +922,12 @@ export const listStockByArticle = async (req, res) => {
       continue;
     }
 
-    const prev = quantityByArticle.get(row.articleId) ?? {
+    const rowSize = normalizeSize(row.size);
+    const mapKey = `${row.articleId}__${rowSize}`;
+    const prev = quantityByArticle.get(mapKey) ?? {
       articleId: row.articleId,
       articleName: row.article?.name ?? "-",
+      size: rowSize,
       articleCode: row.article?.code ?? null,
       quantityDozen: 0,
       bMallDozen: 0,
@@ -777,7 +936,7 @@ export const listStockByArticle = async (req, res) => {
     prev.quantityDozen += contributionA;
     prev.bMallDozen += contributionB;
     prev.cMallDozen += contributionC;
-    quantityByArticle.set(row.articleId, prev);
+    quantityByArticle.set(mapKey, prev);
   }
 
   for (const entry of stockEntries) {
@@ -786,24 +945,32 @@ export const listStockByArticle = async (req, res) => {
     const contribution = toNumber(entry.quantityDozen);
     if (contribution <= 0) continue;
 
-    const prev = quantityByArticle.get(entry.articleId) ?? {
+    const mapKey = `${entry.articleId}__-`;
+    const prev = quantityByArticle.get(mapKey) ?? {
       articleId: entry.articleId,
       articleName: entry.article?.name ?? "-",
+      size: "-",
       articleCode: entry.article?.code ?? null,
       quantityDozen: 0,
+      bMallDozen: 0,
+      cMallDozen: 0,
     };
     prev.quantityDozen += contribution;
-    quantityByArticle.set(entry.articleId, prev);
+    quantityByArticle.set(mapKey, prev);
   }
 
   const rows = Array.from(quantityByArticle.values())
     .filter((row) => {
       if (!search) return true;
       const haystack =
-        `${row.articleName} ${row.articleCode ?? ""}`.toLowerCase();
+        `${row.articleName} ${row.size} ${row.articleCode ?? ""}`.toLowerCase();
       return haystack.includes(search);
     })
-    .sort((a, b) => a.articleName.localeCompare(b.articleName));
+    .sort((a, b) => {
+      const byArticle = a.articleName.localeCompare(b.articleName);
+      if (byArticle !== 0) return byArticle;
+      return a.size.localeCompare(b.size);
+    });
 
   res.json(rows);
 };
@@ -822,7 +989,7 @@ export const listManualStockEntries = async (req, res) => {
     rows.map((row) => ({
       ...row,
       quantityDozen: toNumber(row.quantityDozen),
-    }))
+    })),
   );
 };
 

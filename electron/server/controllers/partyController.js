@@ -3,7 +3,17 @@ import { toDate, withDateRange } from "../utils/date.js";
 import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
 
 export const listParties = async (req, res) => {
-  const parties = await prisma.party.findMany({ orderBy: { name: "asc" } });
+  const typeFilter = String(req.query.type ?? "")
+    .trim()
+    .toUpperCase();
+  const where =
+    typeFilter === "CUSTOMER" || typeFilter === "SUPPLIER"
+      ? { type: typeFilter }
+      : undefined;
+  const parties = await prisma.party.findMany({
+    where,
+    orderBy: { name: "asc" },
+  });
   res.json(parties);
 };
 
@@ -13,6 +23,16 @@ const isCashLikeLedgerEntry = (entry) => {
   return reference.includes("cash") || description.includes("cash");
 };
 
+const normalizePartyType = (value) => {
+  const type = String(value ?? "")
+    .trim()
+    .toUpperCase();
+  if (type === "CUSTOMER" || type === "SUPPLIER") {
+    return type;
+  }
+  return null;
+};
+
 export const listSupplierPendingDues = async (req, res) => {
   const asOfDate = toDate(req.query.asOf);
   const end = asOfDate ?? new Date();
@@ -20,9 +40,7 @@ export const listSupplierPendingDues = async (req, res) => {
   const [suppliers, ledgerEntries] = await Promise.all([
     prisma.party.findMany({
       where: {
-        type: {
-          in: ["SUPPLIER", "BOTH"],
-        },
+        type: "SUPPLIER",
       },
       orderBy: { name: "asc" },
       select: {
@@ -82,10 +100,16 @@ export const listSupplierPendingDues = async (req, res) => {
 };
 
 export const createParty = async (req, res) => {
+  const type = normalizePartyType(req.body.type);
+  if (!type) {
+    res.status(400).json({ error: "Party type must be CUSTOMER or SUPPLIER." });
+    return;
+  }
+
   const party = await prisma.party.create({
     data: {
       name: req.body.name,
-      type: req.body.type,
+      type,
       // Balance is derived from ledger entries; keep opening balance neutral.
       openingBalance: 0,
     },
@@ -94,11 +118,18 @@ export const createParty = async (req, res) => {
 };
 
 export const updateParty = async (req, res) => {
+  const type =
+    req.body.type === undefined ? undefined : normalizePartyType(req.body.type);
+  if (req.body.type !== undefined && !type) {
+    res.status(400).json({ error: "Party type must be CUSTOMER or SUPPLIER." });
+    return;
+  }
+
   const party = await prisma.party.update({
     where: { id: req.params.partyId },
     data: {
       name: req.body.name,
-      type: req.body.type,
+      type,
     },
   });
   res.json(party);
@@ -318,7 +349,7 @@ export const createPartyPayment = async (req, res) => {
         if (!chequeId) {
           throw new Error("Please select an available cheque.");
         }
-        if (!["SUPPLIER", "BOTH"].includes(party.type)) {
+        if (party.type !== "SUPPLIER") {
           throw new Error(
             "Cheque payment is only allowed to supplier parties.",
           );

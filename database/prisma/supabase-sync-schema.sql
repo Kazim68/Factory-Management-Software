@@ -2,7 +2,7 @@
 CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateEnum
-CREATE TYPE "PartyType" AS ENUM ('CUSTOMER', 'SUPPLIER', 'BOTH');
+CREATE TYPE "PartyType" AS ENUM ('CUSTOMER', 'SUPPLIER');
 
 -- CreateEnum
 CREATE TYPE "BillType" AS ENUM ('CASH', 'CREDIT');
@@ -54,16 +54,6 @@ CREATE TABLE "Article" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Article_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "ExpenseCategory" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ExpenseCategory_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -355,9 +345,6 @@ CREATE UNIQUE INDEX "Unit_name_key" ON "Unit"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Article_name_key" ON "Article"("name");
-
--- CreateIndex
-CREATE UNIQUE INDEX "ExpenseCategory_name_key" ON "ExpenseCategory"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "LaborDepartmentName_department_key" ON "LaborDepartmentName"("department");

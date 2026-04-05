@@ -3,7 +3,7 @@
 export interface Party {
   id: string;
   name: string;
-  type: 'customer' | 'supplier' | 'both';
+  type: "customer" | "supplier";
   openingBalance: number;
   currentBalance: number;
   createdAt: string;
@@ -19,7 +19,7 @@ export interface Article {
 export interface LaborCategory {
   id: string;
   name: string;
-  paymentType: 'per_dozen' | 'per_pair' | 'per_upper' | 'monthly_salary';
+  paymentType: "per_dozen" | "per_pair" | "per_upper" | "monthly_salary";
   createdAt: string;
 }
 
@@ -28,7 +28,7 @@ export interface Labor {
   name: string;
   categoryId: string;
   category: string;
-  paymentType: 'per_dozen' | 'per_pair' | 'per_upper' | 'monthly_salary';
+  paymentType: "per_dozen" | "per_pair" | "per_upper" | "monthly_salary";
   monthlyRate?: number;
   articleRates: { [articleId: string]: number }; // article-wise rates
   createdAt: string;
@@ -67,7 +67,7 @@ export interface ChemicalTransaction {
   weight: number; // kg
   rate: number;
   total: number;
-  paymentType: 'cash' | 'payable';
+  paymentType: "cash" | "payable";
   paymentReceived: number;
   balance: number;
   detail: string;
@@ -83,7 +83,7 @@ export interface RexineTransaction {
   meters: number;
   rate: number;
   total: number;
-  paymentType: 'cash' | 'payable';
+  paymentType: "cash" | "payable";
   paymentReceived: number;
   balance: number;
   detail: string;
@@ -101,7 +101,7 @@ export interface MaterialTransaction {
   quantity: number;
   pricePerPair: number;
   total: number;
-  paymentType: 'cash' | 'payable';
+  paymentType: "cash" | "payable";
   paymentReceived: number;
   balance: number;
   detail: string;
@@ -126,8 +126,8 @@ export interface Bill {
   partyName: string;
   items: BillItem[];
   grandTotal: number;
-  paymentType: 'cash' | 'receivable';
-  status: 'draft' | 'confirmed';
+  paymentType: "cash" | "receivable";
+  status: "draft" | "confirmed";
   createdAt: string;
   editHistory?: EditLog[];
 }
@@ -141,7 +141,7 @@ export interface PartyLedgerEntry {
   payable: number;
   receivable: number;
   balance: number;
-  type: 'bill' | 'payment' | 'chemical' | 'rexine' | 'material' | 'opening';
+  type: "bill" | "payment" | "chemical" | "rexine" | "material" | "opening";
   createdAt: string;
 }
 
@@ -157,12 +157,6 @@ export interface RoznamchaEntry {
   description: string;
   createdAt: string;
   editHistory?: EditLog[];
-}
-
-export interface ExpenseCategory {
-  id: string;
-  name: string;
-  createdAt: string;
 }
 
 export interface EditLog {
@@ -183,7 +177,7 @@ export interface Payment {
   createdAt: string;
 }
 
-export type UserRole = 'admin' | 'super_admin' | 'sub_admin';
+export type UserRole = "admin" | "super_admin" | "sub_admin";
 
 export interface AppUser {
   id: string;

@@ -23,7 +23,7 @@ const isSchemaMismatchError = (error) => {
   return (
     message.includes("does not exist in the current database") ||
     message.includes("no such table:") ||
-    message.includes("column") && message.includes("does not exist")
+    (message.includes("column") && message.includes("does not exist"))
   );
 };
 
@@ -110,7 +110,7 @@ const getModelScalarFields = (entity) => {
   const scalarFields = new Set(
     model.fields
       .filter((field) => field.kind !== "object")
-      .map((field) => field.name)
+      .map((field) => field.name),
   );
 
   modelScalarFieldsCache.set(modelName, scalarFields);
@@ -133,6 +133,132 @@ const sanitizeIncoming = (entity, incoming) => {
   return sanitized;
 };
 
+const getUniqueScalarFields = (entity) => {
+  const modelName = toModelName(entity);
+  const model = runtimeModels[modelName];
+  if (!model?.fields) return [];
+
+  return model.fields
+    .filter(
+      (field) => field.kind !== "object" && (field.isId || field.isUnique),
+    )
+    .map((field) => field.name);
+};
+
+const isUniqueConstraintError = (error) =>
+  error?.code === "P2002" ||
+  String(error?.message ?? "").includes("Unique constraint failed");
+
+const parseUniqueTargetsFromMessage = (error) => {
+  const message = String(error?.message ?? "");
+  const match = message.match(/fields?:\s*\(([^)]+)\)/i);
+  if (!match?.[1]) return [];
+
+  return match[1]
+    .split(",")
+    .map((part) => part.replace(/[`'"\s]/g, ""))
+    .filter(Boolean);
+};
+
+const getConflictTargets = (entity, incoming, error) => {
+  const rawTargets = Array.isArray(error?.meta?.target)
+    ? error.meta.target
+    : parseUniqueTargetsFromMessage(error);
+
+  const uniqueScalarFields = getUniqueScalarFields(entity);
+
+  const candidates = (rawTargets.length ? rawTargets : uniqueScalarFields)
+    .filter((field) => field !== "id")
+    .filter((field) => incoming?.[field] != null);
+
+  return [...new Set(candidates)];
+};
+
+const updateExistingOnConflict = async (
+  delegate,
+  existingRecord,
+  sanitizedIncoming,
+) => {
+  const updateData = { ...sanitizedIncoming };
+
+  if (existingRecord.id !== sanitizedIncoming.id) {
+    try {
+      await delegate.update({
+        where: { id: existingRecord.id },
+        data: updateData,
+      });
+      return { resolved: true, rekeyed: true };
+    } catch (error) {
+      // If PK rekey is blocked by related rows, keep existing id and update content.
+      const fallbackData = { ...updateData };
+      delete fallbackData.id;
+      await delegate.update({
+        where: { id: existingRecord.id },
+        data: fallbackData,
+      });
+      return { resolved: true, rekeyed: false };
+    }
+  }
+
+  await delegate.update({
+    where: { id: existingRecord.id },
+    data: updateData,
+  });
+  return { resolved: true, rekeyed: false };
+};
+
+const upsertWithConflictRecovery = async ({
+  delegate,
+  entity,
+  incoming,
+  sanitizedIncoming,
+}) => {
+  try {
+    await delegate.upsert({
+      where: { id: incoming.id },
+      create: sanitizedIncoming,
+      update: sanitizedIncoming,
+    });
+    return { applied: true, skipped: false, conflictResolved: false };
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) {
+      throw error;
+    }
+
+    const conflictTargets = getConflictTargets(entity, incoming, error);
+    for (const field of conflictTargets) {
+      const conflicting = await delegate.findFirst({
+        where: { [field]: incoming[field] },
+      });
+
+      if (!conflicting) continue;
+
+      if (!shouldApplyIncomingUpdate(conflicting, incoming)) {
+        return { applied: true, skipped: true, conflictResolved: true };
+      }
+
+      const result = await updateExistingOnConflict(
+        delegate,
+        conflicting,
+        sanitizedIncoming,
+      );
+
+      if (!result.rekeyed) {
+        warn("sync:unique-conflict-id-mismatch", {
+          entity,
+          field,
+          localId: incoming.id,
+          remoteId: conflicting.id,
+        });
+      }
+
+      return { applied: true, skipped: false, conflictResolved: true };
+    }
+
+    throw error;
+  }
+};
+
 const getModelRelations = (entity) => {
   const modelName = toModelName(entity);
   if (modelRelationsCache.has(modelName)) {
@@ -147,7 +273,8 @@ const getModelRelations = (entity) => {
 
   const relations = model.fields
     .filter(
-      (field) => field.kind === "object" && Array.isArray(field.relationFromFields)
+      (field) =>
+        field.kind === "object" && Array.isArray(field.relationFromFields),
     )
     .map((field) => ({
       targetModel: field.type,
@@ -242,19 +369,25 @@ const applyChangeToRemote = async (cloud, change, deviceId) => {
     return { applied: true, skipped: true };
   }
 
-  const canApply = await areForeignKeysSatisfied(cloud, change.entity, incoming);
+  const canApply = await areForeignKeysSatisfied(
+    cloud,
+    change.entity,
+    incoming,
+  );
   if (!canApply) {
     return { applied: false, deferred: true };
   }
 
   const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
 
+  const upsertResult = await upsertWithConflictRecovery({
+    delegate,
+    entity: change.entity,
+    incoming,
+    sanitizedIncoming,
+  });
+
   await cloud.$transaction([
-    delegate.upsert({
-      where: { id: incoming.id },
-      create: sanitizedIncoming,
-      update: sanitizedIncoming,
-    }),
     cloud.changeLog.upsert({
       where: { id: change.id },
       create: {
@@ -279,7 +412,7 @@ const applyChangeToRemote = async (cloud, change, deviceId) => {
     }),
   ]);
 
-  return { applied: true, skipped: false };
+  return { applied: true, skipped: upsertResult.skipped };
 };
 
 const applyChangeToLocal = async (tx, change) => {
@@ -319,10 +452,11 @@ const applyChangeToLocal = async (tx, change) => {
   }
 
   const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
-  await delegate.upsert({
-    where: { id: incoming.id },
-    create: sanitizedIncoming,
-    update: sanitizedIncoming,
+  await upsertWithConflictRecovery({
+    delegate,
+    entity: change.entity,
+    incoming,
+    sanitizedIncoming,
   });
   return { applied: true, deferred: false };
 };
@@ -383,7 +517,6 @@ const pushPendingChanges = async () => {
 };
 
 const pullRemoteChanges = async () => {
-  const deviceId = getDeviceId();
   const cloud = getCloudPrisma();
   const lastSync = await getLastSyncTimestamp(prisma);
   const lastSyncDate = new Date(lastSync);
@@ -391,7 +524,6 @@ const pullRemoteChanges = async () => {
   const changes = await cloud.changeLog.findMany({
     where: {
       createdAt: { gt: lastSyncDate },
-      deviceId: { not: deviceId },
     },
     orderBy: { createdAt: "asc" },
     take: BATCH_SIZE,
@@ -456,9 +588,16 @@ const pullRemoteChanges = async () => {
   return { applied: appliedCount, maxTimestamp, deferred: false };
 };
 
-const runSyncCycle = async () => {
-  await withRetry(pushPendingChanges, "push");
-  const pullResult = await withRetry(pullRemoteChanges, "pull");
+const runSyncCycle = async ({ pullFirst = false } = {}) => {
+  let pullResult;
+
+  if (pullFirst) {
+    pullResult = await withRetry(pullRemoteChanges, "pull");
+    await withRetry(pushPendingChanges, "push");
+  } else {
+    await withRetry(pushPendingChanges, "push");
+    pullResult = await withRetry(pullRemoteChanges, "pull");
+  }
 
   if (pullResult.maxTimestamp) {
     await setLastSyncTimestamp(prisma, pullResult.maxTimestamp.toISOString());
@@ -469,12 +608,13 @@ export const startSyncWorker = () => {
   let stopped = false;
   let backoffMs = 0;
   let schemaMismatchLogged = false;
+  let isInitialCycle = true;
 
   const scheduleNext = () => {
     if (stopped) return;
     const interval = Math.min(
       BASE_INTERVAL_MS + backoffMs,
-      BASE_INTERVAL_MS + MAX_BACKOFF_MS
+      BASE_INTERVAL_MS + MAX_BACKOFF_MS,
     );
     setTimeout(runLoop, interval);
   };
@@ -482,7 +622,8 @@ export const startSyncWorker = () => {
   const runLoop = async () => {
     if (stopped) return;
     try {
-      await runSyncCycle();
+      await runSyncCycle({ pullFirst: isInitialCycle });
+      isInitialCycle = false;
       backoffMs = 0;
       log("cycle:ok");
     } catch (error) {
@@ -501,7 +642,7 @@ export const startSyncWorker = () => {
       warn("cycle:error", { error: error?.message ?? error });
       backoffMs = Math.min(
         backoffMs ? backoffMs * 2 : BASE_INTERVAL_MS,
-        MAX_BACKOFF_MS
+        MAX_BACKOFF_MS,
       );
     } finally {
       scheduleNext();

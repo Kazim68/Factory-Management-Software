@@ -4,9 +4,29 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { formatCurrency } from "../lib/utils";
-import { billApi, expenseApi, laborApi, partyApi, purchaseApi } from "../lib/api";
-import { DollarSign, Users, TrendingUp, TrendingDown, Package } from "lucide-react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  billApi,
+  expenseApi,
+  laborApi,
+  partyApi,
+  purchaseApi,
+} from "../lib/api";
+import {
+  DollarSign,
+  Users,
+  TrendingUp,
+  TrendingDown,
+  Package,
+} from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type DateFilter = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
@@ -66,7 +86,9 @@ export function Dashboard() {
   } | null>(null);
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("monthly");
-  const [customStart, setCustomStart] = useState(() => toLocalDateKey(subtractDays(new Date(), 29)));
+  const [customStart, setCustomStart] = useState(() =>
+    toLocalDateKey(subtractDays(new Date(), 29)),
+  );
   const [customEnd, setCustomEnd] = useState(() => toLocalDateKey(new Date()));
 
   useEffect(() => {
@@ -135,7 +157,9 @@ export function Dashboard() {
     const safeStart = customStart || toLocalDateKey(new Date());
     const safeEnd = customEnd || toLocalDateKey(new Date());
     const start = toStartOfDay(safeStart <= safeEnd ? safeStart : safeEnd);
-    const customRangeEnd = toEndOfDay(safeEnd >= safeStart ? safeEnd : safeStart);
+    const customRangeEnd = toEndOfDay(
+      safeEnd >= safeStart ? safeEnd : safeStart,
+    );
     return { start, end: customRangeEnd };
   }, [dateFilter, customStart, customEnd]);
 
@@ -169,7 +193,10 @@ export function Dashboard() {
     const rexine = rawData.rexine.filter((item) => inRange(item.date));
     const materials = rawData.materials.filter((item) => inRange(item.date));
 
-    const totalRevenue = bills.reduce((sum, bill) => sum + Number(bill.total), 0);
+    const totalRevenue = bills.reduce(
+      (sum, bill) => sum + Number(bill.total),
+      0,
+    );
 
     const miscExpenses = expenses.reduce((sum, entry) => {
       const amount = Number(entry.amount);
@@ -181,7 +208,10 @@ export function Dashboard() {
       .reduce((sum, entry) => sum + Math.max(Number(entry.amount ?? 0), 0), 0);
 
     const laborPaid = expenses
-      .filter((entry) => entry.module === "LABOR" && entry.laborId && !entry.laborAdvanceId)
+      .filter(
+        (entry) =>
+          entry.module === "LABOR" && entry.laborId && !entry.laborAdvanceId,
+      )
       .reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
 
     const totalPayables = rawData.parties.reduce((sum, party) => {
@@ -201,13 +231,19 @@ export function Dashboard() {
 
     const materialPaid =
       chemicals
-        .filter((item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH")
+        .filter(
+          (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
+        )
         .reduce((sum, item) => sum + Number(item.totalAmount), 0) +
       rexine
-        .filter((item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH")
+        .filter(
+          (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
+        )
         .reduce((sum, item) => sum + Number(item.totalAmount), 0) +
       materials
-        .filter((item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH")
+        .filter(
+          (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
+        )
         .reduce((sum, item) => sum + Number(item.totalAmount), 0);
 
     const materialPendingPayable = Math.max(materialCost - materialPaid, 0);
@@ -239,7 +275,10 @@ export function Dashboard() {
       while (cursor <= selectedRange.end) {
         const key = toMonthKey(cursor);
         trendBuckets.set(key, {
-          label: cursor.toLocaleDateString([], { month: "short", year: "numeric" }),
+          label: cursor.toLocaleDateString([], {
+            month: "short",
+            year: "numeric",
+          }),
           revenue: 0,
           expenses: 0,
         });
@@ -273,8 +312,8 @@ export function Dashboard() {
         dateFilter === "monthly"
           ? toMonthKey(value)
           : dateFilter === "yearly"
-          ? toYearKey(value)
-          : toLocalDateKey(value);
+            ? toYearKey(value)
+            : toLocalDateKey(value);
       const bucket = trendBuckets.get(key);
       if (!bucket) {
         return;
@@ -283,7 +322,11 @@ export function Dashboard() {
     };
 
     bills.forEach((bill) => {
-      addToBucket(parseDateValue(bill.date), Number(bill.total ?? 0), "revenue");
+      addToBucket(
+        parseDateValue(bill.date),
+        Number(bill.total ?? 0),
+        "revenue",
+      );
     });
 
     expenses
@@ -357,39 +400,65 @@ export function Dashboard() {
   }, [rawData, selectedRange.start, selectedRange.end, dateFilter]);
 
   const netProfit =
-    stats.totalRevenue - stats.totalExpenses - stats.laborCost - stats.materialCost;
+    stats.totalRevenue -
+    stats.totalExpenses -
+    stats.laborCost -
+    stats.materialCost;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="mb-2">Dashboard Overview</h2>
-        <p className="text-muted-foreground">
-          Summary of your factory operations and financials
-        </p>
-      </div>
-
       <Card>
-        <CardHeader>
-          <CardTitle>Time Filter</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-wrap gap-2">
-              <Button variant={dateFilter === "daily" ? "default" : "outline"} onClick={() => setDateFilter("daily")}>Daily</Button>
-              <Button variant={dateFilter === "weekly" ? "default" : "outline"} onClick={() => setDateFilter("weekly")}>Weekly</Button>
-              <Button variant={dateFilter === "monthly" ? "default" : "outline"} onClick={() => setDateFilter("monthly")}>Monthly</Button>
-              <Button variant={dateFilter === "yearly" ? "default" : "outline"} onClick={() => setDateFilter("yearly")}>Yearly</Button>
-              <Button variant={dateFilter === "custom" ? "default" : "outline"} onClick={() => setDateFilter("custom")}>Custom Range</Button>
+              <Button
+                variant={dateFilter === "daily" ? "default" : "outline"}
+                onClick={() => setDateFilter("daily")}
+              >
+                Daily
+              </Button>
+              <Button
+                variant={dateFilter === "weekly" ? "default" : "outline"}
+                onClick={() => setDateFilter("weekly")}
+              >
+                Weekly
+              </Button>
+              <Button
+                variant={dateFilter === "monthly" ? "default" : "outline"}
+                onClick={() => setDateFilter("monthly")}
+              >
+                Monthly
+              </Button>
+              <Button
+                variant={dateFilter === "yearly" ? "default" : "outline"}
+                onClick={() => setDateFilter("yearly")}
+              >
+                Yearly
+              </Button>
+              <Button
+                variant={dateFilter === "custom" ? "default" : "outline"}
+                onClick={() => setDateFilter("custom")}
+              >
+                Custom Range
+              </Button>
             </div>
             {dateFilter === "custom" && (
               <>
                 <div>
                   <Label className="mb-1 inline-block">Start</Label>
-                  <Input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+                  <Input
+                    type="date"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                  />
                 </div>
                 <div>
                   <Label className="mb-1 inline-block">End</Label>
-                  <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+                  <Input
+                    type="date"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                  />
                 </div>
               </>
             )}
@@ -398,22 +467,170 @@ export function Dashboard() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Total Revenue</CardTitle><DollarSign className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{formatCurrency(stats.totalRevenue)}</div><p className="text-xs text-muted-foreground">From {stats.totalBills} bills</p></CardContent></Card>
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Net Profit</CardTitle><TrendingUp className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className={`text-2xl ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(netProfit)}</div><p className="text-xs text-muted-foreground">Revenue - Expenses</p></CardContent></Card>
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Receivables</CardTitle><TrendingUp className="h-4 w-4 text-green-600" /></CardHeader><CardContent><div className="text-2xl text-green-600">{formatCurrency(stats.totalReceivables)}</div><p className="text-xs text-muted-foreground">Amount to receive</p></CardContent></Card>
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Payables</CardTitle><TrendingDown className="h-4 w-4 text-red-600" /></CardHeader><CardContent><div className="text-2xl text-red-600">{formatCurrency(stats.totalPayables)}</div><p className="text-xs text-muted-foreground">Parties + Labor pending ({formatCurrency(stats.laborPendingPayable)} labor)</p></CardContent></Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Total Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl">{formatCurrency(stats.totalRevenue)}</div>
+            <p className="text-xs text-muted-foreground">
+              From {stats.totalBills} bills
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Net Profit</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div
+              className={`text-2xl ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}
+            >
+              {formatCurrency(netProfit)}
+            </div>
+            <p className="text-xs text-muted-foreground">Revenue - Expenses</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Receivables</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl text-green-600">
+              {formatCurrency(stats.totalReceivables)}
+            </div>
+            <p className="text-xs text-muted-foreground">Amount to receive</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Payables</CardTitle>
+            <TrendingDown className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl text-red-600">
+              {formatCurrency(stats.totalPayables)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Parties + Labor pending (
+              {formatCurrency(stats.laborPendingPayable)} labor)
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Total Parties</CardTitle><Users className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{stats.totalParties}</div><p className="text-xs text-muted-foreground">Customers & Suppliers</p></CardContent></Card>
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Labor Costs</CardTitle><Users className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{formatCurrency(stats.laborCost)}</div><p className="text-xs text-muted-foreground">Paid {formatCurrency(stats.laborPaid)} • Pending {formatCurrency(stats.laborPendingPayable)}</p></CardContent></Card>
-        <Card><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm">Material Costs</CardTitle><Package className="h-4 w-4 text-muted-foreground" /></CardHeader><CardContent><div className="text-2xl">{formatCurrency(stats.materialCost)}</div><p className="text-xs text-muted-foreground">Paid {formatCurrency(stats.materialPaid)} • Pending {formatCurrency(stats.materialPendingPayable)}</p></CardContent></Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Total Parties</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl">{stats.totalParties}</div>
+            <p className="text-xs text-muted-foreground">
+              Customers & Suppliers
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Labor Costs</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl">{formatCurrency(stats.laborCost)}</div>
+            <p className="text-xs text-muted-foreground">
+              Paid {formatCurrency(stats.laborPaid)} • Pending{" "}
+              {formatCurrency(stats.laborPendingPayable)}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm">Material Costs</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl">{formatCurrency(stats.materialCost)}</div>
+            <p className="text-xs text-muted-foreground">
+              Paid {formatCurrency(stats.materialPaid)} • Pending{" "}
+              {formatCurrency(stats.materialPendingPayable)}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card><CardHeader><CardTitle>Expense Breakdown</CardTitle></CardHeader><CardContent><div className="space-y-3"><div className="flex justify-between"><span>Misc Expenses</span><span className="font-medium">{formatCurrency(stats.totalExpenses)}</span></div><div className="flex justify-between"><span>Labor Costs</span><span className="font-medium">{formatCurrency(stats.laborCost)}</span></div><div className="flex justify-between"><span>Material Costs</span><span className="font-medium">{formatCurrency(stats.materialCost)}</span></div><div className="border-t pt-3 flex justify-between"><span>Total Expenses</span><span className="font-medium">{formatCurrency(stats.totalExpenses + stats.laborCost + stats.materialCost)}</span></div></div></CardContent></Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Expense Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span>Misc Expenses</span>
+                <span className="font-medium">
+                  {formatCurrency(stats.totalExpenses)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Labor Costs</span>
+                <span className="font-medium">
+                  {formatCurrency(stats.laborCost)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Material Costs</span>
+                <span className="font-medium">
+                  {formatCurrency(stats.materialCost)}
+                </span>
+              </div>
+              <div className="border-t pt-3 flex justify-between">
+                <span>Total Expenses</span>
+                <span className="font-medium">
+                  {formatCurrency(
+                    stats.totalExpenses + stats.laborCost + stats.materialCost,
+                  )}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <Card><CardHeader><CardTitle>Financial Summary</CardTitle></CardHeader><CardContent><div className="space-y-3"><div className="flex justify-between"><span>Total Revenue</span><span className="font-medium text-green-600">{formatCurrency(stats.totalRevenue)}</span></div><div className="flex justify-between"><span>Total Expenses</span><span className="font-medium text-red-600">{formatCurrency(stats.totalExpenses + stats.laborCost + stats.materialCost)}</span></div><div className="border-t pt-3 flex justify-between"><span>Net Profit/Loss</span><span className={`font-medium ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(netProfit)}</span></div></div></CardContent></Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Financial Summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex justify-between">
+                <span>Total Revenue</span>
+                <span className="font-medium text-green-600">
+                  {formatCurrency(stats.totalRevenue)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Total Expenses</span>
+                <span className="font-medium text-red-600">
+                  {formatCurrency(
+                    stats.totalExpenses + stats.laborCost + stats.materialCost,
+                  )}
+                </span>
+              </div>
+              <div className="border-t pt-3 flex justify-between">
+                <span>Net Profit/Loss</span>
+                <span
+                  className={`font-medium ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}
+                >
+                  {formatCurrency(netProfit)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>

@@ -3,8 +3,9 @@ import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
 
 const toDbPaymentType = (paymentType) => {
   const normalized = String(paymentType ?? "CASH").toUpperCase();
-  if (normalized === "KHATA") return "CREDIT";
-  return normalized === "CREDIT" ? "CREDIT" : "CASH";
+  if (["KHATA", "BANK", "CREDIT"].includes(normalized)) return "CREDIT";
+  if (normalized === "CHEQUE") return "CHEQUE";
+  return "CASH";
 };
 
 const isKhata = (paymentType) =>
@@ -40,6 +41,20 @@ export const createExpense = async (req, res) => {
     actorUsername,
     actorRole,
   } = req.body;
+
+  const normalizedPaymentType = toDbPaymentType(
+    req.body.paymentType ?? moduleData?.paymentType,
+  );
+  const chequeId =
+    req.body.chequeId == null ? "" : String(req.body.chequeId).trim();
+  const chequeNumber =
+    req.body.chequeNumber == null
+      ? null
+      : String(req.body.chequeNumber).trim() || null;
+  const chequeNotes =
+    req.body.chequeNotes == null
+      ? null
+      : String(req.body.chequeNotes).trim() || null;
 
   const result = await prisma.$transaction(async (tx) => {
     let chemicalPurchaseId;
@@ -139,9 +154,10 @@ export const createExpense = async (req, res) => {
       laborAdvanceId = advance.id;
     }
 
-    const sourceSystem = actorUsername && actorRole
-      ? `ROZNAMCHA_MANUAL|${String(actorUsername)}|${String(actorRole)}`
-      : "ROZNAMCHA_MANUAL";
+    const sourceSystem =
+      actorUsername && actorRole
+        ? `ROZNAMCHA_MANUAL|${String(actorUsername)}|${String(actorRole)}`
+        : "ROZNAMCHA_MANUAL";
 
     const expense = await tx.expenseEntry.create({
       data: {
@@ -149,7 +165,7 @@ export const createExpense = async (req, res) => {
         partyId,
         laborId,
         module: module ?? "MISC",
-        paymentType: toDbPaymentType(req.body.paymentType ?? moduleData?.paymentType),
+        paymentType: normalizedPaymentType,
         amount,
         description,
         chemicalPurchaseId,
@@ -166,6 +182,53 @@ export const createExpense = async (req, res) => {
       },
     });
 
+    if (normalizedPaymentType === "CHEQUE") {
+      const normalizedAmount = Math.abs(Number(expense.amount ?? 0));
+      if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+        throw new Error("Cheque amount must be greater than 0.");
+      }
+
+      const isInflow = Number(expense.amount ?? 0) < 0;
+      if (isInflow) {
+        await tx.cheque.create({
+          data: {
+            date: new Date(expense.date),
+            amount: normalizedAmount,
+            chequeNumber,
+            notes: chequeNotes || description || null,
+            sourcePartyId: partyId ?? null,
+            status: "AVAILABLE",
+          },
+        });
+      } else {
+        if (!chequeId) {
+          throw new Error("Please select an available cheque.");
+        }
+
+        const selectedCheque = await tx.cheque.findUnique({
+          where: { id: chequeId },
+        });
+        if (!selectedCheque || selectedCheque.status !== "AVAILABLE") {
+          throw new Error("Selected cheque is not available.");
+        }
+
+        const selectedAmount = Number(selectedCheque.amount ?? 0);
+        if (Math.abs(selectedAmount - normalizedAmount) > 0.0001) {
+          throw new Error("Expense amount must match selected cheque amount.");
+        }
+
+        await tx.cheque.update({
+          where: { id: selectedCheque.id },
+          data: {
+            status: "USED",
+            usedPartyId: partyId ?? null,
+            notes: chequeNotes || selectedCheque.notes,
+            chequeNumber: chequeNumber || selectedCheque.chequeNumber,
+          },
+        });
+      }
+    }
+
     return expense;
   });
 
@@ -181,7 +244,9 @@ export const updateExpense = async (req, res) => {
     return;
   }
   if (existing.source === "SYSTEM") {
-    res.status(403).json({ error: "System entries cannot be edited from Roznamcha." });
+    res
+      .status(403)
+      .json({ error: "System entries cannot be edited from Roznamcha." });
     return;
   }
 
@@ -216,7 +281,9 @@ export const deleteExpense = async (req, res) => {
     return;
   }
   if (expense.source === "SYSTEM") {
-    res.status(403).json({ error: "System entries cannot be deleted from Roznamcha." });
+    res
+      .status(403)
+      .json({ error: "System entries cannot be deleted from Roznamcha." });
     return;
   }
 
@@ -225,19 +292,25 @@ export const deleteExpense = async (req, res) => {
       await tx.partyLedgerEntry.deleteMany({
         where: { chemicalPurchaseId: expense.chemicalPurchaseId },
       });
-      await tx.chemicalPurchase.delete({ where: { id: expense.chemicalPurchaseId } });
+      await tx.chemicalPurchase.delete({
+        where: { id: expense.chemicalPurchaseId },
+      });
     }
     if (expense?.rexinePurchaseId) {
       await tx.partyLedgerEntry.deleteMany({
         where: { rexinePurchaseId: expense.rexinePurchaseId },
       });
-      await tx.rexinePurchase.delete({ where: { id: expense.rexinePurchaseId } });
+      await tx.rexinePurchase.delete({
+        where: { id: expense.rexinePurchaseId },
+      });
     }
     if (expense?.materialPurchaseId) {
       await tx.partyLedgerEntry.deleteMany({
         where: { materialPurchaseId: expense.materialPurchaseId },
       });
-      await tx.materialPurchase.delete({ where: { id: expense.materialPurchaseId } });
+      await tx.materialPurchase.delete({
+        where: { id: expense.materialPurchaseId },
+      });
     }
     if (expense?.laborAdvanceId) {
       await tx.laborAdvance.delete({ where: { id: expense.laborAdvanceId } });
@@ -257,7 +330,7 @@ export const getDailySummary = async (req, res) => {
   });
 
   const grouped = groupByPeriod(expenses, (expense) =>
-    expense.date.toISOString().slice(0, 10)
+    expense.date.toISOString().slice(0, 10),
   );
   res.json(Object.values(grouped));
 };
@@ -290,7 +363,7 @@ export const getMonthlySummary = async (req, res) => {
   });
 
   const grouped = groupByPeriod(expenses, (expense) =>
-    expense.date.toISOString().slice(0, 7)
+    expense.date.toISOString().slice(0, 7),
   );
 
   res.json(Object.values(grouped));

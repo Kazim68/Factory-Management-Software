@@ -17,18 +17,14 @@ import {
   TableHeader,
   TableRow,
 } from "./ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Card, CardContent, CardHeader } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Plus } from "lucide-react";
 import { formatCurrency, getCurrentDate } from "../lib/utils";
 import {
   billApi,
+  chequeApi,
   expenseApi,
   laborApi,
   partyApi,
@@ -43,10 +39,11 @@ import {
 import { auth } from "../lib/auth";
 import type {
   ApiBill,
+  ApiCheque,
+  ApiExpenseModule,
   ApiExpenseEntry,
   ApiLaborLedger,
   ApiRoznamchaSummaryReport,
-  ApiExpenseModule,
   ApiLaborProfile,
   ApiParty,
   ApiSupplierPendingDue,
@@ -69,6 +66,8 @@ export function Roznamcha() {
   const [isLoading, setIsLoading] = useState(false);
   const [billOptions, setBillOptions] = useState<ApiBill[]>([]);
   const [isLoadingBills, setIsLoadingBills] = useState(false);
+  const [availableCheques, setAvailableCheques] = useState<ApiCheque[]>([]);
+  const [isLoadingCheques, setIsLoadingCheques] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ApiExpenseEntry | null>(
     null,
   );
@@ -111,8 +110,9 @@ export function Roznamcha() {
     date: getCurrentDate(),
     module: "MISC" as RoznamchaModule,
     direction: "OUT" as "IN" | "OUT",
-    paymentType: "CASH" as "CASH" | "KHATA",
+    paymentType: "CASH" as "CASH" | "KHATA" | "CHEQUE",
     partyId: "none",
+    chequeId: "",
     billId: "",
     laborId: "",
     quantity: "",
@@ -142,11 +142,22 @@ export function Roznamcha() {
   const exceedsBillAmount =
     formData.module === "BILL" &&
     !!selectedBill &&
+    formData.paymentType !== "CHEQUE" &&
     Number(formData.amount || 0) > selectedBillRemaining;
   const exceedsSupplierDue =
     formData.module === "SUPPLIER_PAYMENT" &&
     !!selectedSupplierPendingDue &&
     Number(formData.amount || 0) > selectedSupplierRemainingDue;
+  const selectedAvailableCheque = availableCheques.find(
+    (cheque) => cheque.id === formData.chequeId,
+  );
+  const isChequeOutMode =
+    (formData.module === "MISC" || formData.module === "SUPPLIER_PAYMENT") &&
+    formData.paymentType === "CHEQUE" &&
+    formData.direction === "OUT";
+
+  const isRecordInFlow = lockedDirection === "IN" && !editingEntry;
+  const isRecordOutFlow = lockedDirection === "OUT" && !editingEntry;
 
   const loadData = async (dateFilter: string) => {
     setIsLoading(true);
@@ -323,6 +334,52 @@ export function Roznamcha() {
   }, [isDialogOpen, formData.module, formData.partyId]);
 
   useEffect(() => {
+    if (
+      !isDialogOpen ||
+      (formData.module !== "MISC" && formData.module !== "SUPPLIER_PAYMENT") ||
+      formData.paymentType !== "CHEQUE" ||
+      formData.direction !== "OUT"
+    ) {
+      setAvailableCheques([]);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingCheques(true);
+    chequeApi
+      .listAvailableCheques()
+      .then((cheques) => {
+        if (!active) return;
+        setAvailableCheques(cheques);
+        const stillValid = cheques.some((row) => row.id === formData.chequeId);
+        if (!stillValid) {
+          setFormData((prev) => ({ ...prev, chequeId: "" }));
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) {
+          toast.error("Failed to load available cheques.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingCheques(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    isDialogOpen,
+    formData.module,
+    formData.paymentType,
+    formData.direction,
+    formData.chequeId,
+  ]);
+
+  useEffect(() => {
     if (!isDialogOpen || formData.module !== "SUPPLIER_PAYMENT") {
       setSupplierPendingDues([]);
       return;
@@ -464,7 +521,6 @@ export function Roznamcha() {
       formData.module === "CHEMICAL" ||
       formData.module === "REXINE" ||
       formData.module === "MATERIAL";
-
     const amount = parseFloat(formData.amount || "0");
     const quantity = parseFloat(formData.quantity || "0");
     const rate = parseFloat(formData.rate || "0");
@@ -487,7 +543,11 @@ export function Roznamcha() {
                 formData.partyId === "none" ? undefined : formData.partyId,
               laborId:
                 formData.module === "LABOR" ? formData.laborId : undefined,
-              module: formData.module === "BILL" ? "MISC" : formData.module,
+              module:
+                formData.module === "BILL" ||
+                formData.module === "SUPPLIER_PAYMENT"
+                  ? "MISC"
+                  : formData.module,
               paymentType: formData.paymentType,
               amount,
               description: formData.description,
@@ -508,28 +568,32 @@ export function Roznamcha() {
         toast.success("Expense updated");
       } else if (formData.module === "BILL") {
         if (!formData.partyId || formData.partyId === "none") {
-          toast.error("Select a party.");
+          toast.error("Select a customer.");
           return;
         }
         if (!formData.billId) {
-          toast.error("Select a bill.");
+          toast.error("Select a customer bill.");
           return;
         }
         if (!Number.isFinite(amount) || amount <= 0) {
           toast.error("Enter a valid amount.");
           return;
         }
-        if (selectedBill && amount > Number(selectedBill.remaining ?? 0)) {
+        if (
+          selectedBill &&
+          formData.paymentType !== "CHEQUE" &&
+          amount > Number(selectedBill.remaining ?? 0)
+        ) {
           toast.error("Amount exceeds bill remaining.");
           return;
         }
         await billApi.receivePayment(formData.billId, {
           amount,
           date: formData.date,
-          method: "CASH",
+          method: formData.paymentType,
           description: formData.description || undefined,
         });
-        toast.success("Bill payment recorded");
+        toast.success("Customer payment recorded");
       } else if (formData.module === "SUPPLIER_PAYMENT") {
         if (!formData.partyId || formData.partyId === "none") {
           toast.error("Select a supplier party.");
@@ -550,9 +614,13 @@ export function Roznamcha() {
         await partyApi.createPayment(formData.partyId, {
           date: formData.date,
           amount,
-          method: "KHATA",
+          method: formData.paymentType,
           direction: "PAY",
           description: formData.description || undefined,
+          chequeId:
+            formData.paymentType === "CHEQUE"
+              ? formData.chequeId || undefined
+              : undefined,
         });
         toast.success("Supplier payment recorded");
       } else if (isPurchaseModule) {
@@ -610,6 +678,10 @@ export function Roznamcha() {
           paymentType: formData.paymentType,
           amount,
           description: formData.description,
+          chequeId:
+            formData.paymentType === "CHEQUE" && formData.direction === "OUT"
+              ? formData.chequeId || undefined
+              : undefined,
           actorUsername: sessionUser?.username,
           actorRole: sessionUser?.role,
         });
@@ -626,6 +698,10 @@ export function Roznamcha() {
           paymentType: formData.paymentType,
           amount: formData.direction === "IN" ? -amount : amount,
           description: formData.description,
+          chequeId:
+            formData.paymentType === "CHEQUE" && formData.direction === "OUT"
+              ? formData.chequeId || undefined
+              : undefined,
           actorUsername: sessionUser?.username,
           actorRole: sessionUser?.role,
         });
@@ -648,6 +724,7 @@ export function Roznamcha() {
       direction: "OUT",
       paymentType: "CASH",
       partyId: "none",
+      chequeId: "",
       billId: "",
       laborId: "",
       quantity: "",
@@ -667,13 +744,14 @@ export function Roznamcha() {
     setEditingEntry(entry);
     setFormData({
       date: entry.date.slice(0, 10),
-      module: entry.module,
+      module: entry.sourceSystem === "BILL_PAYMENT_RECEIVED" ? "BILL" : "MISC",
       direction: Number(entry.amount) < 0 ? "IN" : "OUT",
       paymentType:
-        String(entry.paymentType ?? "CASH").toUpperCase() === "CASH"
-          ? "CASH"
-          : "KHATA",
+        String(entry.paymentType ?? "CASH").toUpperCase() === "CHEQUE"
+          ? "CHEQUE"
+          : "CASH",
       partyId: entry.partyId || "none",
+      chequeId: "",
       billId: "",
       laborId: entry.laborId || entry.laborAdvance?.laborId || "",
       quantity: "",
@@ -722,7 +800,7 @@ export function Roznamcha() {
     "-";
 
   const getReferenceLabel = (entry: ApiExpenseEntry) => {
-    if (entry.sourceSystem === "BILL_PAYMENT_RECEIVED") return "Bill";
+    if (entry.sourceSystem === "BILL_PAYMENT_RECEIVED") return "Customer";
     if (entry.sourceSystem === "PARTY_PAYMENT_RECEIVED") return "Party";
     if (entry.sourceSystem === "PARTY_PAYMENT_PAID") return "Party";
     if (entry.sourceSystem === "LABOR_ADVANCE") return "Labor";
@@ -746,9 +824,11 @@ export function Roznamcha() {
 
   const getInOut = (amount: number) => (amount < 0 ? "In" : "Out");
   const getPaymentTypeLabel = (entry: ApiExpenseEntry) =>
-    String(entry.paymentType ?? "CASH").toUpperCase() === "CASH"
-      ? "Cash"
-      : "Khata";
+    String(entry.paymentType ?? "CASH").toUpperCase() === "CHEQUE"
+      ? "Cheque"
+      : String(entry.paymentType ?? "CASH").toUpperCase() === "CASH"
+        ? "Cash"
+        : "Khata";
 
   const formatTime = (entry: ApiExpenseEntry) => {
     const value = entry.createdAt || entry.date;
@@ -1079,6 +1159,27 @@ export function Roznamcha() {
                             value={formData.module}
                             onValueChange={(value) => {
                               const nextModule = value as RoznamchaModule;
+                              if (isRecordInFlow) {
+                                setFormData({
+                                  ...formData,
+                                  module: nextModule,
+                                  direction:
+                                    nextModule === "BILL" ? "IN" : "OUT",
+                                  paymentType:
+                                    nextModule === "BILL"
+                                      ? formData.paymentType === "CHEQUE"
+                                        ? "CHEQUE"
+                                        : "CASH"
+                                      : "CASH",
+                                  billId:
+                                    nextModule === "BILL"
+                                      ? ""
+                                      : formData.billId,
+                                  partyId: formData.partyId,
+                                });
+                                return;
+                              }
+
                               setFormData({
                                 ...formData,
                                 module: nextModule,
@@ -1089,13 +1190,19 @@ export function Roznamcha() {
                                       ? "OUT"
                                       : formData.direction,
                                 paymentType:
-                                  nextModule === "BILL"
+                                  nextModule === "MISC"
                                     ? "CASH"
-                                    : nextModule === "SUPPLIER_PAYMENT"
-                                      ? "KHATA"
-                                      : formData.paymentType,
+                                    : nextModule === "BILL"
+                                      ? "CASH"
+                                      : nextModule === "SUPPLIER_PAYMENT"
+                                        ? "KHATA"
+                                        : formData.paymentType,
                                 billId:
                                   nextModule === "BILL" ? "" : formData.billId,
+                                chequeId:
+                                  nextModule === "MISC"
+                                    ? formData.chequeId
+                                    : "",
                                 partyId:
                                   nextModule === "SUPPLIER_PAYMENT"
                                     ? "none"
@@ -1113,21 +1220,38 @@ export function Roznamcha() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="MISC">Misc</SelectItem>
-                              <SelectItem value="BILL">Bill</SelectItem>
-                              <SelectItem value="SUPPLIER_PAYMENT">
-                                Parties (Suppliers)
-                              </SelectItem>
-                              <SelectItem value="CHEMICAL">Chemical</SelectItem>
-                              <SelectItem value="REXINE">Rexine</SelectItem>
-                              <SelectItem value="MATERIAL">Material</SelectItem>
-                              <SelectItem
-                                value="LABOR"
-                                disabled={
-                                  !!editingEntry && !editingEntry.laborAdvanceId
-                                }
-                              >
-                                Labor
-                              </SelectItem>
+                              {!isRecordOutFlow && (
+                                <SelectItem value="BILL">Customer</SelectItem>
+                              )}
+                              {!isRecordInFlow && (
+                                <>
+                                  <SelectItem value="SUPPLIER_PAYMENT">
+                                    Parties (Suppliers)
+                                  </SelectItem>
+                                  {!isRecordOutFlow && (
+                                    <>
+                                      <SelectItem value="CHEMICAL">
+                                        Chemical
+                                      </SelectItem>
+                                      <SelectItem value="REXINE">
+                                        Rexine
+                                      </SelectItem>
+                                      <SelectItem value="MATERIAL">
+                                        Material
+                                      </SelectItem>
+                                    </>
+                                  )}
+                                  <SelectItem
+                                    value="LABOR"
+                                    disabled={
+                                      !!editingEntry &&
+                                      !editingEntry.laborAdvanceId
+                                    }
+                                  >
+                                    Labor
+                                  </SelectItem>
+                                </>
+                              )}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1144,11 +1268,7 @@ export function Roznamcha() {
                             disabled={
                               !!lockedDirection ||
                               formData.module === "BILL" ||
-                              formData.module === "CHEMICAL" ||
-                              formData.module === "MATERIAL" ||
-                              formData.module === "REXINE" ||
-                              formData.module === "LABOR" ||
-                              formData.module === "SUPPLIER_PAYMENT"
+                              formData.module === "LABOR"
                             }
                           >
                             <SelectTrigger>
@@ -1164,12 +1284,22 @@ export function Roznamcha() {
                           <Label>Payment Type</Label>
                           <Select
                             value={formData.paymentType}
-                            onValueChange={(value: "CASH" | "KHATA") =>
-                              setFormData({ ...formData, paymentType: value })
+                            onValueChange={(
+                              value: "CASH" | "KHATA" | "CHEQUE",
+                            ) =>
+                              setFormData({
+                                ...formData,
+                                paymentType: value,
+                                chequeId:
+                                  value === "CHEQUE" ? formData.chequeId : "",
+                              })
                             }
                             disabled={
-                              formData.module === "BILL" ||
-                              formData.module === "SUPPLIER_PAYMENT"
+                              isRecordInFlow
+                                ? formData.module === "MISC"
+                                : formData.module === "BILL" ||
+                                  (isRecordOutFlow &&
+                                    formData.module === "MISC")
                             }
                           >
                             <SelectTrigger>
@@ -1177,11 +1307,97 @@ export function Roznamcha() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="CASH">Cash</SelectItem>
-                              <SelectItem value="KHATA">Khata</SelectItem>
+                              {!isRecordInFlow &&
+                                (formData.module === "SUPPLIER_PAYMENT" ||
+                                  formData.module === "LABOR") && (
+                                  <SelectItem value="KHATA">Khata</SelectItem>
+                                )}
+                              {formData.module === "BILL" && (
+                                <SelectItem value="CHEQUE">Cheque</SelectItem>
+                              )}
+                              {!isRecordInFlow &&
+                                formData.module === "SUPPLIER_PAYMENT" && (
+                                  <SelectItem value="CHEQUE">Cheque</SelectItem>
+                                )}
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
+
+                      {!isRecordInFlow &&
+                        formData.module === "SUPPLIER_PAYMENT" &&
+                        formData.paymentType === "CHEQUE" &&
+                        formData.direction === "OUT" && (
+                          <div className="space-y-2">
+                            <Label>Select Cheque</Label>
+                            <Select
+                              value={formData.chequeId || "none"}
+                              onValueChange={(value) => {
+                                const nextChequeId =
+                                  value === "none" ? "" : value;
+                                const nextCheque = availableCheques.find(
+                                  (row) => row.id === nextChequeId,
+                                );
+                                setFormData({
+                                  ...formData,
+                                  chequeId: nextChequeId,
+                                  amount: nextCheque
+                                    ? String(Number(nextCheque.amount ?? 0))
+                                    : "",
+                                });
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue
+                                  placeholder={
+                                    isLoadingCheques
+                                      ? "Loading available cheques..."
+                                      : "Select cheque"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">
+                                  Select cheque
+                                </SelectItem>
+                                {availableCheques.map((cheque) => (
+                                  <SelectItem key={cheque.id} value={cheque.id}>
+                                    {formatCurrency(Number(cheque.amount ?? 0))}
+                                    {cheque.chequeNumber
+                                      ? ` - ${cheque.chequeNumber}`
+                                      : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {selectedAvailableCheque && (
+                              <div className="rounded border p-3 text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">
+                                    Cheque Amount
+                                  </span>
+                                  <span>
+                                    {formatCurrency(
+                                      Number(
+                                        selectedAvailableCheque.amount ?? 0,
+                                      ),
+                                    )}
+                                  </span>
+                                </div>
+                                {selectedAvailableCheque.chequeNumber && (
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">
+                                      Cheque Number
+                                    </span>
+                                    <span>
+                                      {selectedAvailableCheque.chequeNumber}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                       {formData.module === "BILL" ||
                       formData.module === "SUPPLIER_PAYMENT" ||
@@ -1189,7 +1405,9 @@ export function Roznamcha() {
                       formData.module === "MATERIAL" ||
                       formData.module === "REXINE" ? (
                         <div>
-                          <Label>Party</Label>
+                          <Label>
+                            {formData.module === "BILL" ? "Customer" : "Party"}
+                          </Label>
                           <Select
                             value={formData.partyId}
                             onValueChange={(value) =>
@@ -1204,7 +1422,13 @@ export function Roznamcha() {
                             }
                           >
                             <SelectTrigger>
-                              <SelectValue placeholder="Select party" />
+                              <SelectValue
+                                placeholder={
+                                  formData.module === "BILL"
+                                    ? "Select customer"
+                                    : "Select party"
+                                }
+                              />
                             </SelectTrigger>
                             <SelectContent>
                               {formData.module !== "BILL" &&
@@ -1232,7 +1456,7 @@ export function Roznamcha() {
 
                       {formData.module === "BILL" && (
                         <div className="space-y-2">
-                          <Label>Bill</Label>
+                          <Label>Customer Bill</Label>
                           <Select
                             value={formData.billId}
                             onValueChange={(value) => {
@@ -1246,7 +1470,6 @@ export function Roznamcha() {
                                   ? String(Number(bill.remaining ?? 0))
                                   : formData.amount,
                                 direction: "IN",
-                                paymentType: "CASH",
                               });
                             }}
                             disabled={
@@ -1534,7 +1757,8 @@ export function Roznamcha() {
                           disabled={
                             formData.module === "CHEMICAL" ||
                             formData.module === "REXINE" ||
-                            formData.module === "MATERIAL"
+                            formData.module === "MATERIAL" ||
+                            isChequeOutMode
                           }
                         />
                         {formData.module === "BILL" && exceedsBillAmount && (
@@ -1582,7 +1806,11 @@ export function Roznamcha() {
                           disabled={
                             (formData.module === "BILL" && exceedsBillAmount) ||
                             (formData.module === "SUPPLIER_PAYMENT" &&
-                              exceedsSupplierDue)
+                              exceedsSupplierDue) ||
+                            (formData.module === "SUPPLIER_PAYMENT" &&
+                              formData.paymentType === "CHEQUE" &&
+                              formData.direction === "OUT" &&
+                              !formData.chequeId)
                           }
                         >
                           {editingEntry ? "Update Entry" : "Record Entry"}
@@ -1616,7 +1844,10 @@ export function Roznamcha() {
                   <p className="text-2xl text-red-600">
                     {formatCurrency(cashOutToday)}
                   </p>
-                  <Button className="mt-3" onClick={() => openCreateDialog("OUT")}>
+                  <Button
+                    className="mt-3"
+                    onClick={() => openCreateDialog("OUT")}
+                  >
                     <Plus className="mr-2 h-4 w-4" />
                     Record Out
                   </Button>

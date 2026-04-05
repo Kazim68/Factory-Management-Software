@@ -124,7 +124,7 @@ export function StockControl({
       setManualForm((prev) =>
         prev.articleId || data.length === 0
           ? prev
-          : { ...prev, articleId: data[0].id }
+          : { ...prev, articleId: data[0].id },
       );
     } catch (error) {
       console.error(error);
@@ -133,7 +133,11 @@ export function StockControl({
   };
 
   const refreshStockData = async () => {
-    await Promise.all([loadSummary(), loadRows(mode, query), loadManualEntries()]);
+    await Promise.all([
+      loadSummary(),
+      loadRows(mode, query),
+      loadManualEntries(),
+    ]);
   };
 
   useEffect(() => {
@@ -310,6 +314,7 @@ export function StockControl({
               <TableHeader>
                 <TableRow>
                   <TableHead>Article</TableHead>
+                  <TableHead>Size</TableHead>
                   <TableHead>
                     {mode === "PACKED" ? "A-Mall (Dozen)" : "Quantity (Dozen)"}
                   </TableHead>
@@ -321,7 +326,7 @@ export function StockControl({
                 {isLoading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={mode === "PACKED" ? 4 : 2}
+                      colSpan={mode === "PACKED" ? 5 : 3}
                       className="text-center text-sm text-muted-foreground"
                     >
                       Loading stock rows...
@@ -330,7 +335,7 @@ export function StockControl({
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={mode === "PACKED" ? 4 : 2}
+                      colSpan={mode === "PACKED" ? 5 : 3}
                       className="text-center text-sm text-muted-foreground"
                     >
                       No articles found for this filter.
@@ -338,8 +343,9 @@ export function StockControl({
                   </TableRow>
                 ) : (
                   rows.map((row) => (
-                    <TableRow key={row.articleId}>
+                    <TableRow key={`${row.articleId}-${row.size}`}>
                       <TableCell>{row.articleName}</TableCell>
+                      <TableCell>{row.size}</TableCell>
                       <TableCell>
                         <Badge variant="secondary">{row.quantityDozen}</Badge>
                       </TableCell>
@@ -379,7 +385,10 @@ export function StockControl({
               }}
             >
               <DialogTrigger asChild>
-                <Button onClick={openCreateDialog} disabled={articles.length === 0}>
+                <Button
+                  onClick={openCreateDialog}
+                  disabled={articles.length === 0}
+                >
                   <Plus className="mr-2 h-4 w-4" />
                   Add Stock
                 </Button>

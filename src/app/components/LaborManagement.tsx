@@ -26,9 +26,17 @@ import {
 } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { ArrowLeft, Banknote, Eye, Plus, Wallet, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Banknote,
+  Eye,
+  Plus,
+  Printer,
+  Wallet,
+  X,
+} from "lucide-react";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
-import { configApi, expenseApi, laborApi, reportsApi } from "../lib/api";
+import { configApi, expenseApi, laborApi } from "../lib/api";
 import {
   exportTableToExcel,
   exportTableToPdf,
@@ -36,12 +44,10 @@ import {
 } from "../lib/report";
 import type {
   ApiArticle,
-  ApiExpenseCategory,
   ApiExpenseEntry,
   ApiLaborCategory,
   ApiLaborLedger,
   ApiLaborProfile,
-  ApiLaborSummaryReport,
   ApiLaborWorkEntry,
   ApiLaborAdvance,
   ApiPaymentType,
@@ -71,11 +77,7 @@ type LedgerTransactionRow = {
 
 const toDateKey = (value: string) => value.slice(0, 10);
 
-const isWithinDateRange = (
-  value: string,
-  start?: string,
-  end?: string,
-) => {
+const isWithinDateRange = (value: string, start?: string, end?: string) => {
   const dateKey = toDateKey(value);
   if (start && dateKey < start) {
     return false;
@@ -92,9 +94,6 @@ export function LaborManagement() {
   const [categories, setCategories] = useState<ApiLaborCategory[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<
-    ApiExpenseCategory[]
-  >([]);
   const [workEntries, setWorkEntries] = useState<UiWorkEntry[]>([]);
   const [advanceEntries, setAdvanceEntries] = useState<UiAdvance[]>([]);
   const [ledgerMap, setLedgerMap] = useState<Record<string, ApiLaborLedger>>(
@@ -105,6 +104,7 @@ export function LaborManagement() {
     ApiExpenseEntry[]
   >([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPrintingWorkEntries, setIsPrintingWorkEntries] = useState(false);
   const [isLoadingLedgerView, setIsLoadingLedgerView] = useState(false);
 
   const [laborDialog, setLaborDialog] = useState(false);
@@ -125,18 +125,9 @@ export function LaborManagement() {
   const [payingLaborId, setPayingLaborId] = useState<string | null>(null);
   const [ledgerRangeStart, setLedgerRangeStart] = useState("");
   const [ledgerRangeEnd, setLedgerRangeEnd] = useState(getCurrentDate());
-  const [laborReportPeriod, setLaborReportPeriod] = useState<
-    "weekly" | "monthly"
-  >("weekly");
-  const [laborReportStart, setLaborReportStart] = useState("");
-  const [laborReportEnd, setLaborReportEnd] = useState(getCurrentDate());
-  const [laborReport, setLaborReport] = useState<ApiLaborSummaryReport | null>(
-    null,
-  );
-  const [isLoadingLaborReport, setIsLoadingLaborReport] = useState(false);
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") return "entries";
-    return localStorage.getItem("labor.activeSection") || "entries";
+    return "entries";
   });
 
   const [laborForm, setLaborForm] = useState({
@@ -149,7 +140,6 @@ export function LaborManagement() {
   const [kharchaForm, setKharchaForm] = useState({
     laborId: "",
     date: getCurrentDate(),
-    categoryId: "",
     amount: "",
     reason: "",
   });
@@ -171,10 +161,6 @@ export function LaborManagement() {
     paymentTypes.find((paymentType) => paymentType.id === paymentTypeId)
       ?.name || "Unknown";
 
-  const getExpenseCategoryName = (categoryId?: string | null) =>
-    expenseCategories.find((category) => category.id === categoryId)?.name ||
-    "Unknown";
-
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -185,7 +171,6 @@ export function LaborManagement() {
         categoryData,
         paymentData,
         articleData,
-        expenseCategoryData,
         laborExpenseData,
         laborExpenseTodayData,
       ] = await Promise.all([
@@ -194,7 +179,6 @@ export function LaborManagement() {
         configApi.listLaborCategories(),
         configApi.listPaymentTypes(),
         configApi.listArticles(),
-        configApi.listExpenseCategories(),
         expenseApi.listExpenses({ module: "LABOR" }),
         expenseApi.listExpenses({ module: "LABOR", start: today, end: today }),
       ]);
@@ -204,7 +188,6 @@ export function LaborManagement() {
       setCategories(categoryData);
       setPaymentTypes(paymentData);
       setArticles(articleData);
-      setExpenseCategories(expenseCategoryData);
       setLaborPayments(laborExpenseData);
       setLaborPaymentsToday(laborExpenseTodayData);
 
@@ -262,41 +245,6 @@ export function LaborManagement() {
   }, []);
 
   useEffect(() => {
-    let active = true;
-    setIsLoadingLaborReport(true);
-
-    const timer = window.setTimeout(() => {
-      reportsApi
-        .getLaborSummary({
-          period: laborReportPeriod,
-          start: laborReportStart || undefined,
-          end: laborReportEnd || undefined,
-        })
-        .then((report) => {
-          if (active) {
-            setLaborReport(report);
-          }
-        })
-        .catch((error) => {
-          console.error(error);
-          if (active) {
-            toast.error("Failed to load labor report.");
-          }
-        })
-        .finally(() => {
-          if (active) {
-            setIsLoadingLaborReport(false);
-          }
-        });
-    }, 150);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [laborReportPeriod, laborReportStart, laborReportEnd]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
     localStorage.setItem("labor.activeSection", activeSection);
   }, [activeSection]);
@@ -342,56 +290,6 @@ export function LaborManagement() {
       active = false;
     };
   }, [viewingLaborId, ledgerRangeStart, ledgerRangeEnd]);
-
-  const buildLaborReportPayload = (
-    report: ApiLaborSummaryReport,
-  ): ReportExportPayload => ({
-    title: `Labor ${report.period} summary`,
-    table: {
-      columns: [
-        "Period",
-        "Labor",
-        "Total Earnings",
-        "Total Advances",
-        "Total Paid Cash",
-        "Net Payable",
-      ],
-      rows: report.buckets.flatMap((bucket) =>
-        bucket.labors.map((labor) => [
-          bucket.key,
-          labor.laborName,
-          labor.totalEarnings.toFixed(2),
-          labor.totalAdvances.toFixed(2),
-          labor.totalPaidCash.toFixed(2),
-          labor.netPayable.toFixed(2),
-        ]),
-      ),
-    },
-    metadata: {
-      generatedAt: new Date().toLocaleString(),
-      filters: [
-        `Period: ${report.period}`,
-        `Range: ${new Date(report.range.start).toLocaleDateString()} - ${new Date(report.range.end).toLocaleDateString()}`,
-      ],
-    },
-  });
-
-  const exportLaborReport = (type: "excel" | "pdf") => {
-    if (!laborReport) {
-      toast.error("Load a labor report first.");
-      return;
-    }
-    const payload = buildLaborReportPayload(laborReport);
-    const ok =
-      type === "excel"
-        ? exportTableToExcel(payload)
-        : exportTableToPdf(payload);
-    if (!ok) {
-      toast.error(`Failed to export ${type.toUpperCase()} report.`);
-      return;
-    }
-    toast.success(`${type.toUpperCase()} report generated.`);
-  };
 
   const buildLedgerExportPayload = (): ReportExportPayload | null => {
     if (!viewingLabor || !viewingLedger) {
@@ -536,10 +434,6 @@ export function LaborManagement() {
       toast.error("Please select labor");
       return;
     }
-    if (!kharchaForm.categoryId && !editingAdvanceId) {
-      toast.error("Please select an expense category");
-      return;
-    }
     const amount = parseFloat(kharchaForm.amount);
     if (!Number.isFinite(amount)) {
       toast.error("Enter a valid amount");
@@ -558,13 +452,11 @@ export function LaborManagement() {
             date: kharchaForm.date,
             amount,
             reason: kharchaForm.reason,
-            categoryId: kharchaForm.categoryId || undefined,
           },
           {
             itemLabel: getLaborName(kharchaForm.laborId),
             fieldLabels: {
               laborId: getLaborName(kharchaForm.laborId),
-              categoryId: getExpenseCategoryName(kharchaForm.categoryId),
             },
             previousFieldLabels: {
               laborId: getLaborName(current?.laborId),
@@ -585,7 +477,6 @@ export function LaborManagement() {
             date: kharchaForm.date,
             amount,
             reason: kharchaForm.reason,
-            categoryId: kharchaForm.categoryId,
           },
           {
             itemLabel: getLaborName(kharchaForm.laborId),
@@ -597,7 +488,6 @@ export function LaborManagement() {
       setKharchaForm({
         laborId: "",
         date: getCurrentDate(),
-        categoryId: "",
         amount: "",
         reason: "",
       });
@@ -701,11 +591,35 @@ export function LaborManagement() {
     setKharchaForm({
       laborId: advance.laborId,
       date: advance.date.slice(0, 10),
-      categoryId: "",
       amount: String(advance.amount),
       reason: advance.reason || "",
     });
     setKharchaDialog(true);
+  };
+
+  const printFilteredWorkEntries = async () => {
+    try {
+      setIsPrintingWorkEntries(true);
+      const html = await laborApi.getPrintableWorkEntries({
+        start: workEntryStart || undefined,
+        end: workEntryEnd || undefined,
+        department: departmentFilter === "ALL" ? undefined : departmentFilter,
+        search: laborSearchQuery.trim() || undefined,
+      });
+
+      const printWindow = window.open("", "", "width=1000,height=700");
+      if (!printWindow) {
+        toast.error("Unable to open print window.");
+        return;
+      }
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to generate printable work entries.");
+    } finally {
+      setIsPrintingWorkEntries(false);
+    }
   };
 
   const deleteAdvance = async (advanceId: string) => {
@@ -787,7 +701,7 @@ export function LaborManagement() {
   );
 
   const viewingLabor = viewingLaborId
-    ? allProfiles.find((labor) => labor.id === viewingLaborId) ?? null
+    ? (allProfiles.find((labor) => labor.id === viewingLaborId) ?? null)
     : null;
 
   const ledgerPaidEntries = useMemo(
@@ -800,8 +714,7 @@ export function LaborManagement() {
                 isWithinDateRange(entry.date, ledgerRangeStart, ledgerRangeEnd),
             )
             .sort(
-              (a, b) =>
-                new Date(a.date).getTime() - new Date(b.date).getTime(),
+              (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
             )
         : [],
     [viewingLaborId, paidEntries, ledgerRangeStart, ledgerRangeEnd],
@@ -880,7 +793,10 @@ export function LaborManagement() {
       totalEarnings: viewingLedger.totalEarnings,
       totalAdvances: viewingLedger.totalAdvances,
       totalPaidCash,
-      netPayable: viewingLedger.totalEarnings - viewingLedger.totalAdvances - totalPaidCash,
+      netPayable:
+        viewingLedger.totalEarnings -
+        viewingLedger.totalAdvances -
+        totalPaidCash,
     };
   }, [viewingLedger, ledgerPaidEntries]);
 
@@ -978,7 +894,9 @@ export function LaborManagement() {
             <CardContent>
               <p
                 className={`text-2xl ${
-                  ledgerTotals.netPayable >= 0 ? "text-green-600" : "text-red-600"
+                  ledgerTotals.netPayable >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
                 }`}
               >
                 {formatCurrency(ledgerTotals.netPayable)}
@@ -1061,166 +979,6 @@ export function LaborManagement() {
   return (
     <div className="space-y-6">
       <Tabs value={activeSection} onValueChange={setActiveSection}>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <TabsList className="grid w-full max-w-[320px] grid-cols-2">
-            <TabsTrigger value="entries">Labor Work</TabsTrigger>
-            <TabsTrigger value="reports">Reports</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="reports" className="space-y-0">
-          <Card>
-            <CardHeader>
-              <CardTitle>Labor Reports</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div>
-                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
-                    Report Period
-                  </Label>
-                  <Select
-                    value={laborReportPeriod}
-                    onValueChange={(value) =>
-                      setLaborReportPeriod(value as "weekly" | "monthly")
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="monthly">Monthly</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
-                    Start Date (optional)
-                  </Label>
-                  <Input
-                    type="date"
-                    value={laborReportStart}
-                    onChange={(e) => setLaborReportStart(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
-                    End Date
-                  </Label>
-                  <Input
-                    type="date"
-                    value={laborReportEnd}
-                    onChange={(e) => setLaborReportEnd(e.target.value)}
-                  />
-                </div>
-                <div className="flex items-end gap-2">
-                  {isLoadingLaborReport && (
-                    <p className="text-xs text-muted-foreground">Loading...</p>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => exportLaborReport("excel")}
-                    disabled={!laborReport || laborReport.buckets.length === 0}
-                  >
-                    Excel
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => exportLaborReport("pdf")}
-                    disabled={!laborReport || laborReport.buckets.length === 0}
-                  >
-                    PDF
-                  </Button>
-                </div>
-              </div>
-
-              {laborReport && (
-                <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-4">
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Total Earnings
-                      </p>
-                      <p className="text-lg">
-                        {formatCurrency(laborReport.totals.totalEarnings)}
-                      </p>
-                    </div>
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Total Advances
-                      </p>
-                      <p className="text-lg">
-                        {formatCurrency(laborReport.totals.totalAdvances)}
-                      </p>
-                    </div>
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Total Paid Cash
-                      </p>
-                      <p className="text-lg">
-                        {formatCurrency(laborReport.totals.totalPaidCash)}
-                      </p>
-                    </div>
-                    <div className="rounded border p-3">
-                      <p className="text-xs text-muted-foreground">
-                        Net Payable
-                      </p>
-                      <p className="text-lg">
-                        {formatCurrency(laborReport.totals.netPayable)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Period</TableHead>
-                        <TableHead>Total Earnings</TableHead>
-                        <TableHead>Total Advances</TableHead>
-                        <TableHead>Total Paid Cash</TableHead>
-                        <TableHead>Net Payable</TableHead>
-                        <TableHead>Labors</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {laborReport.buckets.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={6}
-                            className="text-center text-muted-foreground"
-                          >
-                            No data found for selected period.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        laborReport.buckets.map((bucket) => (
-                          <TableRow key={bucket.key}>
-                            <TableCell>{bucket.key}</TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.totalEarnings)}
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.totalAdvances)}
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.totalPaidCash)}
-                            </TableCell>
-                            <TableCell>
-                              {formatCurrency(bucket.netPayable)}
-                            </TableCell>
-                            <TableCell>{bucket.laborCount}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="entries" className="space-y-0">
           <Card>
             <CardHeader>
@@ -1318,6 +1076,17 @@ export function LaborManagement() {
                     </>
                   )}
                   <div className="ml-auto flex items-center gap-2">
+                    {activeTab === "work" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={printFilteredWorkEntries}
+                        disabled={isPrintingWorkEntries}
+                      >
+                        <Printer className="mr-2 h-4 w-4" />
+                        {isPrintingWorkEntries ? "Preparing..." : "Print"}
+                      </Button>
+                    )}
                     {activeTab === "labors" && (
                       <Dialog open={laborDialog} onOpenChange={setLaborDialog}>
                         <DialogTrigger asChild>

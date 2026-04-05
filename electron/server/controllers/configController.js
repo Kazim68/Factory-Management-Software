@@ -1,7 +1,5 @@
 import prisma from "../prisma.js";
-import {
-  normalizeLaborDepartment,
-} from "../constants/laborDepartments.js";
+import { normalizeLaborDepartment } from "../constants/laborDepartments.js";
 import { listLaborDepartments } from "../services/laborDepartmentService.js";
 
 export const listUnits = async (req, res) => {
@@ -69,9 +67,7 @@ export const deleteArticle = async (req, res) => {
 export const listLaborCategories = async (req, res) => {
   const rows = await listLaborDepartments();
   const overrides = await prisma.laborDepartmentName.findMany();
-  const overrideMap = new Map(
-    overrides.map((row) => [row.department, row])
-  );
+  const overrideMap = new Map(overrides.map((row) => [row.department, row]));
 
   res.json(
     rows.map((department) => {
@@ -82,13 +78,14 @@ export const listLaborCategories = async (req, res) => {
         createdAt: existing?.createdAt ?? new Date(),
         updatedAt: existing?.updatedAt ?? new Date(),
       };
-    })
+    }),
   );
 };
 
 export const createLaborCategory = async (req, res) => {
   res.status(405).json({
-    error: "Labor departments are fixed. Edit existing department names instead.",
+    error:
+      "Labor departments are fixed. Edit existing department names instead.",
   });
 };
 
@@ -162,35 +159,6 @@ export const updatePaymentType = async (req, res) => {
 export const deletePaymentType = async (req, res) => {
   await prisma.paymentCalculationType.delete({
     where: { id: req.params.paymentTypeId },
-  });
-  res.status(204).end();
-};
-
-export const listExpenseCategories = async (req, res) => {
-  const categories = await prisma.expenseCategory.findMany({
-    orderBy: { name: "asc" },
-  });
-  res.json(categories);
-};
-
-export const createExpenseCategory = async (req, res) => {
-  const category = await prisma.expenseCategory.create({
-    data: { name: req.body.name },
-  });
-  res.status(201).json(category);
-};
-
-export const updateExpenseCategory = async (req, res) => {
-  const category = await prisma.expenseCategory.update({
-    where: { id: req.params.expenseCategoryId },
-    data: { name: req.body.name },
-  });
-  res.json(category);
-};
-
-export const deleteExpenseCategory = async (req, res) => {
-  await prisma.expenseCategory.delete({
-    where: { id: req.params.expenseCategoryId },
   });
   res.status(204).end();
 };
