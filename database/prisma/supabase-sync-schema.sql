@@ -11,7 +11,10 @@ CREATE TYPE "BillType" AS ENUM ('CASH', 'CREDIT');
 CREATE TYPE "BillStatus" AS ENUM ('DRAFT', 'CONFIRMED');
 
 -- CreateEnum
-CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'CREDIT', 'BANK');
+CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'CREDIT', 'BANK', 'CHEQUE');
+
+-- CreateEnum
+CREATE TYPE "ChequeStatus" AS ENUM ('AVAILABLE', 'USED', 'CASHED');
 
 -- CreateEnum
 CREATE TYPE "ExpenseModule" AS ENUM ('CHEMICAL', 'REXINE', 'MATERIAL', 'LABOR', 'MISC');
@@ -26,13 +29,19 @@ CREATE TYPE "LaborStatus" AS ENUM ('ACTIVE', 'FIRED');
 CREATE TYPE "LaborDepartment" AS ENUM ('PRESSMAN', 'UPPERMAN', 'PRINTING', 'DC', 'MACHINEMAN', 'PACKING');
 
 -- CreateEnum
+CREATE TYPE "StockEntryMode" AS ENUM ('IN_STOCK', 'PACKED');
+
+-- CreateEnum
+CREATE TYPE "MallStockType" AS ENUM ('B_MALL', 'C_MALL');
+
+-- CreateEnum
+CREATE TYPE "StockMovementDirection" AS ENUM ('IN', 'OUT');
+
+-- CreateEnum
 CREATE TYPE "ProductionStage" AS ENUM ('STAGE_PRESSMAN', 'STAGE_UPPERMAN', 'STAGE_PRINTING', 'STAGE_DC', 'STAGE_MACHINEMAN', 'STAGE_PACKING');
 
 -- CreateEnum
 CREATE TYPE "ProductionOrderSource" AS ENUM ('MANUAL', 'PRESSMAN_FLOW', 'UPPER_PRINT_PARALLEL', 'STAGE_FLOW');
-
--- CreateEnum
-CREATE TYPE "StockEntryMode" AS ENUM ('IN_STOCK', 'PACKED');
 
 -- CreateTable
 CREATE TABLE "Unit" (
@@ -223,6 +232,37 @@ CREATE TABLE "bill_number_counter" (
 );
 
 -- CreateTable
+CREATE TABLE "StockEntry" (
+    "id" TEXT NOT NULL,
+    "articleId" TEXT NOT NULL,
+    "mode" "StockEntryMode" NOT NULL DEFAULT 'IN_STOCK',
+    "quantityDozen" DECIMAL(65,30) NOT NULL,
+    "note" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "StockEntry_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MallStockMovement" (
+    "id" TEXT NOT NULL,
+    "mallType" "MallStockType" NOT NULL,
+    "direction" "StockMovementDirection" NOT NULL DEFAULT 'OUT',
+    "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "quantityDozen" DECIMAL(65,30) NOT NULL,
+    "ratePerDozen" DECIMAL(65,30),
+    "totalAmount" DECIMAL(65,30),
+    "reference" TEXT,
+    "note" TEXT,
+    "roznamchaEntryId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "MallStockMovement_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ChemicalPurchase" (
     "id" TEXT NOT NULL,
     "date" TIMESTAMP(3) NOT NULL,
@@ -285,16 +325,41 @@ CREATE TABLE "PartyPayment" (
 );
 
 -- CreateTable
+CREATE TABLE "Cheque" (
+    "id" TEXT NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL,
+    "amount" DECIMAL(65,30) NOT NULL,
+    "chequeNumber" TEXT,
+    "notes" TEXT,
+    "status" "ChequeStatus" NOT NULL DEFAULT 'AVAILABLE',
+    "sourcePartyId" TEXT,
+    "usedPartyId" TEXT,
+    "sourcePaymentId" TEXT,
+    "usedPaymentId" TEXT,
+    "cashedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Cheque_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ProductionOrder" (
     "id" TEXT NOT NULL,
     "department" "LaborDepartment" NOT NULL,
     "stage" "ProductionStage" NOT NULL,
     "articleId" TEXT NOT NULL,
+    "size" TEXT NOT NULL DEFAULT '',
     "laborId" TEXT,
+    "packingLaborId" TEXT,
     "quantityDozen" DECIMAL(65,30) NOT NULL,
     "pricePerDozen" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "packingPricePerDozen" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "completedDozen" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "bMallDozen" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "cMallDozen" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "forwardedDozen" DECIMAL(65,30) NOT NULL DEFAULT 0,
+    "orderDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "source" "ProductionOrderSource" NOT NULL DEFAULT 'MANUAL',
     "isClosed" BOOLEAN NOT NULL DEFAULT false,
     "closedAt" TIMESTAMP(3),
@@ -302,19 +367,6 @@ CREATE TABLE "ProductionOrder" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "ProductionOrder_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "StockEntry" (
-    "id" TEXT NOT NULL,
-    "articleId" TEXT NOT NULL,
-    "mode" "StockEntryMode" NOT NULL DEFAULT 'IN_STOCK',
-    "quantityDozen" DECIMAL(65,30) NOT NULL,
-    "note" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "StockEntry_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -377,6 +429,15 @@ CREATE INDEX "LaborAdvance_laborId_date_idx" ON "LaborAdvance"("laborId", "date"
 CREATE INDEX "Bill_date_idx" ON "Bill"("date");
 
 -- CreateIndex
+CREATE INDEX "StockEntry_mode_articleId_idx" ON "StockEntry"("mode", "articleId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MallStockMovement_roznamchaEntryId_key" ON "MallStockMovement"("roznamchaEntryId");
+
+-- CreateIndex
+CREATE INDEX "MallStockMovement_mallType_date_idx" ON "MallStockMovement"("mallType", "date");
+
+-- CreateIndex
 CREATE INDEX "ChemicalPurchase_date_idx" ON "ChemicalPurchase"("date");
 
 -- CreateIndex
@@ -389,13 +450,28 @@ CREATE INDEX "MaterialPurchase_date_idx" ON "MaterialPurchase"("date");
 CREATE INDEX "PartyPayment_partyId_date_idx" ON "PartyPayment"("partyId", "date");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Cheque_sourcePaymentId_key" ON "Cheque"("sourcePaymentId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Cheque_usedPaymentId_key" ON "Cheque"("usedPaymentId");
+
+-- CreateIndex
+CREATE INDEX "Cheque_status_date_idx" ON "Cheque"("status", "date");
+
+-- CreateIndex
+CREATE INDEX "Cheque_amount_idx" ON "Cheque"("amount");
+
+-- CreateIndex
 CREATE INDEX "ProductionOrder_department_isClosed_updatedAt_idx" ON "ProductionOrder"("department", "isClosed", "updatedAt");
+
+-- CreateIndex
+CREATE INDEX "ProductionOrder_orderDate_idx" ON "ProductionOrder"("orderDate");
 
 -- CreateIndex
 CREATE INDEX "ProductionOrder_articleId_department_idx" ON "ProductionOrder"("articleId", "department");
 
 -- CreateIndex
-CREATE INDEX "StockEntry_mode_articleId_idx" ON "StockEntry"("mode", "articleId");
+CREATE INDEX "ProductionOrder_packingLaborId_idx" ON "ProductionOrder"("packingLaborId");
 
 -- CreateIndex
 CREATE INDEX "change_log_synced_created_at_idx" ON "change_log"("synced", "created_at");
@@ -470,6 +546,9 @@ ALTER TABLE "BillLine" ADD CONSTRAINT "BillLine_billId_fkey" FOREIGN KEY ("billI
 ALTER TABLE "BillLine" ADD CONSTRAINT "BillLine_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "StockEntry" ADD CONSTRAINT "StockEntry_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ChemicalPurchase" ADD CONSTRAINT "ChemicalPurchase_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -500,11 +579,23 @@ ALTER TABLE "PartyPayment" ADD CONSTRAINT "PartyPayment_rexinePurchaseId_fkey" F
 ALTER TABLE "PartyPayment" ADD CONSTRAINT "PartyPayment_materialPurchaseId_fkey" FOREIGN KEY ("materialPurchaseId") REFERENCES "MaterialPurchase"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Cheque" ADD CONSTRAINT "Cheque_sourcePartyId_fkey" FOREIGN KEY ("sourcePartyId") REFERENCES "Party"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Cheque" ADD CONSTRAINT "Cheque_usedPartyId_fkey" FOREIGN KEY ("usedPartyId") REFERENCES "Party"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Cheque" ADD CONSTRAINT "Cheque_sourcePaymentId_fkey" FOREIGN KEY ("sourcePaymentId") REFERENCES "PartyPayment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Cheque" ADD CONSTRAINT "Cheque_usedPaymentId_fkey" FOREIGN KEY ("usedPaymentId") REFERENCES "PartyPayment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ProductionOrder" ADD CONSTRAINT "ProductionOrder_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionOrder" ADD CONSTRAINT "ProductionOrder_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "StockEntry" ADD CONSTRAINT "StockEntry_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "Article"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ProductionOrder" ADD CONSTRAINT "ProductionOrder_packingLaborId_fkey" FOREIGN KEY ("packingLaborId") REFERENCES "LaborProfile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 

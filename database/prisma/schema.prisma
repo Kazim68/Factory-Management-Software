@@ -70,6 +70,16 @@ enum StockEntryMode {
   PACKED
 }
 
+enum MallStockType {
+  B_MALL
+  C_MALL
+}
+
+enum StockMovementDirection {
+  IN
+  OUT
+}
+
 enum ProductionStage {
   STAGE_PRESSMAN
   STAGE_UPPERMAN
@@ -327,6 +337,23 @@ model StockEntry {
   @@index([mode, articleId])
 }
 
+model MallStockMovement {
+  id              String                 @id @default(uuid())
+  mallType        MallStockType
+  direction       StockMovementDirection @default(OUT)
+  date            DateTime               @default(now())
+  quantityDozen   Decimal
+  ratePerDozen    Decimal?
+  totalAmount     Decimal?
+  reference       String?
+  note            String?
+  roznamchaEntryId String?               @unique
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([mallType, date])
+}
+
 model ChemicalPurchase {
   id           String   @id @default(uuid())
   date         DateTime
@@ -449,6 +476,7 @@ model ProductionOrder {
   bMallDozen    Decimal               @default(0)
   cMallDozen    Decimal               @default(0)
   forwardedDozen Decimal              @default(0)
+  orderDate     DateTime              @default(now())
   source        ProductionOrderSource @default(MANUAL)
   isClosed      Boolean               @default(false)
   closedAt      DateTime?
@@ -460,6 +488,7 @@ model ProductionOrder {
   packingLabor LaborProfile? @relation("ProductionOrderPackingLabor", fields: [packingLaborId], references: [id])
 
   @@index([department, isClosed, updatedAt])
+  @@index([orderDate])
   @@index([articleId, department])
   @@index([packingLaborId])
 }
