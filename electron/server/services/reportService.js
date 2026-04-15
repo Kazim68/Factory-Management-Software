@@ -1,39 +1,15 @@
 import prisma from "../prisma.js";
-import { toDate, withDateRange } from "../utils/date.js";
-
-const startOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-const endOfDay = (date) => {
-  const d = new Date(date);
-  d.setHours(23, 59, 59, 999);
-  return d;
-};
-
-const getWeekStart = (date) => {
-  const d = startOfDay(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
-};
-
-const getMonthStart = (date) => {
-  const d = startOfDay(date);
-  d.setDate(1);
-  return d;
-};
-
-const getMonthEnd = (date) => {
-  const d = endOfDay(date);
-  d.setMonth(d.getMonth() + 1, 0);
-  return d;
-};
-
-const toIsoDay = (date) => startOfDay(date).toISOString().slice(0, 10);
+import {
+  endOfDay,
+  formatDateKey,
+  formatMonthKey,
+  getMonthEnd,
+  getMonthStart,
+  getWeekStart,
+  startOfDay,
+  toDate,
+  withDateRange,
+} from "../utils/date.js";
 
 const normalizeDateRange = ({ start, end, period }) => {
   const parsedStart = toDate(start);
@@ -64,12 +40,12 @@ const normalizeDateRange = ({ start, end, period }) => {
 
 const getBucketKey = (date, period) => {
   if (period === "daily") {
-    return toIsoDay(date);
+    return formatDateKey(date);
   }
   if (period === "weekly") {
-    return toIsoDay(getWeekStart(date));
+    return formatDateKey(getWeekStart(date));
   }
-  return new Date(date).toISOString().slice(0, 7);
+  return formatMonthKey(date);
 };
 
 const ensureBucket = (map, key) => {
@@ -117,13 +93,21 @@ const updateLaborRow = (byLabor, laborId, laborName, updater) => {
 };
 
 const getMonthKeysBetween = (start, end) => {
+  const startKey = formatMonthKey(start);
+  const endKey = formatMonthKey(end);
+  const [startYear, startMonth] = startKey.split("-").map(Number);
+  const [endYear, endMonth] = endKey.split("-").map(Number);
   const keys = [];
-  const cursor = getMonthStart(start);
-  const limit = getMonthStart(end);
+  let year = startYear;
+  let month = startMonth;
 
-  while (cursor <= limit) {
-    keys.push(cursor.toISOString().slice(0, 7));
-    cursor.setMonth(cursor.getMonth() + 1);
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    keys.push(`${year}-${String(month).padStart(2, "0")}`);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
   }
 
   return keys;
@@ -133,6 +117,26 @@ const isCashLedgerEntry = (entry) => {
   const reference = String(entry.reference ?? "").toLowerCase();
   const description = String(entry.description ?? "").toLowerCase();
   return reference.includes("cash") || description.includes("cash");
+};
+
+const getRoznamchaModuleKey = (entry) => {
+  const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
+  if (sourceSystem === "PARTY_PAYMENT_PAID") {
+    return "SUPPLIER_PAYMENT";
+  }
+  if (
+    sourceSystem === "PARTY_PAYMENT_RECEIVED" ||
+    sourceSystem === "BILL_PAYMENT_RECEIVED"
+  ) {
+    return "CUSTOMER_PAYMENT";
+  }
+  if (sourceSystem === "B_MALL_SALE" || sourceSystem === "C_MALL_SALE") {
+    return "SALE";
+  }
+  if (sourceSystem.startsWith("BILL_SALE|")) {
+    return "SALE";
+  }
+  return entry.module ?? "MISC";
 };
 
 export const getRoznamchaSummary = async ({ period, start, end }) => {
@@ -157,7 +161,7 @@ export const getRoznamchaSummary = async ({ period, start, end }) => {
     const amount = Number(entry.amount ?? 0);
     const bucketKey = getBucketKey(entry.date, period);
     const bucket = ensureBucket(bucketsMap, bucketKey);
-    const moduleKey = entry.module ?? "MISC";
+    const moduleKey = getRoznamchaModuleKey(entry);
 
     if (!bucket.moduleBreakdown[moduleKey]) {
       bucket.moduleBreakdown[moduleKey] = 0;

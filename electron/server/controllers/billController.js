@@ -1,8 +1,15 @@
 import prisma from "../prisma.js";
 import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
+import { toDate } from "../utils/date.js";
+import {
+  getPackedStockSnapshot,
+  getStockVariantKey,
+  toNumber,
+} from "../services/stockService.js";
 
 const BILL_COUNTER_ID = "default";
 const MAX_BILL_NUMBER = 9999;
+const PAIRS_PER_DOZEN = 12;
 
 const formatBillNumber = (value) => String(value).padStart(4, "0");
 
@@ -26,88 +33,52 @@ const computePaymentStatus = (total, totalPaid) => {
   return "UNPAID";
 };
 
+const roundMoney = (value) => Number(Number(value ?? 0).toFixed(2));
+
 const computeLineTotal = ({ quantity, price, discount }) => {
-  const grossTotal = Number(quantity ?? 0) * Number(price ?? 0);
-  const discountAmount = Number(discount ?? 0) * Number(quantity ?? 0);
-  return Number((grossTotal - discountAmount).toFixed(2));
+  const grossTotal =
+    Number(quantity ?? 0) * PAIRS_PER_DOZEN * Number(price ?? 0);
+  const discountAmount =
+    Number(discount ?? 0) * Number(quantity ?? 0) * PAIRS_PER_DOZEN;
+  return roundMoney(grossTotal - discountAmount);
 };
 
-const toNumber = (value) => {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
-};
+const computeBillTotalFromLines = (lines = []) =>
+  roundMoney(
+    lines.reduce((sum, line) => sum + computeLineTotal(line), 0),
+  );
 
-const normalizeSize = (value) => {
-  const normalized = String(value ?? "").trim();
-  return normalized || "-";
-};
-
-const getStockVariantKey = (articleId, size) =>
-  `${articleId}::${normalizeSize(size)}`;
-
-const MERGED_FINAL_DEPARTMENTS = ["MACHINEMAN", "PACKING"];
-
-const getAvailableStockByVariant = async (tx) => {
-  const [orders, stockEntries] = await Promise.all([
-    tx.productionOrder.findMany({
-      select: {
-        department: true,
-        articleId: true,
-        size: true,
-        quantityDozen: true,
-        completedDozen: true,
-        bMallDozen: true,
-        cMallDozen: true,
-      },
-    }),
-    tx.stockEntry.findMany({
-      where: { mode: "PACKED" },
-      select: {
-        articleId: true,
-        quantityDozen: true,
-      },
-    }),
-  ]);
-
-  const availableByVariant = new Map();
-
-  for (const row of orders) {
-    const completed = toNumber(row.completedDozen);
-
-    if (!MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
-      continue;
-    }
-
-    const contribution = completed;
-    if (contribution <= 0) continue;
-    const variantKey = getStockVariantKey(row.articleId, row.size);
-    availableByVariant.set(
-      variantKey,
-      (availableByVariant.get(variantKey) ?? 0) + contribution,
-    );
+const resolveBillTotal = (bill) => {
+  if (Array.isArray(bill?.lines) && bill.lines.length > 0) {
+    return computeBillTotalFromLines(bill.lines);
   }
-
-  for (const entry of stockEntries) {
-    const contribution = toNumber(entry.quantityDozen);
-    if (contribution <= 0) continue;
-    const variantKey = getStockVariantKey(entry.articleId, "-");
-    availableByVariant.set(
-      variantKey,
-      (availableByVariant.get(variantKey) ?? 0) + contribution,
-    );
-  }
-
-  return availableByVariant;
+  return roundMoney(Number(bill?.total ?? 0));
 };
 
-const assertSufficientStockForBillLines = async (tx, lines) => {
+const getAvailableStockByVariant = async (tx, options = {}) => {
+  const { packedRows } = await getPackedStockSnapshot(tx, options);
+  return packedRows.reduce((acc, row) => {
+    acc.set(
+      getStockVariantKey(row.articleId, row.size),
+      (acc.get(getStockVariantKey(row.articleId, row.size)) ?? 0) +
+        toNumber(row.quantityDozen),
+    );
+    return acc;
+  }, new Map());
+};
+
+const assertSufficientStockForBillLines = async (
+  tx,
+  lines,
+  options = {},
+) => {
   const requestedByVariant = lines.reduce((acc, line) => {
     const variantKey = getStockVariantKey(line.articleId, line.size);
     acc[variantKey] = (acc[variantKey] ?? 0) + toNumber(line.quantity);
     return acc;
   }, {});
 
-  const availableByVariant = await getAvailableStockByVariant(tx);
+  const availableByVariant = await getAvailableStockByVariant(tx, options);
 
   for (const [variantKey, requestedQty] of Object.entries(requestedByVariant)) {
     const [articleId] = variantKey.split("::");
@@ -201,16 +172,18 @@ const reserveNextBillNumber = async (tx) => {
   return formatBillNumber(nextNumber);
 };
 
+const getBillRoznamchaSourceSystem = (billId) => `BILL_SALE|${billId}`;
+
 const toApiBill = (bill) => {
   if (!bill) return bill;
-  const total = Number(bill.total ?? 0);
-  const totalPaid = Number(
+  const total = resolveBillTotal(bill);
+  const totalPaid = roundMoney(
     (bill.payments ?? []).reduce(
       (sum, payment) => sum + Number(payment.amount ?? 0),
       0,
     ),
   );
-  const remaining = Math.max(total - totalPaid, 0);
+  const remaining = roundMoney(Math.max(total - totalPaid, 0));
   return {
     ...bill,
     type: bill.type === "CREDIT" ? "RECEIVABLE" : bill.type,
@@ -253,7 +226,7 @@ const syncBillLedgerEntry = async (tx, bill) => {
     date: bill.date,
     reference: bill.billNumber,
     description: "Receivable bill",
-    balance: Number(bill.total ?? 0),
+    balance: resolveBillTotal(bill),
   };
 
   if (existing) {
@@ -263,6 +236,18 @@ const syncBillLedgerEntry = async (tx, bill) => {
     });
   } else {
     await tx.partyLedgerEntry.create({ data: payload });
+  }
+};
+
+const syncBillRoznamchaEntry = async (tx, bill) => {
+  if (!bill?.id) return;
+
+  const sourceSystem = getBillRoznamchaSourceSystem(bill.id);
+  const existing = await tx.expenseEntry.findFirst({
+    where: { sourceSystem },
+  });
+  if (existing) {
+    await tx.expenseEntry.delete({ where: { id: existing.id } });
   }
 };
 
@@ -281,20 +266,18 @@ export const listBills = async (req, res) => {
 export const createBill = async (req, res) => {
   const { date, partyId, type, status, lines } = req.body;
   const normalizedLines = normalizeBillLines(lines);
+  const billTotal = computeBillTotalFromLines(normalizedLines);
   const bill = await prisma.$transaction(async (tx) => {
     await assertSufficientStockForBillLines(tx, normalizedLines);
     const billNumber = await reserveNextBillNumber(tx);
-    return tx.bill.create({
+    const created = await tx.bill.create({
       data: {
         billNumber,
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         type: toDbBillType(type) ?? "CASH",
         status: status ?? "DRAFT",
-        total: normalizedLines.reduce(
-          (sum, line) => sum + Number(line.total),
-          0,
-        ),
+        total: billTotal,
         verifiedAt: null,
         lines: {
           create: normalizedLines.map((line) => ({
@@ -309,6 +292,9 @@ export const createBill = async (req, res) => {
       },
       include: { lines: true, payments: true },
     });
+    await syncBillLedgerEntry(tx, created);
+    await syncBillRoznamchaEntry(tx, created);
+    return created;
   });
 
   res.status(201).json(toApiBill(bill));
@@ -321,6 +307,7 @@ export const confirmBill = async (req, res) => {
       data: { status: "CONFIRMED" },
     });
     await syncBillLedgerEntry(tx, updated);
+    await syncBillRoznamchaEntry(tx, updated);
     return getBillSummary(tx, updated.id);
   });
 
@@ -332,21 +319,24 @@ export const updateBill = async (req, res) => {
   const normalizedLines = Array.isArray(lines)
     ? normalizeBillLines(lines)
     : null;
+  const nextBillTotal = normalizedLines
+    ? computeBillTotalFromLines(normalizedLines)
+    : undefined;
   const bill = await prisma.$transaction(async (tx) => {
     if (normalizedLines) {
-      await assertSufficientStockForBillLines(tx, normalizedLines);
+      await assertSufficientStockForBillLines(tx, normalizedLines, {
+        excludeBillId: req.params.billId,
+      });
     }
 
     const updated = await tx.bill.update({
       where: { id: req.params.billId },
       data: {
-        date: date ? new Date(date) : undefined,
+        date: date ? toDate(date, "start") : undefined,
         partyId,
         type: toDbBillType(type),
         status,
-        total: normalizedLines
-          ? normalizedLines.reduce((sum, line) => sum + Number(line.total), 0)
-          : undefined,
+        total: nextBillTotal,
       },
     });
 
@@ -366,6 +356,7 @@ export const updateBill = async (req, res) => {
     }
 
     await syncBillLedgerEntry(tx, updated);
+    await syncBillRoznamchaEntry(tx, updated);
 
     const hasPayments = await tx.partyPayment.count({
       where: { billId: updated.id },
@@ -394,6 +385,7 @@ export const getBillLedger = async (req, res) => {
   const bill = await prisma.bill.findUnique({
     where: { id: req.params.billId },
     include: {
+      lines: true,
       payments: { orderBy: { date: "asc" } },
       ledgerEntries: { orderBy: { date: "asc" } },
     },
@@ -403,12 +395,13 @@ export const getBillLedger = async (req, res) => {
     return;
   }
 
+  const total = resolveBillTotal(bill);
   const openingEntry = {
     id: `bill-${bill.id}`,
     date: bill.date,
     reference: bill.billNumber,
     description: "Bill Raised",
-    amount: Number(bill.total),
+    amount: total,
     kind: "RECEIVABLE",
   };
 
@@ -436,7 +429,7 @@ export const receiveBillPayment = async (req, res) => {
     .$transaction(async (tx) => {
       const bill = await tx.bill.findUnique({
         where: { id: req.params.billId },
-        include: { payments: true },
+        include: { payments: true, lines: true },
       });
       if (!bill) {
         throw new Error("Bill not found");
@@ -445,12 +438,12 @@ export const receiveBillPayment = async (req, res) => {
         throw new Error("Bill has no linked party.");
       }
 
-      const total = Number(bill.total ?? 0);
+      const total = resolveBillTotal(bill);
       const totalPaid = bill.payments.reduce(
         (sum, payment) => sum + Number(payment.amount ?? 0),
         0,
       );
-      const remaining = Math.max(total - totalPaid, 0);
+      const remaining = roundMoney(Math.max(total - totalPaid, 0));
       const method = toDbPaymentMethod(req.body.method ?? "KHATA");
       if (remaining <= 0) {
         throw new Error("Bill is already fully paid.");
@@ -459,7 +452,9 @@ export const receiveBillPayment = async (req, res) => {
         throw new Error("Payment exceeds remaining amount.");
       }
 
-      const paymentDate = req.body.date ? new Date(req.body.date) : new Date();
+      const paymentDate = req.body.date
+        ? toDate(req.body.date, "start")
+        : new Date();
       const chequeNumber =
         req.body.chequeNumber == null
           ? null
@@ -547,16 +542,16 @@ export const verifyBill = async (req, res) => {
     .$transaction(async (tx) => {
       const found = await tx.bill.findUnique({
         where: { id: req.params.billId },
-        include: { payments: true },
+        include: { payments: true, lines: true },
       });
       if (!found) throw new Error("Bill not found");
 
-      const total = Number(found.total ?? 0);
+      const total = resolveBillTotal(found);
       const totalPaid = found.payments.reduce(
         (sum, payment) => sum + Number(payment.amount ?? 0),
         0,
       );
-      const remaining = Math.max(total - totalPaid, 0);
+      const remaining = roundMoney(Math.max(total - totalPaid, 0));
       if (remaining > 0) {
         throw new Error("Bill cannot be verified until remaining amount is 0.");
       }
@@ -591,6 +586,9 @@ export const deleteBill = async (req, res) => {
 
       await tx.partyLedgerEntry.deleteMany({
         where: { billId: req.params.billId },
+      });
+      await tx.expenseEntry.deleteMany({
+        where: { sourceSystem: getBillRoznamchaSourceSystem(req.params.billId) },
       });
       await tx.billLine.deleteMany({ where: { billId: req.params.billId } });
       await tx.bill.delete({ where: { id: req.params.billId } });

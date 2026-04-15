@@ -7,6 +7,24 @@ import {
   getLaborDepartmentLabelFromMap,
   getLaborDepartmentLabelMap,
 } from "../services/laborDepartmentService.js";
+import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
+import {
+  getPackedStockSnapshot,
+  normalizeMallStockType,
+  normalizeSize,
+  normalizeStockMovementDirection,
+  toNumber,
+} from "../services/stockService.js";
+import { formatDateTime, toDate } from "../utils/date.js";
+import {
+  formatPrintNumber,
+  getPrintDirection,
+  getPrintFontFamily,
+  getPrintLocale,
+  getPrintTextAlign,
+  normalizePrintLanguage,
+  translatePrintText,
+} from "../utils/printLanguage.js";
 
 const STAGE_BY_DEPARTMENT = {
   PRESSMAN: "STAGE_PRESSMAN",
@@ -41,21 +59,30 @@ const getAllowedNextDepartments = (department) => {
   return DEPARTMENT_FLOW.slice(currentIndex + 1);
 };
 
-const toNumber = (value) => {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? n : 0;
-};
-
 const computeStatus = (completedDozen, quantityDozen) => {
   if (completedDozen <= 0) return "INCOMPLETE";
   if (completedDozen >= quantityDozen) return "COMPLETE";
   return "PARTIALLY_COMPLETE";
 };
 
-const statusLabel = (status) => {
-  if (status === "PARTIALLY_COMPLETE") return "Partially Complete";
-  if (status === "COMPLETE") return "Complete";
-  return "Incomplete";
+const statusLabel = (status, language = "en") => {
+  if (status === "PARTIALLY_COMPLETE") {
+    return translatePrintText("Partially Complete", language);
+  }
+  if (status === "COMPLETE") return translatePrintText("Complete", language);
+  return translatePrintText("Incomplete", language);
+};
+
+const formatRateValue = (value) => {
+  const numericValue = toNumber(value);
+  return String(Number(numericValue.toFixed(4)));
+};
+
+const toDisplayDepartmentPrice = (department, pricePerDozen) => {
+  if (department === "UPPERMAN") {
+    return formatRateValue(toNumber(pricePerDozen) / 12);
+  }
+  return formatRateValue(pricePerDozen);
 };
 
 const getOrderProgressDozen = (order) => {
@@ -167,7 +194,7 @@ export const listProductionOrders = async (req, res) => {
         labor: true,
         packingLabor: true,
       },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ orderDate: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
     }),
     getLaborDepartmentLabelMap(),
   ]);
@@ -180,6 +207,7 @@ export const listProductionOrders = async (req, res) => {
 };
 
 export const getPrintableProductionOrders = async (req, res) => {
+  const language = normalizePrintLanguage(req.query.lang);
   const [rows, labelMap] = await Promise.all([
     prisma.productionOrder.findMany({
       where: {
@@ -200,12 +228,17 @@ export const getPrintableProductionOrders = async (req, res) => {
     .filter((row) => getOrderProgressDozen(row) < Number(row.quantityDozen));
 
   const sectionDepartments = DEPARTMENT_FLOW;
+  const direction = getPrintDirection(language);
+  const textAlign = getPrintTextAlign(language);
+  const fontFamily = getPrintFontFamily(language);
+  const languageCode = language === "ur" ? "ur" : "en";
+  const title = translatePrintText("Production Control Orders", language);
 
   const sectionHtml = sectionDepartments
     .map((department) => {
-      const departmentLabel = getLaborDepartmentLabelFromMap(
-        department,
-        labelMap,
+      const departmentLabel = translatePrintText(
+        getLaborDepartmentLabelFromMap(department, labelMap),
+        language,
       );
       const sectionRows = apiRows.filter((row) => {
         const belongsToMergedFinal =
@@ -215,46 +248,76 @@ export const getPrintableProductionOrders = async (req, res) => {
       });
 
       const rowHtml = sectionRows
-        .map((row) => {
-          const laborText = MERGED_FINAL_DEPARTMENTS.includes(department)
-            ? `${row.labor?.name || "-"} / ${row.packingLabor?.name || "-"}`
-            : row.labor?.name || "-";
-          const priceText = MERGED_FINAL_DEPARTMENTS.includes(department)
-            ? `${row.pricePerDozen} / ${row.packingPricePerDozen}`
-            : department === "UPPERMAN"
-              ? Number(row.pricePerDozen) / 12
-              : row.pricePerDozen;
+          .map((row) => {
+            const laborText = MERGED_FINAL_DEPARTMENTS.includes(department)
+              ? `${row.labor?.name || "-"} / ${row.packingLabor?.name || "-"}`
+              : row.labor?.name || "-";
+            const priceText = MERGED_FINAL_DEPARTMENTS.includes(department)
+              ? `${formatPrintNumber(formatRateValue(row.pricePerDozen), language, {
+                  maximumFractionDigits: 4,
+                })} / ${formatPrintNumber(
+                  formatRateValue(row.packingPricePerDozen),
+                  language,
+                  {
+                    maximumFractionDigits: 4,
+                  },
+                )}`
+              : formatPrintNumber(
+                  toDisplayDepartmentPrice(department, row.pricePerDozen),
+                  language,
+                  {
+                    maximumFractionDigits: 4,
+                  },
+                );
 
-          return `
+            return `
             <tr>
               <td>${escapeHtml(row.article?.name || "-")}</td>
               <td>${escapeHtml(row.size || "-")}</td>
               <td>${escapeHtml(laborText)}</td>
-              <td>${escapeHtml(row.quantityDozen)}</td>
+              <td>${escapeHtml(formatPrintNumber(row.quantityDozen, language))}</td>
               <td>${escapeHtml(priceText)}</td>
-              <td>${escapeHtml(row.completedDozen)}</td>
-              <td>${escapeHtml(statusLabel(row.status))}</td>
+              <td>${escapeHtml(formatPrintNumber(row.completedDozen, language))}</td>
+              <td>${escapeHtml(statusLabel(row.status, language))}</td>
             </tr>`;
-        })
-        .join("");
+          })
+          .join("");
 
       return `
         <section class="section">
-          <h2>${escapeHtml(departmentLabel)} Orders</h2>
+          <h2>${escapeHtml(departmentLabel)} ${escapeHtml(
+            translatePrintText("Orders", language),
+          )}</h2>
           <table>
             <thead>
               <tr>
-                <th>Article</th>
-                <th>Size</th>
-                <th>Labor</th>
-                <th>Quantity (Dozen)</th>
-                <th>${department === "UPPERMAN" ? "Price / Pair" : "Price / Dozen"}</th>
-                <th>${MERGED_FINAL_DEPARTMENTS.includes(department) ? "A-Mall Qty" : "Completed Qty"}</th>
-                <th>Status</th>
+                <th>${escapeHtml(translatePrintText("Article", language))}</th>
+                <th>${escapeHtml(translatePrintText("Size", language))}</th>
+                <th>${escapeHtml(translatePrintText("Labor", language))}</th>
+                <th>${escapeHtml(
+                  translatePrintText("Quantity (Dozen)", language),
+                )}</th>
+                <th>${escapeHtml(
+                  translatePrintText(
+                    department === "UPPERMAN"
+                      ? "Price / Pair"
+                      : "Price / Dozen",
+                    language,
+                  ),
+                )}</th>
+                <th>${escapeHtml(
+                  translatePrintText(
+                    MERGED_FINAL_DEPARTMENTS.includes(department)
+                      ? "A-Mall Qty"
+                      : "Completed Qty",
+                    language,
+                  ),
+                )}</th>
+                <th>${escapeHtml(translatePrintText("Status", language))}</th>
               </tr>
             </thead>
             <tbody>
-              ${rowHtml || '<tr><td colspan="7">No orders in this subsection.</td></tr>'}
+              ${rowHtml || `<tr><td colspan="7">${escapeHtml(translatePrintText("No orders in this subsection.", language))}</td></tr>`}
             </tbody>
           </table>
         </section>`;
@@ -262,28 +325,170 @@ export const getPrintableProductionOrders = async (req, res) => {
     .join("");
 
   const html = `<!DOCTYPE html>
-  <html>
+  <html lang="${languageCode}" dir="${direction}">
     <head>
       <meta charset="utf-8" />
-      <title>Production Control Orders</title>
+      <title>${escapeHtml(title)}</title>
       <style>
-        body { font-family: Arial, sans-serif; padding: 18px; color: #111; }
+        body { font-family: ${fontFamily}; padding: 18px; color: #111; direction: ${direction}; text-align: ${textAlign}; }
         h1 { margin: 0 0 8px; font-size: 22px; }
         h2 { margin: 18px 0 8px; font-size: 17px; }
         .meta { margin-bottom: 14px; font-size: 13px; }
         .meta p { margin: 3px 0; }
         .section { margin-bottom: 16px; break-inside: avoid; page-break-inside: avoid; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: left; font-size: 12px; }
+        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: ${textAlign}; font-size: 12px; }
         th { background: #f5f5f5; }
         @media print { body { padding: 8px; } }
       </style>
     </head>
     <body>
-      <h1>Production Control Orders</h1>
+      <h1>${escapeHtml(title)}</h1>
       <div class="meta">
-        <p><strong>Generated At:</strong> ${escapeHtml(new Date().toLocaleString("en-GB"))}</p>
-        <p><strong>Total Rows:</strong> ${apiRows.length}</p>
+        <p><strong>${escapeHtml(translatePrintText("Generated At", language))}:</strong> ${escapeHtml(
+          formatDateTime(new Date(), getPrintLocale(language, "date"), {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        )}</p>
+        <p><strong>${escapeHtml(translatePrintText("Total Rows", language))}:</strong> ${apiRows.length}</p>
+      </div>
+      ${sectionHtml}
+      <script>window.onload = () => { window.focus(); window.print(); };</script>
+    </body>
+  </html>`;
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+};
+
+export const getPrintableDailyPressmanOrders = async (req, res) => {
+  const language = normalizePrintLanguage(req.query.lang);
+  const dateStr = req.query.date;
+  if (!dateStr) {
+    res.status(400).json({ error: "Date query parameter is required." });
+    return;
+  }
+
+  // Parse start and end of the specified date to filter `orderDate`
+  const startOfDay = toDate(dateStr, "start");
+  const endOfDayValue = toDate(dateStr, "end");
+
+  const [rows, labelMap] = await Promise.all([
+    prisma.productionOrder.findMany({
+      where: {
+        department: "PRESSMAN",
+        isClosed: false,
+        orderDate: {
+          gte: startOfDay,
+          lte: endOfDayValue,
+        },
+      },
+      include: {
+        article: true,
+        labor: true,
+        packingLabor: true,
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    getLaborDepartmentLabelMap(),
+  ]);
+
+  const apiRows = rows
+    .map((row) => toApiOrder(row, labelMap))
+    .filter((row) => getOrderProgressDozen(row) < Number(row.quantityDozen));
+
+  const rowHtml = apiRows
+    .map((row) => {
+      const laborText = row.labor?.name || "-";
+      return `
+        <tr>
+          <td>${escapeHtml(row.article?.name || "-")}</td>
+          <td>${escapeHtml(row.size || "-")}</td>
+          <td>${escapeHtml(laborText)}</td>
+          <td>${escapeHtml(formatPrintNumber(row.quantityDozen, language))}</td>
+          <td>${escapeHtml(
+            formatPrintNumber(row.pricePerDozen, language, {
+              maximumFractionDigits: 4,
+            }),
+          )}</td>
+          <td>${escapeHtml(formatPrintNumber(row.completedDozen, language))}</td>
+          <td>${escapeHtml(statusLabel(row.status, language))}</td>
+        </tr>`;
+    })
+    .join("");
+
+  const formattedDate = formatDateTime(
+    startOfDay,
+    getPrintLocale(language, "date"),
+    {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    },
+  );
+  const direction = getPrintDirection(language);
+  const textAlign = getPrintTextAlign(language);
+  const fontFamily = getPrintFontFamily(language);
+  const languageCode = language === "ur" ? "ur" : "en";
+  const title = translatePrintText("Pressman Orders", language);
+
+  const sectionHtml = `
+    <section class="section">
+      <table>
+        <thead>
+          <tr>
+            <th>${escapeHtml(translatePrintText("Article", language))}</th>
+            <th>${escapeHtml(translatePrintText("Size", language))}</th>
+            <th>${escapeHtml(translatePrintText("Labor", language))}</th>
+            <th>${escapeHtml(translatePrintText("Quantity (Dozen)", language))}</th>
+            <th>${escapeHtml(translatePrintText("Price / Dozen", language))}</th>
+            <th>${escapeHtml(translatePrintText("Completed Qty", language))}</th>
+            <th>${escapeHtml(translatePrintText("Status", language))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowHtml || `<tr><td colspan="7">${escapeHtml(translatePrintText("No pressman orders for this date.", language))}</td></tr>`}
+        </tbody>
+      </table>
+    </section>`;
+
+  const html = `<!DOCTYPE html>
+  <html lang="${languageCode}" dir="${direction}">
+    <head>
+      <meta charset="utf-8" />
+      <title>${escapeHtml(title)} - ${escapeHtml(formattedDate)}</title>
+      <style>
+        body { font-family: ${fontFamily}; padding: 18px; color: #111; direction: ${direction}; text-align: ${textAlign}; }
+        h1 { margin: 0 0 8px; font-size: 22px; }
+        h2 { margin: 18px 0 8px; font-size: 17px; }
+        .meta { margin-bottom: 14px; font-size: 13px; }
+        .meta p { margin: 3px 0; }
+        .section { margin-bottom: 16px; break-inside: avoid; page-break-inside: avoid; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: ${textAlign}; font-size: 12px; }
+        th { background: #f5f5f5; }
+        @media print { body { padding: 8px; } }
+      </style>
+    </head>
+    <body>
+      <h1>${escapeHtml(title)}</h1>
+      <div class="meta">
+        <p><strong>${escapeHtml(translatePrintText("Date", language))}:</strong> ${escapeHtml(formattedDate)}</p>
+        <p><strong>${escapeHtml(translatePrintText("Generated At", language))}:</strong> ${escapeHtml(
+          formatDateTime(new Date(), getPrintLocale(language, "date"), {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        )}</p>
+        <p><strong>${escapeHtml(translatePrintText("Total Rows", language))}:</strong> ${apiRows.length}</p>
       </div>
       ${sectionHtml}
       <script>window.onload = () => { window.focus(); window.print(); };</script>
@@ -299,6 +504,9 @@ export const createProductionOrder = async (req, res) => {
   const quantityDozen = Math.abs(toNumber(req.body.quantityDozen));
   const pricePerDozen = Math.abs(toNumber(req.body.pricePerDozen));
   const size = String(req.body.size ?? "").trim();
+  const orderDate = req.body.orderDate
+    ? toDate(req.body.orderDate, "start")
+    : new Date();
 
   if (!req.body.articleId) {
     res.status(400).json({ error: "Article is required." });
@@ -331,6 +539,7 @@ export const createProductionOrder = async (req, res) => {
       pricePerDozen,
       completedDozen: 0,
       forwardedDozen: 0,
+      orderDate,
       source: "MANUAL",
       isClosed: false,
     },
@@ -345,16 +554,86 @@ export const createProductionOrder = async (req, res) => {
   res.status(201).json(toApiOrder(order, labelMap));
 };
 
+export const createBulkProductionOrders = async (req, res) => {
+  const department = normalizeLaborDepartment(req.body.department);
+  const orderDate = req.body.orderDate
+    ? toDate(req.body.orderDate, "start")
+    : new Date();
+  const items = req.body.items;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ error: "At least one item is required." });
+    return;
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item.articleId) {
+      res.status(400).json({ error: `Item ${i + 1}: Article is required.` });
+      return;
+    }
+    const size = String(item.size ?? "").trim();
+    if (!size) {
+      res.status(400).json({ error: `Item ${i + 1}: Size is required.` });
+      return;
+    }
+    const quantityDozen = Math.abs(toNumber(item.quantityDozen));
+    if (quantityDozen <= 0) {
+      res.status(400).json({ error: `Item ${i + 1}: Quantity must be greater than 0.` });
+      return;
+    }
+    if (item.laborId) {
+      try {
+        await assertDepartmentLaborMatch(department, item.laborId);
+      } catch (error) {
+        res.status(400).json({ error: `Item ${i + 1}: ${error.message}` });
+        return;
+      }
+    }
+  }
+
+  const orders = await prisma.$transaction(async (tx) => {
+    const created = [];
+    for (const item of items) {
+      const size = String(item.size ?? "").trim();
+      const quantityDozen = Math.abs(toNumber(item.quantityDozen));
+      const pricePerDozen = Math.abs(toNumber(item.pricePerDozen));
+      const order = await tx.productionOrder.create({
+        data: {
+          department,
+          stage: STAGE_BY_DEPARTMENT[department],
+          articleId: item.articleId,
+          size,
+          laborId: item.laborId || null,
+          quantityDozen,
+          pricePerDozen,
+          completedDozen: 0,
+          forwardedDozen: 0,
+          orderDate,
+          source: "MANUAL",
+          isClosed: false,
+        },
+        include: {
+          article: true,
+          labor: true,
+          packingLabor: true,
+        },
+      });
+      created.push(order);
+    }
+    return created;
+  });
+
+  const labelMap = await getLaborDepartmentLabelMap();
+  res.status(201).json(orders.map((order) => toApiOrder(order, labelMap)));
+};
+
 export const updateProductionOrder = async (req, res) => {
   const existing = await prisma.productionOrder.findUnique({
     where: { id: req.params.orderId },
   });
   if (!existing) {
     res.status(404).json({ error: "Order not found." });
-    return;
-  }
-  if (existing.department !== "PRESSMAN") {
-    res.status(400).json({ error: "Only pressman orders can be edited." });
     return;
   }
 
@@ -378,6 +657,20 @@ export const updateProductionOrder = async (req, res) => {
   const nextQuantity = quantityDozen ?? toNumber(existing.quantityDozen);
   if (nextQuantity <= 0) {
     res.status(400).json({ error: "Quantity must be greater than 0." });
+    return;
+  }
+  const currentProgress = getOrderProgressDozen(existing);
+  if (quantityDozen !== undefined && quantityDozen < currentProgress) {
+    res.status(400).json({
+      error: `Quantity cannot be less than ${currentProgress} dozen already completed.`,
+    });
+    return;
+  }
+  const currentForwarded = toNumber(existing.forwardedDozen);
+  if (quantityDozen !== undefined && quantityDozen < currentForwarded) {
+    res.status(400).json({
+      error: `Quantity cannot be less than ${currentForwarded} dozen already forwarded.`,
+    });
     return;
   }
 
@@ -408,6 +701,32 @@ export const updateProductionOrder = async (req, res) => {
   res.json(toApiOrder(updated, labelMap));
 };
 
+export const deleteProductionOrder = async (req, res) => {
+  const existing = await prisma.productionOrder.findUnique({
+    where: { id: req.params.orderId },
+  });
+  if (!existing) {
+    res.status(404).json({ error: "Order not found." });
+    return;
+  }
+
+  const progress = getOrderProgressDozen(existing);
+  const forwarded = toNumber(existing.forwardedDozen);
+  if (progress > 0 || forwarded > 0) {
+    res.status(400).json({
+      error:
+        "Only orders with no completed or forwarded work can be deleted.",
+    });
+    return;
+  }
+
+  await prisma.productionOrder.delete({
+    where: { id: req.params.orderId },
+  });
+
+  res.status(204).end();
+};
+
 export const assignProductionOrderLabor = async (req, res) => {
   const existing = await prisma.productionOrder.findUnique({
     where: { id: req.params.orderId },
@@ -428,7 +747,11 @@ export const assignProductionOrderLabor = async (req, res) => {
     : undefined;
 
   if (!isMergedFinal) {
-    if (hasPriceUpdate && normalizedPricePerDozen <= 0) {
+    if (
+      hasPriceUpdate &&
+      normalizedPricePerDozen <= 0 &&
+      laborId !== null
+    ) {
       res.status(400).json({ error: "Price must be greater than 0." });
       return;
     }
@@ -468,13 +791,21 @@ export const assignProductionOrderLabor = async (req, res) => {
     : undefined;
 
   if (isMergedFinal) {
-    if (hasMachinemanPriceUpdate && normalizedMachinemanPrice <= 0) {
+    if (
+      hasMachinemanPriceUpdate &&
+      normalizedMachinemanPrice <= 0 &&
+      machinamanLaborId !== null
+    ) {
       res
         .status(400)
         .json({ error: "Machineman price must be greater than 0." });
       return;
     }
-    if (hasPackingPriceUpdate && normalizedPackingPrice <= 0) {
+    if (
+      hasPackingPriceUpdate &&
+      normalizedPackingPrice <= 0 &&
+      packingLaborId !== null
+    ) {
       res.status(400).json({ error: "Packing price must be greater than 0." });
       return;
     }
@@ -586,7 +917,7 @@ export const updateProductionOrderCompletion = async (req, res) => {
             "Assign both Machineman and Packing labors before marking this order done.",
           );
         }
-      } else if (row.department !== "PRESSMAN" && !row.laborId) {
+      } else if (!row.laborId) {
         throw new Error("Assign labor before marking this order done.");
       }
 
@@ -688,10 +1019,10 @@ export const updateProductionOrderCompletion = async (req, res) => {
         data: patch,
       });
 
-      if (progressDelta > 0 && row.laborId) {
+      if (aMallDelta > 0 && row.laborId) {
         const baseRatePerDozen = toNumber(row.pricePerDozen);
         const isUpperman = row.department === "UPPERMAN";
-        const quantity = isUpperman ? progressDelta * 12 : progressDelta;
+        const quantity = isUpperman ? aMallDelta * 12 : aMallDelta;
         const rate = isUpperman ? baseRatePerDozen / 12 : baseRatePerDozen;
 
         await tx.laborWorkEntry.create({
@@ -715,9 +1046,9 @@ export const updateProductionOrderCompletion = async (req, res) => {
                 articleId: row.articleId,
                 startDate: new Date(),
                 endDate: new Date(),
-                quantity: progressDelta,
+                quantity: aMallDelta,
                 rate: packingRatePerDozen,
-                total: progressDelta * packingRatePerDozen,
+                total: aMallDelta * packingRatePerDozen,
               },
             });
           }
@@ -793,7 +1124,9 @@ export const updateProductionOrderCompletion = async (req, res) => {
 };
 
 export const getStockSummary = async (req, res) => {
-  const [orders, stockEntries] = await Promise.all([
+  const [{ packedAMallDozen, packedBMallDozen, packedCMallDozen }, orders, stockEntries] =
+    await Promise.all([
+      getPackedStockSnapshot(prisma),
     prisma.productionOrder.findMany({
       select: {
         department: true,
@@ -811,11 +1144,10 @@ export const getStockSummary = async (req, res) => {
         quantityDozen: true,
       },
     }),
-  ]);
+    ]);
 
   let wipDozen = 0;
   let readyStockDozen = 0;
-  let packedStockDozen = 0;
   let activeOrders = 0;
 
   for (const row of orders) {
@@ -832,31 +1164,28 @@ export const getStockSummary = async (req, res) => {
     wipDozen += Math.max(quantity - progress, 0);
 
     if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
-      packedStockDozen += progress;
       readyStockDozen += Math.max(quantity - progress, 0);
-      continue;
-    }
-
-    // Stock starts when rows reach Machineman queue from DC completion.
-    if (row.department === "MACHINEMAN") {
-      readyStockDozen += Math.max(quantity - forwarded, 0);
     }
   }
 
   for (const entry of stockEntries) {
     const quantity = toNumber(entry.quantityDozen);
-    if (entry.mode === "PACKED") {
-      packedStockDozen += quantity;
-    } else {
+    if (entry.mode !== "PACKED") {
       readyStockDozen += quantity;
     }
   }
+
+  const packedStockDozen =
+    packedAMallDozen + packedBMallDozen + packedCMallDozen;
 
   res.json({
     activeOrders,
     wipDozen,
     readyStockDozen,
     packedStockDozen,
+    packedAMallDozen,
+    packedBMallDozen,
+    packedCMallDozen,
   });
 };
 
@@ -866,10 +1195,23 @@ export const listStockByArticle = async (req, res) => {
     .trim()
     .toLowerCase();
   const isPackedMode = mode === "PACKED";
-  const normalizeSize = (value) => {
-    const normalized = String(value ?? "").trim();
-    return normalized || "-";
-  };
+
+  if (isPackedMode) {
+    const excludeBillId = String(req.query.excludeBillId ?? "").trim() || null;
+    const { packedRows } = await getPackedStockSnapshot(prisma, {
+      excludeBillId,
+    });
+
+    const rows = packedRows.filter((row) => {
+      if (!search) return true;
+      const haystack =
+        `${row.articleName} ${row.size} ${row.articleCode ?? ""}`.toLowerCase();
+      return haystack.includes(search);
+    });
+
+    res.json(rows);
+    return;
+  }
 
   const [orders, stockEntries] = await Promise.all([
     prisma.productionOrder.findMany({
@@ -906,19 +1248,11 @@ export const listStockByArticle = async (req, res) => {
       : completed;
 
     let contributionA = 0;
-    let contributionB = 0;
-    let contributionC = 0;
-    if (isPackedMode) {
-      if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
-        contributionA = completed;
-        contributionB = bMall;
-        contributionC = cMall;
-      }
-    } else if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
+    if (MERGED_FINAL_DEPARTMENTS.includes(row.department)) {
       contributionA = Math.max(quantity - progress, 0);
     }
 
-    if (contributionA <= 0 && contributionB <= 0 && contributionC <= 0) {
+    if (contributionA <= 0) {
       continue;
     }
 
@@ -934,8 +1268,6 @@ export const listStockByArticle = async (req, res) => {
       cMallDozen: 0,
     };
     prev.quantityDozen += contributionA;
-    prev.bMallDozen += contributionB;
-    prev.cMallDozen += contributionC;
     quantityByArticle.set(mapKey, prev);
   }
 
@@ -1070,6 +1402,337 @@ export const deleteManualStockEntry = async (req, res) => {
   await prisma.stockEntry.delete({
     where: { id: req.params.entryId },
   });
+  res.status(204).end();
+};
+
+const toApiMallStockMovement = (row) => ({
+  ...row,
+  quantityDozen: toNumber(row.quantityDozen),
+  ratePerDozen:
+    row.ratePerDozen == null ? null : toNumber(row.ratePerDozen),
+  totalAmount: calculateMallSaleTotal(
+    row.quantityDozen,
+    row.ratePerDozen,
+    row.direction,
+  ),
+});
+
+const calculateMallSaleTotal = (quantityDozen, ratePerPair, direction) => {
+  if (direction !== "OUT" || ratePerPair == null) return null;
+  return Number(
+    (Math.abs(toNumber(quantityDozen)) * 12 * Math.abs(toNumber(ratePerPair))).toFixed(
+      2,
+    ),
+  );
+};
+
+const totalsDiffer = (left, right) => {
+  if (left == null && right == null) return false;
+  return Math.abs(toNumber(left) - toNumber(right)) > 0.009;
+};
+
+const reconcileMallStockMovementRow = async (tx, row) => {
+  const correctedTotalAmount = calculateMallSaleTotal(
+    row.quantityDozen,
+    row.ratePerDozen,
+    row.direction,
+  );
+
+  if (!totalsDiffer(row.totalAmount, correctedTotalAmount)) {
+    return row;
+  }
+
+  const updatedRow = await tx.mallStockMovement.update({
+    where: { id: row.id },
+    data: {
+      totalAmount: correctedTotalAmount,
+    },
+  });
+
+  if (row.roznamchaEntryId && correctedTotalAmount != null) {
+    await tx.expenseEntry.update({
+      where: { id: row.roznamchaEntryId },
+      data: {
+        amount: -correctedTotalAmount,
+      },
+    });
+  }
+
+  return updatedRow;
+};
+
+const getMallSaleSourceSystem = (mallType) =>
+  mallType === "C_MALL" ? "C_MALL_SALE" : "B_MALL_SALE";
+
+const getMallSaleDescription = (mallType, reference) => {
+  const baseLabel = mallType === "C_MALL" ? "C-Mall sale" : "B-Mall sale";
+  return reference ? `${baseLabel} - ${reference}` : baseLabel;
+};
+
+const getMallAvailableQuantity = async (tx, mallType) => {
+  const snapshot = await getPackedStockSnapshot(tx);
+  return mallType === "C_MALL"
+    ? snapshot.packedCMallDozen
+    : snapshot.packedBMallDozen;
+};
+
+export const listMallStockMovements = async (req, res) => {
+  const rows = await prisma.$transaction(async (tx) => {
+    const fetchedRows = await tx.mallStockMovement.findMany({
+      orderBy: [{ date: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
+    });
+
+    const normalizedRows = [];
+    for (const row of fetchedRows) {
+      normalizedRows.push(await reconcileMallStockMovementRow(tx, row));
+    }
+
+    return normalizedRows;
+  });
+
+  res.json(rows.map(toApiMallStockMovement));
+};
+
+export const createMallStockMovement = async (req, res) => {
+  const mallType = normalizeMallStockType(req.body.mallType, "");
+  const direction = normalizeStockMovementDirection(req.body.direction);
+  const quantityDozen = Math.abs(toNumber(req.body.quantityDozen));
+  const ratePerDozenInput = Math.abs(toNumber(req.body.ratePerDozen));
+  const date = req.body.date ? toDate(req.body.date, "start") : new Date();
+  const reference = String(req.body.reference ?? "").trim();
+  const note = String(req.body.note ?? "").trim();
+
+  if (!mallType) {
+    res.status(400).json({ error: "Mall type is required." });
+    return;
+  }
+  if (quantityDozen <= 0) {
+    res.status(400).json({ error: "Quantity must be greater than 0." });
+    return;
+  }
+  if (Number.isNaN(date.getTime())) {
+    res.status(400).json({ error: "Valid date is required." });
+    return;
+  }
+  if (direction === "OUT" && ratePerDozenInput <= 0) {
+    res.status(400).json({ error: "Price per pair must be greater than 0." });
+    return;
+  }
+
+  if (direction === "OUT") {
+    const availableQuantity = await getMallAvailableQuantity(prisma, mallType);
+    if (quantityDozen > availableQuantity) {
+      res.status(400).json({
+        error: `Only ${availableQuantity} dozen is available in ${mallType === "B_MALL" ? "B-Mall" : "C-Mall"} stock.`,
+      });
+      return;
+    }
+  }
+
+  const totalAmount = calculateMallSaleTotal(
+    quantityDozen,
+    ratePerDozenInput,
+    direction,
+  );
+
+  const entry = await prisma.$transaction(async (tx) => {
+    let roznamchaEntryId = null;
+
+    if (direction === "OUT" && totalAmount != null) {
+      const roznamchaEntry = await createSystemRoznamchaEntry(tx, {
+        date,
+        amount: -totalAmount,
+        description: getMallSaleDescription(mallType, reference),
+        sourceSystem: getMallSaleSourceSystem(mallType),
+        paymentType: "CASH",
+      });
+      roznamchaEntryId = roznamchaEntry.id;
+    }
+
+    return tx.mallStockMovement.create({
+      data: {
+        mallType,
+        direction,
+        date,
+        quantityDozen,
+        ratePerDozen: direction === "OUT" ? ratePerDozenInput : null,
+        totalAmount,
+        reference: reference || null,
+        note: note || null,
+        roznamchaEntryId,
+      },
+    });
+  });
+
+  res.status(201).json(toApiMallStockMovement(entry));
+};
+
+export const updateMallStockMovement = async (req, res) => {
+  const existing = await prisma.mallStockMovement.findUnique({
+    where: { id: req.params.movementId },
+  });
+
+  if (!existing) {
+    res.status(404).json({ error: "Mall stock movement not found." });
+    return;
+  }
+
+  const mallType =
+    req.body.mallType === undefined
+      ? existing.mallType
+      : normalizeMallStockType(req.body.mallType, "");
+  const direction =
+    req.body.direction === undefined
+      ? existing.direction
+      : normalizeStockMovementDirection(req.body.direction);
+  const quantityDozen =
+    req.body.quantityDozen === undefined
+      ? toNumber(existing.quantityDozen)
+      : Math.abs(toNumber(req.body.quantityDozen));
+  const ratePerDozen =
+    req.body.ratePerDozen === undefined
+      ? existing.ratePerDozen == null
+        ? 0
+        : toNumber(existing.ratePerDozen)
+      : Math.abs(toNumber(req.body.ratePerDozen));
+  const date =
+    req.body.date === undefined
+      ? existing.date
+      : toDate(req.body.date, "start");
+  const reference =
+    req.body.reference === undefined
+      ? existing.reference
+      : String(req.body.reference ?? "").trim() || null;
+  const note =
+    req.body.note === undefined
+      ? existing.note
+      : String(req.body.note ?? "").trim() || null;
+
+  if (!mallType) {
+    res.status(400).json({ error: "Mall type is required." });
+    return;
+  }
+  if (quantityDozen <= 0) {
+    res.status(400).json({ error: "Quantity must be greater than 0." });
+    return;
+  }
+  if (Number.isNaN(date.getTime())) {
+    res.status(400).json({ error: "Valid date is required." });
+    return;
+  }
+  if (direction === "OUT" && ratePerDozen <= 0) {
+    res.status(400).json({ error: "Price per pair must be greater than 0." });
+    return;
+  }
+
+  if (direction === "OUT") {
+    const availableQuantity = await getMallAvailableQuantity(prisma, mallType);
+    const existingContribution =
+      existing.mallType === mallType
+        ? existing.direction === "IN"
+          ? toNumber(existing.quantityDozen)
+          : -toNumber(existing.quantityDozen)
+        : 0;
+    const availableWithoutExisting = Math.max(
+      availableQuantity - existingContribution,
+      0,
+    );
+
+    if (quantityDozen > availableWithoutExisting) {
+      res.status(400).json({
+        error: `Only ${availableWithoutExisting} dozen is available in ${mallType === "B_MALL" ? "B-Mall" : "C-Mall"} stock.`,
+      });
+      return;
+    }
+  }
+
+  const totalAmount = calculateMallSaleTotal(
+    quantityDozen,
+    ratePerDozen,
+    direction,
+  );
+
+  const entry = await prisma.$transaction(async (tx) => {
+    let roznamchaEntryId = existing.roznamchaEntryId ?? null;
+
+    if (direction === "OUT" && totalAmount != null) {
+      const roznamchaData = {
+        date,
+        amount: -totalAmount,
+        description: getMallSaleDescription(mallType, reference),
+        module: "MISC",
+        paymentType: "CASH",
+        source: "SYSTEM",
+        sourceSystem: getMallSaleSourceSystem(mallType),
+      };
+
+      if (existing.roznamchaEntryId) {
+        await tx.expenseEntry.update({
+          where: { id: existing.roznamchaEntryId },
+          data: roznamchaData,
+        });
+      } else {
+        const roznamchaEntry = await createSystemRoznamchaEntry(tx, {
+          date,
+          amount: -totalAmount,
+          description: getMallSaleDescription(mallType, reference),
+          sourceSystem: getMallSaleSourceSystem(mallType),
+          paymentType: "CASH",
+        });
+        roznamchaEntryId = roznamchaEntry.id;
+      }
+    } else if (existing.roznamchaEntryId) {
+      await tx.expenseEntry.delete({
+        where: { id: existing.roznamchaEntryId },
+      });
+      roznamchaEntryId = null;
+    }
+
+    return tx.mallStockMovement.update({
+      where: { id: req.params.movementId },
+      data: {
+        mallType,
+        direction,
+        date,
+        quantityDozen,
+        ratePerDozen: direction === "OUT" ? ratePerDozen : null,
+        totalAmount,
+        reference,
+        note,
+        roznamchaEntryId,
+      },
+    });
+  });
+
+  res.json(toApiMallStockMovement(entry));
+};
+
+export const deleteMallStockMovement = async (req, res) => {
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.mallStockMovement.findUnique({
+      where: { id: req.params.movementId },
+    });
+
+    if (!existing) {
+      throw new Error("Mall stock movement not found.");
+    }
+
+    if (existing.roznamchaEntryId) {
+      await tx.expenseEntry.delete({
+        where: { id: existing.roznamchaEntryId },
+      });
+    }
+
+    await tx.mallStockMovement.delete({
+      where: { id: req.params.movementId },
+    });
+  }).catch((error) => {
+    res
+      .status(400)
+      .json({ error: error.message ?? "Failed to delete mall stock movement." });
+    return null;
+  });
+  if (res.headersSent) return;
   res.status(204).end();
 };
 

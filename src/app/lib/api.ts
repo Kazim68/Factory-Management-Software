@@ -19,6 +19,8 @@ import type {
   ApiBillType,
   ApiCheque,
   ApiChemicalPurchase,
+  ApiMallStockMovement,
+  ApiMallStockType,
   ApiMaterialPurchase,
   ApiPaymentMethod,
   ApiRexinePurchase,
@@ -28,12 +30,14 @@ import type {
   ApiStockArticleRow,
   ApiStockEntry,
   ApiStockMode,
+  ApiStockMovementDirection,
   ApiUnit,
   ApiLaborSummaryReport,
   ApiPartyMonthlyOutstandingReport,
   ApiRoznamchaSummaryReport,
 } from "../types/api";
 import { auth } from "./auth";
+import { getStoredLanguage } from "./i18n";
 
 type ApiAuditMeta = {
   itemLabel?: string;
@@ -93,6 +97,7 @@ const ENTITY_LABELS: Record<string, string> = {
   "purchases/rexine": "rexine purchase",
   "purchases/material": "material purchase",
   "production/orders": "production order",
+  "production/stock/mall-movements": "mall stock movement",
   "production/stock/manual": "manual stock entry",
 };
 
@@ -493,6 +498,7 @@ export const partyApi = {
       amount: number;
       method?: ApiPartyPayment["method"];
       direction?: "RECEIVE" | "PAY";
+      chequeDate?: string;
       reference?: string;
       description?: string;
       chequeId?: string;
@@ -648,6 +654,7 @@ export const laborApi = {
         end: params?.end,
         department: params?.department,
         search: params?.search,
+        lang: getStoredLanguage(),
       }),
     ),
   updateWorkEntry: (
@@ -690,6 +697,7 @@ export const laborApi = {
       date?: string;
       amount?: number;
       reason?: string;
+      paymentType?: ApiPaymentMethod;
     },
     auditMeta?: ApiAuditMeta,
   ): Promise<ApiLaborAdvance> =>
@@ -814,9 +822,6 @@ export const purchaseApi = {
   createCombined: (data: {
     date: string;
     partyId: string;
-    paymentType: ApiPaymentMethod;
-    amountPaid: number;
-    chequeId?: string;
     rows: Array<{
       type: "CHEMICAL" | "REXINE" | "MATERIAL";
       quantity: number;
@@ -832,12 +837,12 @@ export const purchaseApi = {
   getPrintableSupplierPurchases: (params: {
     types: Array<"CHEMICAL" | "REXINE" | "MATERIAL">;
     timePreset:
-      | "DAILY"
-      | "WEEKLY"
-      | "MONTHLY"
-      | "YEARLY"
-      | "CUSTOM"
-      | "THIS_MONTH";
+    | "DAILY"
+    | "WEEKLY"
+    | "MONTHLY"
+    | "YEARLY"
+    | "CUSTOM"
+    | "THIS_MONTH";
     start?: string;
     end?: string;
   }): Promise<string> =>
@@ -847,6 +852,7 @@ export const purchaseApi = {
         timePreset: params.timePreset,
         start: params.start,
         end: params.end,
+        lang: getStoredLanguage(),
       }),
     ),
   listChemicals: (): Promise<ApiChemicalPurchase[]> => get("/chemicals"),
@@ -978,7 +984,18 @@ export const productionApi = {
     return get(`/production/orders${suffix ? `?${suffix}` : ""}`);
   },
   getPrintableOrders: (): Promise<string> =>
-    get("/production/orders/printable"),
+    get(
+      withQuery("/production/orders/printable", {
+        lang: getStoredLanguage(),
+      }),
+    ),
+  getPrintableDailyPressmanOrders: (dateStr: string): Promise<string> =>
+    get(
+      withQuery("/production/orders/printable/pressman/daily", {
+        date: dateStr,
+        lang: getStoredLanguage(),
+      }),
+    ),
   createOrder: (data: {
     department: ApiLaborDepartment;
     articleId: string;
@@ -988,6 +1005,18 @@ export const productionApi = {
     pricePerDozen: number;
   }): Promise<ApiProductionOrder> =>
     request({ path: "/production/orders", method: "POST", body: data }),
+  createBulkOrders: (data: {
+    department: ApiLaborDepartment;
+    orderDate: string;
+    items: Array<{
+      articleId: string;
+      size: string;
+      quantityDozen: number;
+      pricePerDozen: number;
+      laborId?: string;
+    }>;
+  }): Promise<ApiProductionOrder[]> =>
+    request({ path: "/production/orders/bulk", method: "POST", body: data }),
   updateOrder: (
     orderId: string,
     data: {
@@ -1001,6 +1030,11 @@ export const productionApi = {
       path: `/production/orders/${orderId}`,
       method: "PATCH",
       body: data,
+    }),
+  deleteOrder: (orderId: string): Promise<void> =>
+    request({
+      path: `/production/orders/${orderId}`,
+      method: "DELETE",
     }),
   assignLabor: (
     orderId: string,
@@ -1060,13 +1094,53 @@ export const productionApi = {
   listStockByArticle: (params?: {
     mode?: ApiStockMode;
     q?: string;
+    excludeBillId?: string;
   }): Promise<ApiStockArticleRow[]> => {
     const query = new URLSearchParams();
     if (params?.mode) query.set("mode", params.mode);
     if (params?.q) query.set("q", params.q);
+    if (params?.excludeBillId) query.set("excludeBillId", params.excludeBillId);
     const suffix = query.toString();
     return get(`/production/stock/articles${suffix ? `?${suffix}` : ""}`);
   },
+  listMallStockMovements: (): Promise<ApiMallStockMovement[]> =>
+    get("/production/stock/mall-movements"),
+  createMallStockMovement: (data: {
+    mallType: ApiMallStockType;
+    direction: ApiStockMovementDirection;
+    date: string;
+    quantityDozen: number;
+    ratePerDozen?: number;
+    reference?: string;
+    note?: string;
+  }): Promise<ApiMallStockMovement> =>
+    request({
+      path: "/production/stock/mall-movements",
+      method: "POST",
+      body: data,
+    }),
+  updateMallStockMovement: (
+    movementId: string,
+    data: {
+      mallType?: ApiMallStockType;
+      direction?: ApiStockMovementDirection;
+      date?: string;
+      quantityDozen?: number;
+      ratePerDozen?: number | null;
+      reference?: string | null;
+      note?: string | null;
+    },
+  ): Promise<ApiMallStockMovement> =>
+    request({
+      path: `/production/stock/mall-movements/${movementId}`,
+      method: "PATCH",
+      body: data,
+    }),
+  deleteMallStockMovement: (movementId: string): Promise<void> =>
+    request({
+      path: `/production/stock/mall-movements/${movementId}`,
+      method: "DELETE",
+    }),
   listManualStockEntries: (): Promise<ApiStockEntry[]> =>
     get("/production/stock/manual"),
   createManualStockEntry: (data: {

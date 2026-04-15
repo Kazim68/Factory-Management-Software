@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -30,13 +31,20 @@ import {
   ArrowLeft,
   Banknote,
   Eye,
+  Filter,
   Plus,
   Printer,
   Wallet,
   X,
 } from "lucide-react";
-import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  getCurrentDate,
+} from "../lib/utils";
 import { configApi, expenseApi, laborApi } from "../lib/api";
+import { useClientPagination } from "../hooks/useClientPagination";
 import {
   exportTableToExcel,
   exportTableToPdf,
@@ -52,6 +60,7 @@ import type {
   ApiLaborAdvance,
   ApiPaymentType,
 } from "../types/api";
+import { TablePagination } from "./ui/table-pagination";
 import { toast } from "sonner";
 
 type UiWorkEntry = ApiLaborWorkEntry & {
@@ -124,7 +133,7 @@ export function LaborManagement() {
   const [workEntryEnd, setWorkEntryEnd] = useState(getCurrentDate());
   const [payingLaborId, setPayingLaborId] = useState<string | null>(null);
   const [ledgerRangeStart, setLedgerRangeStart] = useState("");
-  const [ledgerRangeEnd, setLedgerRangeEnd] = useState(getCurrentDate());
+  const [ledgerRangeEnd, setLedgerRangeEnd] = useState("");
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") return "entries";
     return "entries";
@@ -323,10 +332,10 @@ export function LaborManagement() {
         ]),
       },
       metadata: {
-        generatedAt: new Date().toLocaleString(),
+        generatedAt: formatDateTime(new Date()),
         filters: [
           `Labor: ${viewingLabor.name}`,
-          `Range: ${ledgerRangeStart || "All"} - ${ledgerRangeEnd || "Today"}`,
+          `Range: ${ledgerRangeStart || "All"} - ${ledgerRangeEnd || "All"}`,
         ],
       },
     };
@@ -640,7 +649,7 @@ export function LaborManagement() {
   const openLedgerScreen = (laborId: string) => {
     setViewingLaborId(laborId);
     setLedgerRangeStart("");
-    setLedgerRangeEnd(getCurrentDate());
+    setLedgerRangeEnd("");
   };
 
   const getLaborSummary = (laborId: string) =>
@@ -677,22 +686,28 @@ export function LaborManagement() {
       labor.name.toLowerCase().includes(normalizedLaborQuery);
     return matchesDepartment && matchesSearch;
   };
-  const filteredLaborIds = new Set(
-    allProfiles.filter(laborMatchesFilters).map((labor) => labor.id),
+  const filteredLaborIds = useMemo(
+    () => new Set(allProfiles.filter(laborMatchesFilters).map((labor) => labor.id)),
+    [allProfiles, departmentFilter, normalizedLaborQuery],
   );
-  const filteredProfiles = profiles.filter((labor) =>
-    filteredLaborIds.has(labor.id),
+  const filteredProfiles = useMemo(
+    () => profiles.filter((labor) => filteredLaborIds.has(labor.id)),
+    [profiles, filteredLaborIds],
   );
-  const filteredWorkEntries = workEntries
-    .filter(
-      (entry) =>
-        filteredLaborIds.has(entry.laborId) &&
-        isWithinDateRange(entry.startDate, workEntryStart, workEntryEnd),
-    )
-    .sort(
-      (a, b) =>
-        new Date(b.startDate).getTime() - new Date(a.startDate).getTime(),
-    );
+  const filteredWorkEntries = useMemo(
+    () =>
+      workEntries
+        .filter(
+          (entry) =>
+            filteredLaborIds.has(entry.laborId) &&
+            isWithinDateRange(entry.startDate, workEntryStart, workEntryEnd),
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.startDate).getTime() - new Date(a.startDate).getTime(),
+        ),
+    [filteredLaborIds, workEntries, workEntryEnd, workEntryStart],
+  );
   const filteredPaidTodayEntries = paidTodayEntries.filter(
     (entry) => entry.laborId && filteredLaborIds.has(entry.laborId),
   );
@@ -799,6 +814,84 @@ export function LaborManagement() {
         totalPaidCash,
     };
   }, [viewingLedger, ledgerPaidEntries]);
+
+  const {
+    currentPage: ledgerPage,
+    setCurrentPage: setLedgerPage,
+    pageSize: ledgerPageSize,
+    setPageSize: setLedgerPageSize,
+    totalPages: ledgerTotalPages,
+    totalItems: ledgerTotalItems,
+    startItem: ledgerStartItem,
+    endItem: ledgerEndItem,
+    paginatedItems: paginatedLedgerRows,
+    goToPreviousPage: goToPreviousLedgerPage,
+    goToNextPage: goToNextLedgerPage,
+  } = useClientPagination(ledgerRows);
+
+  const {
+    currentPage: profilesPage,
+    setCurrentPage: setProfilesPage,
+    pageSize: profilesPageSize,
+    setPageSize: setProfilesPageSize,
+    totalPages: profilesTotalPages,
+    totalItems: profilesTotalItems,
+    startItem: profilesStartItem,
+    endItem: profilesEndItem,
+    paginatedItems: paginatedProfiles,
+    goToPreviousPage: goToPreviousProfilesPage,
+    goToNextPage: goToNextProfilesPage,
+  } = useClientPagination(filteredProfiles);
+
+  const {
+    currentPage: workEntriesPage,
+    setCurrentPage: setWorkEntriesPage,
+    pageSize: workEntriesPageSize,
+    setPageSize: setWorkEntriesPageSize,
+    totalPages: workEntriesTotalPages,
+    totalItems: workEntriesTotalItems,
+    startItem: workEntriesStartItem,
+    endItem: workEntriesEndItem,
+    paginatedItems: paginatedWorkEntries,
+    goToPreviousPage: goToPreviousWorkEntriesPage,
+    goToNextPage: goToNextWorkEntriesPage,
+  } = useClientPagination(filteredWorkEntries);
+
+  const departmentFilterOptions = useMemo(
+    () => [
+      { value: "ALL", label: "All Departments" },
+      ...categories.map((category) => ({
+        value: category.id,
+        label: category.name,
+      })),
+    ],
+    [categories],
+  );
+
+  const clearMainFilters = () => {
+    setLaborSearchQuery("");
+    setDepartmentFilter("ALL");
+    setWorkEntryStart("");
+    setWorkEntryEnd(getCurrentDate());
+  };
+
+  const laborCategoryOptions = useMemo(
+    () =>
+      categories.map((category) => ({
+        value: category.id,
+        label: category.name,
+      })),
+    [categories],
+  );
+
+  const laborPaymentTypeOptions = useMemo(
+    () =>
+      paymentTypes.map((type) => ({
+        value: type.id,
+        label: type.name,
+      })),
+    [paymentTypes],
+  );
 
   if (viewingLaborId) {
     return (
@@ -944,7 +1037,7 @@ export function LaborManagement() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  ledgerRows.map((row, index) => (
+                  paginatedLedgerRows.map((row, index) => (
                     <TableRow key={`${row.type}-${row.date}-${index}`}>
                       <TableCell>{formatDate(row.date)}</TableCell>
                       <TableCell>{row.type}</TableCell>
@@ -970,6 +1063,18 @@ export function LaborManagement() {
                 )}
               </TableBody>
             </Table>
+            <TablePagination
+              currentPage={ledgerPage}
+              totalPages={ledgerTotalPages}
+              totalItems={ledgerTotalItems}
+              startItem={ledgerStartItem}
+              endItem={ledgerEndItem}
+              pageSize={ledgerPageSize}
+              setPageSize={setLedgerPageSize}
+              goToPreviousPage={goToPreviousLedgerPage}
+              goToNextPage={goToNextLedgerPage}
+              setCurrentPage={setLedgerPage}
+            />
           </CardContent>
         </Card>
       </div>
@@ -1034,22 +1139,14 @@ export function LaborManagement() {
                     <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                       Department Filter
                     </Label>
-                    <Select
+                    <SearchableSelect
                       value={departmentFilter}
                       onValueChange={setDepartmentFilter}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ALL">All Departments</SelectItem>
-                        {categories.map((category) => (
-                          <SelectItem key={category.id} value={category.id}>
-                            {category.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={departmentFilterOptions}
+                      placeholder="All Departments"
+                      searchPlaceholder="Search department..."
+                      emptyMessage="No departments found."
+                    />
                   </div>
                   {activeTab === "work" && (
                     <>
@@ -1076,6 +1173,14 @@ export function LaborManagement() {
                     </>
                   )}
                   <div className="ml-auto flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={clearMainFilters}
+                    >
+                      <Filter className="mr-2 h-4 w-4" />
+                      Reset Filters
+                    </Button>
                     {activeTab === "work" && (
                       <Button
                         type="button"
@@ -1120,7 +1225,7 @@ export function LaborManagement() {
                             </div>
                             <div>
                               <Label>Department</Label>
-                              <Select
+                              <SearchableSelect
                                 value={laborForm.categoryId}
                                 onValueChange={(value) =>
                                   setLaborForm({
@@ -1128,22 +1233,15 @@ export function LaborManagement() {
                                     categoryId: value,
                                   })
                                 }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select department" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {categories.map((cat) => (
-                                    <SelectItem key={cat.id} value={cat.id}>
-                                      {cat.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                options={laborCategoryOptions}
+                                placeholder="Select department"
+                                searchPlaceholder="Search department..."
+                                emptyMessage="No departments found."
+                              />
                             </div>
                             <div>
                               <Label>Payment Type</Label>
-                              <Select
+                              <SearchableSelect
                                 value={laborForm.paymentTypeId}
                                 onValueChange={(value) =>
                                   setLaborForm({
@@ -1151,18 +1249,11 @@ export function LaborManagement() {
                                     paymentTypeId: value,
                                   })
                                 }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select payment type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {paymentTypes.map((type) => (
-                                    <SelectItem key={type.id} value={type.id}>
-                                      {type.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                options={laborPaymentTypeOptions}
+                                placeholder="Select payment type"
+                                searchPlaceholder="Search payment type..."
+                                emptyMessage="No payment types found."
+                              />
                             </div>
                             <div>
                               <Label>Default Rate (optional)</Label>
@@ -1366,7 +1457,7 @@ export function LaborManagement() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredProfiles.map((labor) => {
+                        paginatedProfiles.map((labor) => {
                           const summary = getLaborSummary(labor.id);
                           const totalPaid = paidByLabor[labor.id] ?? 0;
                           const adjustedNetPayable =
@@ -1437,6 +1528,18 @@ export function LaborManagement() {
                       )}
                     </TableBody>
                   </Table>
+                  <TablePagination
+                    currentPage={profilesPage}
+                    totalPages={profilesTotalPages}
+                    totalItems={profilesTotalItems}
+                    startItem={profilesStartItem}
+                    endItem={profilesEndItem}
+                    pageSize={profilesPageSize}
+                    setPageSize={setProfilesPageSize}
+                    goToPreviousPage={goToPreviousProfilesPage}
+                    goToNextPage={goToNextProfilesPage}
+                    setCurrentPage={setProfilesPage}
+                  />
                 </TabsContent>
 
                 <TabsContent
@@ -1475,7 +1578,7 @@ export function LaborManagement() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredWorkEntries.map((work) => (
+                        paginatedWorkEntries.map((work) => (
                           <TableRow key={work.id}>
                             <TableCell>{formatDate(work.startDate)}</TableCell>
                             <TableCell>{work.laborName}</TableCell>
@@ -1492,6 +1595,18 @@ export function LaborManagement() {
                       )}
                     </TableBody>
                   </Table>
+                  <TablePagination
+                    currentPage={workEntriesPage}
+                    totalPages={workEntriesTotalPages}
+                    totalItems={workEntriesTotalItems}
+                    startItem={workEntriesStartItem}
+                    endItem={workEntriesEndItem}
+                    pageSize={workEntriesPageSize}
+                    setPageSize={setWorkEntriesPageSize}
+                    goToPreviousPage={goToPreviousWorkEntriesPage}
+                    goToNextPage={goToNextWorkEntriesPage}
+                    setCurrentPage={setWorkEntriesPage}
+                  />
                 </TabsContent>
 
                 {/* <TabsContent

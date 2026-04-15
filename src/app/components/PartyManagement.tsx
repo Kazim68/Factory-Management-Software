@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { useClientPagination } from "../hooks/useClientPagination";
 import {
   Select,
   SelectContent,
@@ -9,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -19,15 +21,32 @@ import {
 } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Plus, Eye } from "lucide-react";
-import { formatCurrency, formatDate } from "../lib/utils";
-import { billApi, chequeApi, partyApi } from "../lib/api";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { TablePagination } from "./ui/table-pagination";
+import { Filter, Plus, Eye, Printer } from "lucide-react";
+import {
+  exportTableToPdf,
+  type ReportExportPayload,
+} from "../lib/report";
+import { printBillInvoice } from "../lib/bill-print";
+import { getPresetDateRange } from "../lib/time-presets";
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  getCurrentDate,
+  toPakistanBoundaryDate,
+} from "../lib/utils";
+import { billApi, chequeApi, partyApi, purchaseApi } from "../lib/api";
 import { SupplierCombinedPurchase } from "./SupplierPurchaseSection";
 import type {
   ApiBill,
   ApiCheque,
+  ApiChemicalPurchase,
+  ApiMaterialPurchase,
   ApiPartyLedgerEntry,
   ApiPaymentMethod,
+  ApiRexinePurchase,
 } from "../types/api";
 import { toast } from "sonner";
 
@@ -37,6 +56,152 @@ type UiParty = {
   type: "customer" | "supplier";
   currentBalance: number;
   createdAt: string;
+};
+
+type LedgerEntryFilter = "ALL" | "PAYABLE" | "RECEIVABLE" | "CASH";
+type CustomerBillsFilterPreset =
+  | "ALL"
+  | "TODAY"
+  | "THIS_WEEK"
+  | "THIS_MONTH"
+  | "CUSTOM";
+type ProfileViewTab = "ledger" | "bills" | "purchases";
+
+type SupplierProfilePurchaseRecord = {
+  id: string;
+  date: string;
+  type: "CHEMICAL" | "REXINE" | "MATERIAL";
+  itemName: string;
+  quantityLabel: string;
+  rateLabel: string;
+  totalAmount: number;
+  paymentType: ApiPaymentMethod;
+  description: string;
+};
+
+const getLedgerReferenceLabel = (
+  entry: Pick<ApiPartyLedgerEntry, "reference" | "description">,
+) => {
+  const parts = [entry.reference?.trim(), entry.description?.trim()].filter(
+    Boolean,
+  ) as string[];
+  return parts.length > 0 ? parts.join(" - ") : "-";
+};
+
+const CUSTOMER_BILLS_FILTER_OPTIONS: Array<{
+  value: CustomerBillsFilterPreset;
+  label: string;
+}> = [
+  { value: "ALL", label: "All Dates" },
+  { value: "TODAY", label: "Today" },
+  { value: "THIS_WEEK", label: "This Week" },
+  { value: "THIS_MONTH", label: "This Month" },
+  { value: "CUSTOM", label: "Custom Date" },
+];
+
+const getCustomerBillsFilterLabel = (preset: CustomerBillsFilterPreset) =>
+  CUSTOMER_BILLS_FILTER_OPTIONS.find((option) => option.value === preset)
+    ?.label ?? preset;
+
+const getCustomerBillsPresetRange = (
+  preset: CustomerBillsFilterPreset,
+  now: Date,
+) => {
+  if (preset === "TODAY") {
+    return getPresetDateRange("DAILY", now);
+  }
+
+  if (preset === "THIS_WEEK") {
+    return getPresetDateRange("WEEKLY", now);
+  }
+
+  if (preset === "THIS_MONTH") {
+    return getPresetDateRange("THIS_MONTH", now);
+  }
+
+  return null;
+};
+
+const sortBillsDescending = (bills: ApiBill[]) =>
+  [...bills].sort((left, right) => {
+    const byDate =
+      new Date(right.date).getTime() - new Date(left.date).getTime();
+    if (byDate !== 0) return byDate;
+    return String(right.billNumber).localeCompare(String(left.billNumber));
+  });
+
+const sortSupplierPurchasesDescending = (
+  purchases: SupplierProfilePurchaseRecord[],
+) =>
+  [...purchases].sort((left, right) => {
+    const byDate =
+      new Date(right.date).getTime() - new Date(left.date).getTime();
+    if (byDate !== 0) return byDate;
+    return String(right.id).localeCompare(String(left.id));
+  });
+
+const toPurchaseTypeLabel = (
+  value: SupplierProfilePurchaseRecord["type"],
+) =>
+  value
+    .toLowerCase()
+    .replace(
+      /(^|_)([a-z])/g,
+      (_, prefix: string, letter: string) =>
+        `${prefix === "_" ? " " : ""}${letter.toUpperCase()}`,
+    );
+
+const formatSupplierPurchasePaymentLabel = (value: ApiPaymentMethod) => {
+  const normalized = String(value ?? "KHATA").toUpperCase();
+  if (normalized === "KHATA" || normalized === "CREDIT") return "Khata";
+  if (normalized === "CHEQUE") return "Cheque";
+  if (normalized === "BANK") return "Bank";
+  return "Cash";
+};
+
+const mapChemicalPurchaseToProfileRecord = (
+  entry: ApiChemicalPurchase,
+): SupplierProfilePurchaseRecord => ({
+  id: entry.id,
+  date: entry.date,
+  type: "CHEMICAL",
+  itemName: "Raw Material",
+  quantityLabel: `${Number(entry.quantityKg)} kg`,
+  rateLabel: `${formatCurrency(Number(entry.ratePerKg ?? 0))}/kg`,
+  totalAmount: Number(entry.totalAmount ?? 0),
+  paymentType: entry.paymentType,
+  description: entry.expenses?.[0]?.description || "",
+});
+
+const mapRexinePurchaseToProfileRecord = (
+  entry: ApiRexinePurchase,
+): SupplierProfilePurchaseRecord => ({
+  id: entry.id,
+  date: entry.date,
+  type: "REXINE",
+  itemName: "Raw Material",
+  quantityLabel: `${Number(entry.quantityMeter)} meter`,
+  rateLabel: `${formatCurrency(Number(entry.ratePerMeter ?? 0))}/meter`,
+  totalAmount: Number(entry.totalAmount ?? 0),
+  paymentType: entry.paymentType,
+  description: entry.expenses?.[0]?.description || "",
+});
+
+const mapMaterialPurchaseToProfileRecord = (
+  entry: ApiMaterialPurchase,
+): SupplierProfilePurchaseRecord => {
+  const unitLabel = entry.unit?.symbol || entry.unit?.name || "unit";
+  return {
+    id: entry.id,
+    date: entry.date,
+    type: "MATERIAL",
+    itemName: entry.article?.name || "-",
+    quantityLabel: `${Number(entry.quantity)} ${unitLabel}`,
+    rateLabel: `${formatCurrency(Number(entry.pricePerUnit ?? 0))}/${unitLabel}`,
+    totalAmount: Number(entry.totalAmount ?? 0),
+    paymentType: entry.paymentType,
+    description: entry.expenses?.[0]?.description || "",
+  };
 };
 
 export function PartyManagement({
@@ -55,17 +220,46 @@ export function PartyManagement({
   const [isLoadingPaymentBills, setIsLoadingPaymentBills] = useState(false);
   const [isLoadingCheques, setIsLoadingCheques] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState<ApiPartyLedgerEntry[]>([]);
+  const [customerBills, setCustomerBills] = useState<ApiBill[]>([]);
+  const [isLoadingCustomerBills, setIsLoadingCustomerBills] = useState(false);
+  const [supplierPurchases, setSupplierPurchases] = useState<
+    SupplierProfilePurchaseRecord[]
+  >([]);
+  const [isLoadingSupplierPurchases, setIsLoadingSupplierPurchases] =
+    useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [partyDialogType, setPartyDialogType] = useState<
     "customer" | "supplier"
   >(partyType);
+  const [partySearchQuery, setPartySearchQuery] = useState("");
+  const [partyBalanceFilter, setPartyBalanceFilter] = useState<
+    "ALL" | "POSITIVE" | "NEGATIVE" | "ZERO"
+  >("ALL");
+  const [ledgerSearchQuery, setLedgerSearchQuery] = useState("");
+  const [ledgerEntryFilter, setLedgerEntryFilter] =
+    useState<LedgerEntryFilter>("ALL");
+  const [ledgerDateFrom, setLedgerDateFrom] = useState("");
+  const [ledgerDateTo, setLedgerDateTo] = useState("");
+  const [profileViewTab, setProfileViewTab] = useState<ProfileViewTab>("ledger");
+  const [customerBillsSearchQuery, setCustomerBillsSearchQuery] = useState("");
+  const [customerBillsFilterPreset, setCustomerBillsFilterPreset] =
+    useState<CustomerBillsFilterPreset>("ALL");
+  const [customerBillsDateFrom, setCustomerBillsDateFrom] = useState("");
+  const [customerBillsDateTo, setCustomerBillsDateTo] = useState("");
+  const [supplierPurchasesSearchQuery, setSupplierPurchasesSearchQuery] =
+    useState("");
+  const [supplierPurchasesFilterPreset, setSupplierPurchasesFilterPreset] =
+    useState<CustomerBillsFilterPreset>("ALL");
+  const [supplierPurchasesDateFrom, setSupplierPurchasesDateFrom] =
+    useState("");
+  const [supplierPurchasesDateTo, setSupplierPurchasesDateTo] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
   });
 
   const [paymentData, setPaymentData] = useState({
-    date: new Date().toISOString().split("T")[0],
+    date: getCurrentDate(),
     amount: "",
     method: "KHATA" as ApiPaymentMethod,
     chequeId: "",
@@ -117,6 +311,23 @@ export function PartyManagement({
     }
   };
 
+  const loadCustomerBills = async (partyId: string) => {
+    setIsLoadingCustomerBills(true);
+    try {
+      const allBills = await billApi.listBills();
+      setCustomerBills(
+        sortBillsDescending(
+          allBills.filter((bill) => bill.partyId === partyId),
+        ),
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load customer bills.");
+    } finally {
+      setIsLoadingCustomerBills(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, [partyType]);
@@ -145,6 +356,120 @@ export function PartyManagement({
     return () => {
       active = false;
     };
+  }, [viewingPartyId]);
+
+  useEffect(() => {
+    if (!viewingPartyId) {
+      setCustomerBills([]);
+      setIsLoadingCustomerBills(false);
+      return;
+    }
+
+    const party = parties.find((item) => item.id === viewingPartyId);
+    if (party?.type !== "customer") {
+      setCustomerBills([]);
+      setIsLoadingCustomerBills(false);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingCustomerBills(true);
+    billApi
+      .listBills()
+      .then((allBills) => {
+        if (!active) return;
+        setCustomerBills(
+          sortBillsDescending(
+            allBills.filter((bill) => bill.partyId === viewingPartyId),
+          ),
+        );
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) {
+          toast.error("Failed to load customer bills.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingCustomerBills(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [parties, viewingPartyId]);
+
+  useEffect(() => {
+    if (!viewingPartyId) {
+      setSupplierPurchases([]);
+      setIsLoadingSupplierPurchases(false);
+      return;
+    }
+
+    const party = parties.find((item) => item.id === viewingPartyId);
+    if (party?.type !== "supplier") {
+      setSupplierPurchases([]);
+      setIsLoadingSupplierPurchases(false);
+      return;
+    }
+
+    let active = true;
+    setIsLoadingSupplierPurchases(true);
+    Promise.all([
+      purchaseApi.listChemicals(),
+      purchaseApi.listRexine(),
+      purchaseApi.listMaterials(),
+    ])
+      .then(([chemicalPurchases, rexinePurchases, materialPurchases]) => {
+        if (!active) return;
+
+        const filteredPurchases = sortSupplierPurchasesDescending([
+          ...chemicalPurchases
+            .filter((entry) => entry.partyId === viewingPartyId)
+            .map((entry) => mapChemicalPurchaseToProfileRecord(entry)),
+          ...rexinePurchases
+            .filter((entry) => entry.partyId === viewingPartyId)
+            .map((entry) => mapRexinePurchaseToProfileRecord(entry)),
+          ...materialPurchases
+            .filter((entry) => entry.partyId === viewingPartyId)
+            .map((entry) => mapMaterialPurchaseToProfileRecord(entry)),
+        ]);
+
+        setSupplierPurchases(filteredPurchases);
+      })
+      .catch((error) => {
+        console.error(error);
+        if (active) {
+          toast.error("Failed to load supplier purchases.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingSupplierPurchases(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [parties, viewingPartyId]);
+
+  useEffect(() => {
+    setLedgerSearchQuery("");
+    setLedgerEntryFilter("ALL");
+    setLedgerDateFrom("");
+    setLedgerDateTo("");
+    setProfileViewTab("ledger");
+    setCustomerBillsSearchQuery("");
+    setCustomerBillsFilterPreset("ALL");
+    setCustomerBillsDateFrom("");
+    setCustomerBillsDateTo("");
+    setSupplierPurchasesSearchQuery("");
+    setSupplierPurchasesFilterPreset("ALL");
+    setSupplierPurchasesDateFrom("");
+    setSupplierPurchasesDateTo("");
   }, [viewingPartyId]);
 
   useEffect(() => {
@@ -332,8 +657,9 @@ export function PartyManagement({
         description: paymentData.description || undefined,
       });
       toast.success("Payment recorded");
+      const refreshedPartyId = party.id;
       setPaymentData({
-        date: new Date().toISOString().split("T")[0],
+        date: getCurrentDate(),
         amount: "",
         method: "KHATA",
         chequeId: "",
@@ -343,6 +669,9 @@ export function PartyManagement({
       setIsPaymentDialogOpen(false);
       setPaymentPartyId(null);
       await loadData();
+      if (viewingPartyId === refreshedPartyId && party.type === "customer") {
+        await loadCustomerBills(refreshedPartyId);
+      }
     } catch (error) {
       console.error(error);
       toast.error("Failed to record payment.");
@@ -408,6 +737,1012 @@ export function PartyManagement({
     return withRunning.reverse();
   }, [ledgerEntries, parties, viewingPartyId]);
 
+  const viewingParty = useMemo(
+    () => parties.find((party) => party.id === viewingPartyId) ?? null,
+    [parties, viewingPartyId],
+  );
+
+  const filteredLedgerEntries = useMemo(() => {
+    const query = ledgerSearchQuery.trim().toLowerCase();
+    const fromTs = ledgerDateFrom
+      ? new Date(`${ledgerDateFrom}T00:00:00`).getTime()
+      : null;
+    const toTs = ledgerDateTo
+      ? new Date(`${ledgerDateTo}T23:59:59.999`).getTime()
+      : null;
+
+    return ledgerWithOpening.filter((entry) => {
+      const entryTs = new Date(entry.date).getTime();
+      if (fromTs !== null && (!Number.isFinite(entryTs) || entryTs < fromTs)) {
+        return false;
+      }
+      if (toTs !== null && (!Number.isFinite(entryTs) || entryTs > toTs)) {
+        return false;
+      }
+
+      if (ledgerEntryFilter === "PAYABLE") {
+        if (entry.isCash || Number(entry.payable ?? 0) <= 0) return false;
+      } else if (ledgerEntryFilter === "RECEIVABLE") {
+        if (entry.isCash || Number(entry.receivable ?? 0) <= 0) return false;
+      } else if (ledgerEntryFilter === "CASH") {
+        if (!entry.isCash) return false;
+      }
+
+      if (!query) return true;
+
+      const haystack = [
+        getLedgerReferenceLabel(entry),
+        entry.date,
+        String(entry.payable ?? ""),
+        String(entry.receivable ?? ""),
+        String(entry.cash ?? ""),
+        String(entry.runningBalance ?? ""),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [
+    ledgerDateFrom,
+    ledgerDateTo,
+    ledgerEntryFilter,
+    ledgerSearchQuery,
+    ledgerWithOpening,
+  ]);
+
+  const filteredCustomerBills = useMemo(() => {
+    const query = customerBillsSearchQuery.trim().toLowerCase();
+
+    let fromTs: number | null = null;
+    let toTs: number | null = null;
+
+    if (customerBillsFilterPreset === "CUSTOM") {
+      fromTs = customerBillsDateFrom
+        ? toPakistanBoundaryDate(customerBillsDateFrom, "start").getTime()
+        : null;
+      toTs = customerBillsDateTo
+        ? toPakistanBoundaryDate(customerBillsDateTo, "end").getTime()
+        : null;
+    } else if (customerBillsFilterPreset !== "ALL") {
+      const range = getCustomerBillsPresetRange(
+        customerBillsFilterPreset,
+        new Date(),
+      );
+      fromTs = range?.from.getTime() ?? null;
+      toTs = range?.to.getTime() ?? null;
+    }
+
+    return customerBills.filter((bill) => {
+      const billTs = new Date(bill.date).getTime();
+      if (fromTs !== null && (!Number.isFinite(billTs) || billTs < fromTs)) {
+        return false;
+      }
+      if (toTs !== null && (!Number.isFinite(billTs) || billTs > toTs)) {
+        return false;
+      }
+
+      if (!query) return true;
+
+      return [
+        bill.billNumber,
+        bill.date,
+        bill.paymentStatus,
+        String(bill.total ?? ""),
+        String(bill.totalPaid ?? ""),
+        String(bill.remaining ?? ""),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [
+    customerBills,
+    customerBillsDateFrom,
+    customerBillsDateTo,
+      customerBillsFilterPreset,
+      customerBillsSearchQuery,
+    ]);
+
+  const filteredSupplierPurchases = useMemo(() => {
+    const query = supplierPurchasesSearchQuery.trim().toLowerCase();
+
+    let fromTs: number | null = null;
+    let toTs: number | null = null;
+
+    if (supplierPurchasesFilterPreset === "CUSTOM") {
+      fromTs = supplierPurchasesDateFrom
+        ? toPakistanBoundaryDate(supplierPurchasesDateFrom, "start").getTime()
+        : null;
+      toTs = supplierPurchasesDateTo
+        ? toPakistanBoundaryDate(supplierPurchasesDateTo, "end").getTime()
+        : null;
+    } else if (supplierPurchasesFilterPreset !== "ALL") {
+      const range = getCustomerBillsPresetRange(
+        supplierPurchasesFilterPreset,
+        new Date(),
+      );
+      fromTs = range?.from.getTime() ?? null;
+      toTs = range?.to.getTime() ?? null;
+    }
+
+    return supplierPurchases.filter((purchase) => {
+      const purchaseTs = new Date(purchase.date).getTime();
+      if (
+        fromTs !== null &&
+        (!Number.isFinite(purchaseTs) || purchaseTs < fromTs)
+      ) {
+        return false;
+      }
+      if (
+        toTs !== null &&
+        (!Number.isFinite(purchaseTs) || purchaseTs > toTs)
+      ) {
+        return false;
+      }
+
+      if (!query) return true;
+
+      return [
+        purchase.date,
+        toPurchaseTypeLabel(purchase.type),
+        purchase.itemName,
+        purchase.quantityLabel,
+        purchase.rateLabel,
+        String(purchase.totalAmount),
+        formatSupplierPurchasePaymentLabel(purchase.paymentType),
+        purchase.description,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [
+    supplierPurchases,
+    supplierPurchasesDateFrom,
+    supplierPurchasesDateTo,
+    supplierPurchasesFilterPreset,
+    supplierPurchasesSearchQuery,
+  ]);
+
+  const filteredParties = useMemo(() => {
+    const query = partySearchQuery.trim().toLowerCase();
+
+    return parties.filter((party) => {
+      const balance = Number(party.currentBalance ?? 0);
+      const isZero = Math.abs(balance) < 0.0001;
+
+      if (partyBalanceFilter === "POSITIVE" && balance <= 0) return false;
+      if (partyBalanceFilter === "NEGATIVE" && balance >= 0) return false;
+      if (partyBalanceFilter === "ZERO" && !isZero) return false;
+
+      if (!query) return true;
+
+      return [party.name, String(balance)].join(" ").toLowerCase().includes(query);
+    });
+  }, [parties, partyBalanceFilter, partySearchQuery]);
+
+  const {
+    currentPage: customerPage,
+    setCurrentPage: setCustomerPage,
+    pageSize: customerPageSize,
+    setPageSize: setCustomerPageSize,
+    totalPages: customerTotalPages,
+    totalItems: customerTotalItems,
+    startItem: customerStartItem,
+    endItem: customerEndItem,
+    paginatedItems: paginatedParties,
+    goToPreviousPage: goToPreviousCustomerPage,
+    goToNextPage: goToNextCustomerPage,
+  } = useClientPagination(filteredParties);
+
+  const {
+    currentPage: ledgerPage,
+    setCurrentPage: setLedgerPage,
+    pageSize: ledgerPageSize,
+    setPageSize: setLedgerPageSize,
+    totalPages: ledgerTotalPages,
+    totalItems: ledgerTotalItems,
+    startItem: ledgerStartItem,
+    endItem: ledgerEndItem,
+    paginatedItems: paginatedLedgerEntries,
+    goToPreviousPage: goToPreviousLedgerPage,
+    goToNextPage: goToNextLedgerPage,
+  } = useClientPagination(filteredLedgerEntries);
+
+  const {
+    currentPage: customerBillsPage,
+    setCurrentPage: setCustomerBillsPage,
+    pageSize: customerBillsPageSize,
+    setPageSize: setCustomerBillsPageSize,
+    totalPages: customerBillsTotalPages,
+    totalItems: customerBillsTotalItems,
+    startItem: customerBillsStartItem,
+    endItem: customerBillsEndItem,
+    paginatedItems: paginatedCustomerBills,
+    goToPreviousPage: goToPreviousCustomerBillsPage,
+    goToNextPage: goToNextCustomerBillsPage,
+  } = useClientPagination(filteredCustomerBills);
+
+  const {
+    currentPage: supplierPurchasesPage,
+    setCurrentPage: setSupplierPurchasesPage,
+    pageSize: supplierPurchasesPageSize,
+    setPageSize: setSupplierPurchasesPageSize,
+    totalPages: supplierPurchasesTotalPages,
+    totalItems: supplierPurchasesTotalItems,
+    startItem: supplierPurchasesStartItem,
+    endItem: supplierPurchasesEndItem,
+    paginatedItems: paginatedSupplierPurchases,
+    goToPreviousPage: goToPreviousSupplierPurchasesPage,
+    goToNextPage: goToNextSupplierPurchasesPage,
+  } = useClientPagination(filteredSupplierPurchases);
+
+  useEffect(() => {
+    setLedgerPage(1);
+  }, [
+    ledgerDateFrom,
+    ledgerDateTo,
+    ledgerEntryFilter,
+    ledgerSearchQuery,
+    setLedgerPage,
+    viewingPartyId,
+  ]);
+
+  useEffect(() => {
+    setCustomerBillsPage(1);
+  }, [
+    customerBillsDateFrom,
+    customerBillsDateTo,
+    customerBillsFilterPreset,
+    customerBillsSearchQuery,
+    setCustomerBillsPage,
+    viewingPartyId,
+  ]);
+
+  useEffect(() => {
+    setSupplierPurchasesPage(1);
+  }, [
+    supplierPurchasesDateFrom,
+    supplierPurchasesDateTo,
+    supplierPurchasesFilterPreset,
+    supplierPurchasesSearchQuery,
+    setSupplierPurchasesPage,
+    viewingPartyId,
+  ]);
+
+  const paymentBillOptions = useMemo(
+    () =>
+      paymentBills.map((bill) => ({
+        value: bill.id,
+        label: bill.billNumber,
+        description: `Remaining ${formatCurrency(Number(bill.remaining ?? 0))}`,
+      })),
+    [paymentBills],
+  );
+
+  const paymentChequeOptions = useMemo(
+    () =>
+      availableCheques.map((cheque) => ({
+        value: cheque.id,
+        label: `${cheque.chequeNumber || "No #"} - ${formatCurrency(Number(cheque.amount ?? 0))}`,
+        description: cheque.sourceParty?.name || "Own cheque",
+      })),
+    [availableCheques],
+  );
+
+  const clearPartyFilters = () => {
+    setPartySearchQuery("");
+    setPartyBalanceFilter("ALL");
+  };
+
+  const clearLedgerFilters = () => {
+    setLedgerSearchQuery("");
+    setLedgerEntryFilter("ALL");
+    setLedgerDateFrom("");
+    setLedgerDateTo("");
+  };
+
+  const clearCustomerBillFilters = () => {
+    setCustomerBillsSearchQuery("");
+    setCustomerBillsFilterPreset("ALL");
+    setCustomerBillsDateFrom("");
+    setCustomerBillsDateTo("");
+  };
+
+  const clearSupplierPurchaseFilters = () => {
+    setSupplierPurchasesSearchQuery("");
+    setSupplierPurchasesFilterPreset("ALL");
+    setSupplierPurchasesDateFrom("");
+    setSupplierPurchasesDateTo("");
+  };
+
+  const ledgerPrintPayload = useMemo<ReportExportPayload | null>(() => {
+    if (!viewingParty) return null;
+
+    const activeFilters = [
+      ledgerSearchQuery.trim()
+        ? `Search: ${ledgerSearchQuery.trim()}`
+        : undefined,
+      ledgerEntryFilter !== "ALL"
+        ? `Type: ${ledgerEntryFilter.toLowerCase()}`
+        : undefined,
+      ledgerDateFrom ? `From: ${formatDate(ledgerDateFrom)}` : undefined,
+      ledgerDateTo ? `To: ${formatDate(ledgerDateTo)}` : undefined,
+    ].filter(Boolean) as string[];
+
+    return {
+      title: `${viewingParty.type === "supplier" ? "Supplier" : "Customer"} Ledger - ${viewingParty.name}`,
+      table: {
+        columns: [
+          "Date",
+          "Reference",
+          "Payable",
+          "Receivable",
+          "Cash",
+          "Balance",
+        ],
+        rows: filteredLedgerEntries.map((entry) => [
+          formatDate(entry.date),
+          getLedgerReferenceLabel(entry),
+          entry.isCash
+            ? "-"
+            : Number(entry.payable ?? 0) > 0
+              ? formatCurrency(Number(entry.payable ?? 0))
+              : "-",
+          entry.isCash
+            ? "-"
+            : Number(entry.receivable ?? 0) > 0
+              ? formatCurrency(Number(entry.receivable ?? 0))
+              : "-",
+          entry.isCash
+            ? formatCurrency(Number(entry.cash ?? 0))
+            : "-",
+          formatCurrency(Number(entry.runningBalance ?? 0)),
+        ]),
+      },
+      metadata: {
+        generatedAt: formatDateTime(new Date()),
+        filters:
+          activeFilters.length > 0 ? activeFilters : ["All ledger entries"],
+      },
+    };
+  }, [
+    filteredLedgerEntries,
+    ledgerDateFrom,
+    ledgerDateTo,
+    ledgerEntryFilter,
+    ledgerSearchQuery,
+    viewingParty,
+  ]);
+
+  const customerBillsPrintPayload = useMemo<ReportExportPayload | null>(() => {
+    if (!viewingParty || viewingParty.type !== "customer") return null;
+
+    const activeFilters = [
+      customerBillsSearchQuery.trim()
+        ? `Search: ${customerBillsSearchQuery.trim()}`
+        : undefined,
+      customerBillsFilterPreset !== "ALL"
+        ? `Date: ${getCustomerBillsFilterLabel(customerBillsFilterPreset)}`
+        : undefined,
+      customerBillsFilterPreset === "CUSTOM" && customerBillsDateFrom
+        ? `From: ${formatDate(customerBillsDateFrom)}`
+        : undefined,
+      customerBillsFilterPreset === "CUSTOM" && customerBillsDateTo
+        ? `To: ${formatDate(customerBillsDateTo)}`
+        : undefined,
+    ].filter(Boolean) as string[];
+
+    return {
+      title: `Customer Bills - ${viewingParty.name}`,
+      table: {
+        columns: ["Date", "Bill No", "Status", "Total", "Paid", "Remaining"],
+        rows: filteredCustomerBills.map((bill) => [
+          formatDate(bill.date),
+          bill.billNumber,
+          bill.paymentStatus.replaceAll("_", " "),
+          formatCurrency(Number(bill.total ?? 0)),
+          formatCurrency(Number(bill.totalPaid ?? 0)),
+          formatCurrency(Number(bill.remaining ?? 0)),
+        ]),
+      },
+      metadata: {
+        generatedAt: formatDateTime(new Date()),
+        filters: activeFilters.length > 0 ? activeFilters : ["All bills"],
+      },
+    };
+  }, [
+    customerBillsDateFrom,
+    customerBillsDateTo,
+    customerBillsFilterPreset,
+    customerBillsSearchQuery,
+    filteredCustomerBills,
+      viewingParty,
+    ]);
+
+  const supplierPurchasesPrintPayload = useMemo<ReportExportPayload | null>(
+    () => {
+      if (!viewingParty || viewingParty.type !== "supplier") return null;
+
+      const activeFilters = [
+        supplierPurchasesSearchQuery.trim()
+          ? `Search: ${supplierPurchasesSearchQuery.trim()}`
+          : undefined,
+        supplierPurchasesFilterPreset !== "ALL"
+          ? `Date: ${getCustomerBillsFilterLabel(supplierPurchasesFilterPreset)}`
+          : undefined,
+        supplierPurchasesFilterPreset === "CUSTOM" && supplierPurchasesDateFrom
+          ? `From: ${formatDate(supplierPurchasesDateFrom)}`
+          : undefined,
+        supplierPurchasesFilterPreset === "CUSTOM" && supplierPurchasesDateTo
+          ? `To: ${formatDate(supplierPurchasesDateTo)}`
+          : undefined,
+      ].filter(Boolean) as string[];
+
+      return {
+        title: `Purchase Bills - ${viewingParty.name}`,
+        table: {
+          columns: ["Date", "Type", "Item", "Quantity", "Rate", "Total", "Payment"],
+          rows: filteredSupplierPurchases.map((purchase) => [
+            formatDate(purchase.date),
+            toPurchaseTypeLabel(purchase.type),
+            purchase.itemName,
+            purchase.quantityLabel,
+            purchase.rateLabel,
+            formatCurrency(Number(purchase.totalAmount ?? 0)),
+            formatSupplierPurchasePaymentLabel(purchase.paymentType),
+          ]),
+        },
+        metadata: {
+          generatedAt: formatDateTime(new Date()),
+          filters:
+            activeFilters.length > 0 ? activeFilters : ["All purchases"],
+        },
+      };
+    },
+    [
+      filteredSupplierPurchases,
+      supplierPurchasesDateFrom,
+      supplierPurchasesDateTo,
+      supplierPurchasesFilterPreset,
+      supplierPurchasesSearchQuery,
+      viewingParty,
+    ],
+  );
+
+  const handlePrintLedger = () => {
+    if (!ledgerPrintPayload || filteredLedgerEntries.length === 0) {
+      toast.error("No ledger rows available to print.");
+      return;
+    }
+
+    const printed = exportTableToPdf(ledgerPrintPayload);
+    if (!printed) {
+      toast.error("Unable to open print preview.");
+    }
+  };
+
+  const handlePrintCustomerBills = () => {
+    if (!customerBillsPrintPayload || filteredCustomerBills.length === 0) {
+      toast.error("No bills available to print.");
+      return;
+    }
+
+    const printed = exportTableToPdf(customerBillsPrintPayload);
+    if (!printed) {
+      toast.error("Unable to open bills print preview.");
+    }
+  };
+
+  const handlePrintSupplierPurchases = () => {
+    if (
+      !supplierPurchasesPrintPayload ||
+      filteredSupplierPurchases.length === 0
+    ) {
+      toast.error("No purchases available to print.");
+      return;
+    }
+
+    const printed = exportTableToPdf(supplierPurchasesPrintPayload);
+    if (!printed) {
+      toast.error("Unable to open purchases print preview.");
+    }
+  };
+
+  const handlePrintSingleBill = (bill: ApiBill) => {
+    const printed = printBillInvoice(bill);
+    if (!printed) {
+      toast.error("Unable to open bill print preview.");
+    }
+  };
+
+  const isViewingCustomer = viewingParty?.type === "customer";
+  const isViewingSupplier = viewingParty?.type === "supplier";
+
+  const ledgerView = (
+    <>
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+        <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            Search
+          </Label>
+          <Input
+            value={ledgerSearchQuery}
+            onChange={(event) => setLedgerSearchQuery(event.target.value)}
+            placeholder="Search reference or note..."
+          />
+        </div>
+        <div className="min-w-[180px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            Entry Type
+          </Label>
+          <Select
+            value={ledgerEntryFilter}
+            onValueChange={(value) =>
+              setLedgerEntryFilter(value as LedgerEntryFilter)
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Entries</SelectItem>
+              <SelectItem value="PAYABLE">Payable</SelectItem>
+              <SelectItem value="RECEIVABLE">Receivable</SelectItem>
+              <SelectItem value="CASH">Cash</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="min-w-[170px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            From
+          </Label>
+          <Input
+            type="date"
+            value={ledgerDateFrom}
+            onChange={(event) => setLedgerDateFrom(event.target.value)}
+          />
+        </div>
+        <div className="min-w-[170px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            To
+          </Label>
+          <Input
+            type="date"
+            value={ledgerDateTo}
+            onChange={(event) => setLedgerDateTo(event.target.value)}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={clearLedgerFilters}
+        >
+          <Filter className="mr-2 h-4 w-4" />
+          Reset Filters
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handlePrintLedger}
+          disabled={filteredLedgerEntries.length === 0}
+        >
+          <Printer className="mr-2 h-4 w-4" />
+          Print
+        </Button>
+      </div>
+      <div className="flex-1 overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Reference</TableHead>
+              <TableHead>Payable</TableHead>
+              <TableHead>Receivable</TableHead>
+              <TableHead>Cash</TableHead>
+              <TableHead>Balance</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredLedgerEntries.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={6}
+                  className="text-center text-muted-foreground"
+                >
+                  {ledgerWithOpening.length === 0
+                    ? "No ledger entries yet."
+                    : "No ledger entries match the current filters."}
+                </TableCell>
+              </TableRow>
+            ) : (
+              paginatedLedgerEntries.map((entry) => (
+                <TableRow key={entry.id}>
+                  <TableCell>{formatDate(entry.date)}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <span>{entry.reference || "-"}</span>
+                      {entry.description ? (
+                        <p className="text-xs text-muted-foreground">
+                          {entry.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {entry.isCash
+                      ? "-"
+                      : Number(entry.payable) > 0
+                        ? formatCurrency(Number(entry.payable))
+                        : "-"}
+                  </TableCell>
+                  <TableCell>
+                    {entry.isCash
+                      ? "-"
+                      : Number(entry.receivable) > 0
+                        ? formatCurrency(Number(entry.receivable))
+                        : "-"}
+                  </TableCell>
+                  <TableCell>
+                    {entry.isCash
+                      ? formatCurrency(Number(entry.cash ?? 0))
+                      : "-"}
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={
+                        Number(entry.runningBalance) > 0
+                          ? "text-green-600"
+                          : Number(entry.runningBalance) < 0
+                            ? "text-red-600"
+                            : ""
+                      }
+                    >
+                      {formatCurrency(Number(entry.runningBalance ?? 0))}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <TablePagination
+        currentPage={ledgerPage}
+        totalPages={ledgerTotalPages}
+        totalItems={ledgerTotalItems}
+        startItem={ledgerStartItem}
+        endItem={ledgerEndItem}
+        pageSize={ledgerPageSize}
+        setPageSize={setLedgerPageSize}
+        goToPreviousPage={goToPreviousLedgerPage}
+        goToNextPage={goToNextLedgerPage}
+        setCurrentPage={setLedgerPage}
+      />
+    </>
+  );
+
+  const customerBillsView = (
+    <>
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+        <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            Search
+          </Label>
+          <Input
+            value={customerBillsSearchQuery}
+            onChange={(event) =>
+              setCustomerBillsSearchQuery(event.target.value)
+            }
+            placeholder="Search bill number or status..."
+          />
+        </div>
+        <div className="min-w-[220px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            Date Filter
+          </Label>
+          <Select
+            value={customerBillsFilterPreset}
+            onValueChange={(value) =>
+              setCustomerBillsFilterPreset(value as CustomerBillsFilterPreset)
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CUSTOMER_BILLS_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {customerBillsFilterPreset === "CUSTOM" && (
+          <>
+            <div className="min-w-[170px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                From
+              </Label>
+              <Input
+                type="date"
+                value={customerBillsDateFrom}
+                onChange={(event) => setCustomerBillsDateFrom(event.target.value)}
+              />
+            </div>
+            <div className="min-w-[170px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                To
+              </Label>
+              <Input
+                type="date"
+                value={customerBillsDateTo}
+                onChange={(event) => setCustomerBillsDateTo(event.target.value)}
+              />
+            </div>
+          </>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={clearCustomerBillFilters}
+        >
+          <Filter className="mr-2 h-4 w-4" />
+          Reset Filters
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handlePrintCustomerBills}
+          disabled={filteredCustomerBills.length === 0}
+        >
+          <Printer className="mr-2 h-4 w-4" />
+          Print List
+        </Button>
+      </div>
+      <div className="flex-1 overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Bill No</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Total</TableHead>
+              <TableHead>Paid</TableHead>
+              <TableHead>Remaining</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoadingCustomerBills ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground"
+                >
+                  Loading bills...
+                </TableCell>
+              </TableRow>
+            ) : filteredCustomerBills.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground"
+                >
+                  {customerBills.length === 0
+                    ? "No bills found for this customer."
+                    : "No bills match the current filters."}
+                </TableCell>
+              </TableRow>
+            ) : (
+              paginatedCustomerBills.map((bill) => (
+                <TableRow key={bill.id}>
+                  <TableCell>{formatDate(bill.date)}</TableCell>
+                  <TableCell>{bill.billNumber}</TableCell>
+                  <TableCell>{bill.paymentStatus.replaceAll("_", " ")}</TableCell>
+                  <TableCell>
+                    {formatCurrency(Number(bill.total ?? 0))}
+                  </TableCell>
+                  <TableCell>
+                    {formatCurrency(Number(bill.totalPaid ?? 0))}
+                  </TableCell>
+                  <TableCell>
+                    {formatCurrency(Number(bill.remaining ?? 0))}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handlePrintSingleBill(bill)}
+                    >
+                      <Printer className="mr-2 h-4 w-4" />
+                      Print Bill
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <TablePagination
+        currentPage={customerBillsPage}
+        totalPages={customerBillsTotalPages}
+        totalItems={customerBillsTotalItems}
+        startItem={customerBillsStartItem}
+        endItem={customerBillsEndItem}
+        pageSize={customerBillsPageSize}
+        setPageSize={setCustomerBillsPageSize}
+        goToPreviousPage={goToPreviousCustomerBillsPage}
+        goToNextPage={goToNextCustomerBillsPage}
+        setCurrentPage={setCustomerBillsPage}
+      />
+    </>
+  );
+
+  const supplierPurchasesView = (
+    <>
+      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+        <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            Search
+          </Label>
+          <Input
+            value={supplierPurchasesSearchQuery}
+            onChange={(event) =>
+              setSupplierPurchasesSearchQuery(event.target.value)
+            }
+            placeholder="Search purchase type or item..."
+          />
+        </div>
+        <div className="min-w-[220px]">
+          <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+            Date Filter
+          </Label>
+          <Select
+            value={supplierPurchasesFilterPreset}
+            onValueChange={(value) =>
+              setSupplierPurchasesFilterPreset(
+                value as CustomerBillsFilterPreset,
+              )
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CUSTOMER_BILLS_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {supplierPurchasesFilterPreset === "CUSTOM" && (
+          <>
+            <div className="min-w-[170px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                From
+              </Label>
+              <Input
+                type="date"
+                value={supplierPurchasesDateFrom}
+                onChange={(event) =>
+                  setSupplierPurchasesDateFrom(event.target.value)
+                }
+              />
+            </div>
+            <div className="min-w-[170px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                To
+              </Label>
+              <Input
+                type="date"
+                value={supplierPurchasesDateTo}
+                onChange={(event) =>
+                  setSupplierPurchasesDateTo(event.target.value)
+                }
+              />
+            </div>
+          </>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={clearSupplierPurchaseFilters}
+        >
+          <Filter className="mr-2 h-4 w-4" />
+          Reset Filters
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handlePrintSupplierPurchases}
+          disabled={filteredSupplierPurchases.length === 0}
+        >
+          <Printer className="mr-2 h-4 w-4" />
+          Print List
+        </Button>
+      </div>
+      <div className="flex-1 overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Item</TableHead>
+              <TableHead>Quantity</TableHead>
+              <TableHead>Rate</TableHead>
+              <TableHead>Total</TableHead>
+              <TableHead>Payment</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoadingSupplierPurchases ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground"
+                >
+                  Loading purchases...
+                </TableCell>
+              </TableRow>
+            ) : filteredSupplierPurchases.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-muted-foreground"
+                >
+                  {supplierPurchases.length === 0
+                    ? "No purchases found for this supplier."
+                    : "No purchases match the current filters."}
+                </TableCell>
+              </TableRow>
+            ) : (
+              paginatedSupplierPurchases.map((purchase) => (
+                <TableRow key={`${purchase.type}-${purchase.id}`}>
+                  <TableCell>{formatDate(purchase.date)}</TableCell>
+                  <TableCell>{toPurchaseTypeLabel(purchase.type)}</TableCell>
+                  <TableCell>{purchase.itemName}</TableCell>
+                  <TableCell>{purchase.quantityLabel}</TableCell>
+                  <TableCell>{purchase.rateLabel}</TableCell>
+                  <TableCell>
+                    {formatCurrency(Number(purchase.totalAmount ?? 0))}
+                  </TableCell>
+                  <TableCell>
+                    {formatSupplierPurchasePaymentLabel(purchase.paymentType)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <TablePagination
+        currentPage={supplierPurchasesPage}
+        totalPages={supplierPurchasesTotalPages}
+        totalItems={supplierPurchasesTotalItems}
+        startItem={supplierPurchasesStartItem}
+        endItem={supplierPurchasesEndItem}
+        pageSize={supplierPurchasesPageSize}
+        setPageSize={setSupplierPurchasesPageSize}
+        goToPreviousPage={goToPreviousSupplierPurchasesPage}
+        goToNextPage={goToNextSupplierPurchasesPage}
+        setCurrentPage={setSupplierPurchasesPage}
+      />
+    </>
+  );
+
   return (
     <div className="space-y-6">
       {partyType === "customer" && (
@@ -422,6 +1757,48 @@ export function PartyManagement({
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+              <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Search
+                </Label>
+                <Input
+                  value={partySearchQuery}
+                  onChange={(event) => setPartySearchQuery(event.target.value)}
+                  placeholder="Search customer name..."
+                />
+              </div>
+              <div className="min-w-[200px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Balance
+                </Label>
+                <Select
+                  value={partyBalanceFilter}
+                  onValueChange={(value) =>
+                    setPartyBalanceFilter(value as typeof partyBalanceFilter)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Balances</SelectItem>
+                    <SelectItem value="POSITIVE">Positive Balance</SelectItem>
+                    <SelectItem value="NEGATIVE">Negative Balance</SelectItem>
+                    <SelectItem value="ZERO">Zero Balance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={clearPartyFilters}
+              >
+                <Filter className="mr-2 h-4 w-4" />
+                Reset Filters
+              </Button>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -440,17 +1817,19 @@ export function PartyManagement({
                       Loading parties...
                     </TableCell>
                   </TableRow>
-                ) : parties.length === 0 ? (
+                ) : filteredParties.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={3}
                       className="text-center text-muted-foreground"
                     >
-                      No parties yet
+                      {parties.length === 0
+                        ? "No parties yet"
+                        : "No customers match the current filters."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  parties.map((party) => (
+                  paginatedParties.map((party) => (
                     <TableRow key={party.id}>
                       <TableCell>{party.name}</TableCell>
                       <TableCell>
@@ -489,6 +1868,18 @@ export function PartyManagement({
                 )}
               </TableBody>
             </Table>
+            <TablePagination
+              currentPage={customerPage}
+              totalPages={customerTotalPages}
+              totalItems={customerTotalItems}
+              startItem={customerStartItem}
+              endItem={customerEndItem}
+              pageSize={customerPageSize}
+              setPageSize={setCustomerPageSize}
+              goToPreviousPage={goToPreviousCustomerPage}
+              goToNextPage={goToNextCustomerPage}
+              setCurrentPage={setCustomerPage}
+            />
           </CardContent>
         </Card>
       )}
@@ -601,7 +1992,7 @@ export function PartyManagement({
               <div className="space-y-3">
                 <div>
                   <Label>Bill</Label>
-                  <Select
+                  <SearchableSelect
                     value={paymentData.billId}
                     onValueChange={(value) => {
                       const bill = paymentBills.find(
@@ -615,26 +2006,18 @@ export function PartyManagement({
                           : paymentData.amount,
                       });
                     }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          isLoadingPaymentBills
-                            ? "Loading bills..."
-                            : paymentBills.length === 0
-                              ? "No pending bills"
-                              : "Select bill"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {paymentBills.map((bill) => (
-                        <SelectItem key={bill.id} value={bill.id}>
-                          {bill.billNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={paymentBillOptions}
+                    disabled={isLoadingPaymentBills || paymentBills.length === 0}
+                    placeholder={
+                      isLoadingPaymentBills
+                        ? "Loading bills..."
+                        : paymentBills.length === 0
+                          ? "No pending bills"
+                          : "Select bill"
+                    }
+                    searchPlaceholder="Search bill..."
+                    emptyMessage="No pending bills."
+                  />
                 </div>
                 {selectedPaymentBill && (
                   <div className="rounded border p-3 text-sm">
@@ -676,7 +2059,7 @@ export function PartyManagement({
               <div className="space-y-3">
                 <div>
                   <Label>Select Cheque</Label>
-                  <Select
+                  <SearchableSelect
                     value={paymentData.chequeId}
                     onValueChange={(value) => {
                       const cheque = availableCheques.find(
@@ -690,26 +2073,18 @@ export function PartyManagement({
                           : prev.amount,
                       }));
                     }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          isLoadingCheques
-                            ? "Loading cheques..."
-                            : availableCheques.length === 0
-                              ? "No available cheques"
-                              : "Select cheque"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableCheques.map((cheque) => (
-                        <SelectItem key={cheque.id} value={cheque.id}>
-                          {`${cheque.chequeNumber || "No #"} - ${formatCurrency(Number(cheque.amount))}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={paymentChequeOptions}
+                    disabled={isLoadingCheques || availableCheques.length === 0}
+                    placeholder={
+                      isLoadingCheques
+                        ? "Loading cheques..."
+                        : availableCheques.length === 0
+                          ? "No available cheques"
+                          : "Select cheque"
+                    }
+                    searchPlaceholder="Search cheque..."
+                    emptyMessage="No available cheques."
+                  />
                 </div>
                 {selectedPaymentCheque && (
                   <div className="rounded border p-3 text-sm">
@@ -806,68 +2181,57 @@ export function PartyManagement({
       {/* Ledger View Dialog */}
       <Dialog
         open={viewingPartyId !== null}
-        onOpenChange={() => setViewingPartyId(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setViewingPartyId(null);
+          }
+        }}
       >
-        <DialogContent className="w-[50vw] max-w-[1400px] sm:max-w-[1400px] h-[82vh] overflow-hidden flex flex-col">
+        <DialogContent className="flex h-[82vh] w-[72vw] max-w-[1500px] flex-col overflow-hidden sm:max-w-[1500px]">
           <DialogHeader>
             <DialogTitle>
-              Party Ledger -{" "}
-              {parties.find((p) => p.id === viewingPartyId)?.name}
+              {isViewingCustomer ? "Customer Profile" : "Supplier Profile"} -{" "}
+              {viewingParty?.name}
             </DialogTitle>
           </DialogHeader>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Reference</TableHead>
-                <TableHead>Payable</TableHead>
-                <TableHead>Receivable</TableHead>
-                <TableHead>Cash</TableHead>
-                <TableHead>Balance</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {viewingPartyId &&
-                ledgerWithOpening.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell>{formatDate(entry.date)}</TableCell>
-                    <TableCell>{entry.reference || "-"}</TableCell>
-                    <TableCell>
-                      {entry.isCash
-                        ? "-"
-                        : Number(entry.payable) > 0
-                          ? formatCurrency(Number(entry.payable))
-                          : "-"}
-                    </TableCell>
-                    <TableCell>
-                      {entry.isCash
-                        ? "-"
-                        : Number(entry.receivable) > 0
-                          ? formatCurrency(Number(entry.receivable))
-                          : "-"}
-                    </TableCell>
-                    <TableCell>
-                      {entry.isCash
-                        ? formatCurrency(Number(entry.cash ?? 0))
-                        : "-"}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={
-                          Number(entry.runningBalance) > 0
-                            ? "text-green-600"
-                            : Number(entry.runningBalance) < 0
-                              ? "text-red-600"
-                              : ""
-                        }
-                      >
-                        {formatCurrency(Number(entry.runningBalance ?? 0))}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
+          {isViewingCustomer || isViewingSupplier ? (
+            <Tabs
+              value={profileViewTab}
+              onValueChange={(value) =>
+                setProfileViewTab(value as ProfileViewTab)
+              }
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <div className="mb-4">
+                <TabsList className="grid w-full max-w-[280px] grid-cols-2">
+                  <TabsTrigger value="ledger">Ledger</TabsTrigger>
+                  <TabsTrigger value={isViewingCustomer ? "bills" : "purchases"}>
+                    {isViewingCustomer ? "Bills" : "Purchase Bills"}
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+              <TabsContent value="ledger" className="flex min-h-0 flex-1 flex-col">
+                {ledgerView}
+              </TabsContent>
+              {isViewingCustomer ? (
+                <TabsContent
+                  value="bills"
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  {customerBillsView}
+                </TabsContent>
+              ) : (
+                <TabsContent
+                  value="purchases"
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  {supplierPurchasesView}
+                </TabsContent>
+              )}
+            </Tabs>
+          ) : (
+            ledgerView
+          )}
         </DialogContent>
       </Dialog>
     </div>

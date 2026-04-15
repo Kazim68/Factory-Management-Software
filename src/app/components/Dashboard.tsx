@@ -3,7 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { formatCurrency } from "../lib/utils";
+import {
+  formatCurrency,
+  formatDateTime,
+  getCurrentDate,
+  getDateKey,
+  getMonthKey,
+  getYearKey,
+  toPakistanBoundaryDate,
+} from "../lib/utils";
 import {
   billApi,
   expenseApi,
@@ -36,31 +44,22 @@ const parseDateValue = (value: string | Date) => {
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const [year, month, day] = value.split("-").map(Number);
-    return new Date(year, month - 1, day);
+    return toPakistanBoundaryDate(value, "start");
   }
 
   return new Date(value);
 };
 
 const toLocalDateKey = (value: string | Date) => {
-  const date = parseDateValue(value);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return getDateKey(value);
 };
 
 const toStartOfDay = (value: string | Date) => {
-  const date = parseDateValue(value);
-  date.setHours(0, 0, 0, 0);
-  return date;
+  return toPakistanBoundaryDate(value, "start");
 };
 
 const toEndOfDay = (value: string | Date) => {
-  const date = parseDateValue(value);
-  date.setHours(23, 59, 59, 999);
-  return date;
+  return toPakistanBoundaryDate(value, "end");
 };
 
 const subtractDays = (value: Date, days: number) => {
@@ -70,9 +69,9 @@ const subtractDays = (value: Date, days: number) => {
 };
 
 const toMonthKey = (value: Date) =>
-  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}`;
+  getMonthKey(value);
 
-const toYearKey = (value: Date) => value.getFullYear().toString();
+const toYearKey = (value: Date) => getYearKey(value);
 
 export function Dashboard() {
   const [rawData, setRawData] = useState<{
@@ -89,7 +88,7 @@ export function Dashboard() {
   const [customStart, setCustomStart] = useState(() =>
     toLocalDateKey(subtractDays(new Date(), 29)),
   );
-  const [customEnd, setCustomEnd] = useState(() => toLocalDateKey(new Date()));
+  const [customEnd, setCustomEnd] = useState(() => getCurrentDate());
 
   useEffect(() => {
     const loadStats = async () => {
@@ -192,15 +191,38 @@ export function Dashboard() {
     const chemicals = rawData.chemicals.filter((item) => inRange(item.date));
     const rexine = rawData.rexine.filter((item) => inRange(item.date));
     const materials = rawData.materials.filter((item) => inRange(item.date));
+    const getExpenseCategory = (entry: (typeof expenses)[number]) => {
+      const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
+      if (sourceSystem === "PARTY_PAYMENT_PAID") {
+        return "SUPPLIER_PAYMENT";
+      }
+      if (
+        sourceSystem === "PARTY_PAYMENT_RECEIVED" ||
+        sourceSystem === "BILL_PAYMENT_RECEIVED"
+      ) {
+        return "CUSTOMER_PAYMENT";
+      }
+      return entry.module;
+    };
+    const isMallSaleEntry = (entry: (typeof expenses)[number]) => {
+      const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
+      return sourceSystem === "B_MALL_SALE" || sourceSystem === "C_MALL_SALE";
+    };
 
-    const totalRevenue = bills.reduce(
-      (sum, bill) => sum + Number(bill.total),
-      0,
-    );
+    const mallSaleRevenue = expenses.reduce((sum, entry) => {
+      if (!isMallSaleEntry(entry)) return sum;
+      const amount = Number(entry.amount ?? 0);
+      return amount < 0 ? sum + Math.abs(amount) : sum;
+    }, 0);
+
+    const totalRevenue =
+      bills.reduce((sum, bill) => sum + Number(bill.total), 0) + mallSaleRevenue;
 
     const miscExpenses = expenses.reduce((sum, entry) => {
       const amount = Number(entry.amount);
-      return entry.module === "MISC" && amount > 0 ? sum + amount : sum;
+      return getExpenseCategory(entry) === "MISC" && amount > 0
+        ? sum + amount
+        : sum;
     }, 0);
 
     const laborCost = expenses
@@ -259,8 +281,11 @@ export function Dashboard() {
         const key = toLocalDateKey(cursor);
         const label =
           dateFilter === "weekly"
-            ? cursor.toLocaleDateString([], { weekday: "short" })
-            : cursor.toLocaleDateString([], { month: "short", day: "numeric" });
+            ? formatDateTime(cursor, "en-GB", { weekday: "short" })
+            : formatDateTime(cursor, "en-GB", {
+                month: "short",
+                day: "numeric",
+              });
         trendBuckets.set(key, { label, revenue: 0, expenses: 0 });
         cursor.setDate(cursor.getDate() + 1);
       }
@@ -275,7 +300,7 @@ export function Dashboard() {
       while (cursor <= selectedRange.end) {
         const key = toMonthKey(cursor);
         trendBuckets.set(key, {
-          label: cursor.toLocaleDateString([], {
+          label: formatDateTime(cursor, "en-GB", {
             month: "short",
             year: "numeric",
           }),
@@ -329,8 +354,16 @@ export function Dashboard() {
       );
     });
 
+    expenses.filter(isMallSaleEntry).forEach((entry) => {
+      const amount = Number(entry.amount ?? 0);
+      if (amount >= 0) {
+        return;
+      }
+      addToBucket(parseDateValue(entry.date), Math.abs(amount), "revenue");
+    });
+
     expenses
-      .filter((entry) => entry.module === "MISC")
+      .filter((entry) => getExpenseCategory(entry) === "MISC")
       .forEach((entry) => {
         const amount = Number(entry.amount ?? 0);
         if (amount <= 0) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -20,10 +21,14 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Card, CardContent, CardHeader } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Plus } from "lucide-react";
-import { formatCurrency, getCurrentDate } from "../lib/utils";
+import { Filter, Plus } from "lucide-react";
 import {
-  billApi,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  getCurrentDate,
+} from "../lib/utils";
+import {
   chequeApi,
   expenseApi,
   laborApi,
@@ -31,6 +36,7 @@ import {
   purchaseApi,
   reportsApi,
 } from "../lib/api";
+import { useClientPagination } from "../hooks/useClientPagination";
 import {
   exportTableToExcel,
   exportTableToPdf,
@@ -38,7 +44,6 @@ import {
 } from "../lib/report";
 import { auth } from "../lib/auth";
 import type {
-  ApiBill,
   ApiCheque,
   ApiExpenseModule,
   ApiExpenseEntry,
@@ -48,7 +53,14 @@ import type {
   ApiParty,
   ApiSupplierPendingDue,
 } from "../types/api";
+import { TablePagination } from "./ui/table-pagination";
 import { toast } from "sonner";
+
+const isSupplierLinkedModule = (module: string) =>
+  module === "SUPPLIER_PAYMENT" ||
+  module === "CHEMICAL" ||
+  module === "REXINE" ||
+  module === "MATERIAL";
 
 export function Roznamcha() {
   type RoznamchaModule = ApiExpenseModule | "BILL" | "SUPPLIER_PAYMENT";
@@ -58,14 +70,50 @@ export function Roznamcha() {
     | "OUT_ONLY"
     | "LABOR_ONLY"
     | "PARTY_ONLY";
+  type RoznamchaFormState = {
+    date: string;
+    module: RoznamchaModule;
+    direction: "IN" | "OUT";
+    paymentType: "CASH" | "KHATA" | "CHEQUE";
+    partyId: string;
+    chequeId: string;
+    chequeDate: string;
+    chequeNumber: string;
+    chequeSource: "CUSTOMER" | "OWN";
+    laborId: string;
+    quantity: string;
+    rate: string;
+    amount: string;
+    description: string;
+  };
+
+  const buildFreshFormData = (
+    direction: "IN" | "OUT" = "OUT",
+  ): RoznamchaFormState => {
+    const today = getCurrentDate();
+    return {
+      date: today,
+      module: "MISC",
+      direction,
+      paymentType: "CASH",
+      partyId: "none",
+      chequeId: "",
+      chequeDate: today,
+      chequeNumber: "",
+      chequeSource: "CUSTOMER",
+      laborId: "",
+      quantity: "",
+      rate: "",
+      amount: "",
+      description: "",
+    };
+  };
 
   const [entries, setEntries] = useState<ApiExpenseEntry[]>([]);
   const [parties, setParties] = useState<ApiParty[]>([]);
   const [labors, setLabors] = useState<ApiLaborProfile[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [billOptions, setBillOptions] = useState<ApiBill[]>([]);
-  const [isLoadingBills, setIsLoadingBills] = useState(false);
   const [availableCheques, setAvailableCheques] = useState<ApiCheque[]>([]);
   const [isLoadingCheques, setIsLoadingCheques] = useState(false);
   const [editingEntry, setEditingEntry] = useState<ApiExpenseEntry | null>(
@@ -73,8 +121,6 @@ export function Roznamcha() {
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [entryFilter, setEntryFilter] = useState<EntryViewFilter>("ALL");
-  const [laborSearch, setLaborSearch] = useState("");
-  const [showLaborSuggestions, setShowLaborSuggestions] = useState(false);
   const [selectedLaborSummary, setSelectedLaborSummary] = useState<{
     totalEarnings: number;
     totalKharcha: number;
@@ -94,6 +140,7 @@ export function Roznamcha() {
   const [roznamchaReportStart, setRoznamchaReportStart] = useState("");
   const [roznamchaReportEnd, setRoznamchaReportEnd] =
     useState(getCurrentDate());
+  const [roznamchaReportSearch, setRoznamchaReportSearch] = useState("");
   const [roznamchaReport, setRoznamchaReport] =
     useState<ApiRoznamchaSummaryReport | null>(null);
   const [isLoadingRoznamchaReport, setIsLoadingRoznamchaReport] =
@@ -106,55 +153,66 @@ export function Roznamcha() {
     return localStorage.getItem("roznamcha.activeSection") || "entries";
   });
 
-  const [formData, setFormData] = useState({
-    date: getCurrentDate(),
-    module: "MISC" as RoznamchaModule,
-    direction: "OUT" as "IN" | "OUT",
-    paymentType: "CASH" as "CASH" | "KHATA" | "CHEQUE",
-    partyId: "none",
-    chequeId: "",
-    billId: "",
-    laborId: "",
-    quantity: "",
-    rate: "",
-    amount: "",
-    description: "",
-  });
+  const [formData, setFormData] = useState<RoznamchaFormState>(() =>
+    buildFreshFormData(),
+  );
 
-  const filteredLaborOptions = labors
-    .filter((labor) =>
-      labor.name.toLowerCase().includes(laborSearch.trim().toLowerCase()),
-    )
-    .slice(0, 8);
+  const customerParties = parties.filter((party) => party.type === "CUSTOMER");
+  const supplierParties = parties.filter((party) => party.type === "SUPPLIER");
+  const getPartyIdForModule = (
+    module: RoznamchaModule,
+    currentPartyId: string,
+  ) => {
+    if (module === "BILL") {
+      return customerParties.some((party) => party.id === currentPartyId)
+        ? currentPartyId
+        : "none";
+    }
+
+    if (isSupplierLinkedModule(module)) {
+      return supplierParties.some((party) => party.id === currentPartyId)
+        ? currentPartyId
+        : "none";
+    }
+
+    return currentPartyId;
+  };
 
   const [filterDate, setFilterDate] = useState(getCurrentDate());
   const sessionUser = auth.getSessionUser();
   const computedPurchaseAmount =
     Number(formData.quantity || 0) * Number(formData.rate || 0);
-  const selectedBill = billOptions.find((bill) => bill.id === formData.billId);
-  const selectedBillRemaining = Number(selectedBill?.remaining ?? 0);
   const selectedSupplierPendingDue = supplierPendingDues.find(
     (row) => row.partyId === formData.partyId,
   );
   const selectedSupplierRemainingDue = Number(
     selectedSupplierPendingDue?.remainingDue ?? 0,
   );
-  const exceedsBillAmount =
-    formData.module === "BILL" &&
-    !!selectedBill &&
-    formData.paymentType !== "CHEQUE" &&
-    Number(formData.amount || 0) > selectedBillRemaining;
   const exceedsSupplierDue =
     formData.module === "SUPPLIER_PAYMENT" &&
     !!selectedSupplierPendingDue &&
     Number(formData.amount || 0) > selectedSupplierRemainingDue;
+  const isSupplierChequePayment =
+    formData.module === "SUPPLIER_PAYMENT" &&
+    formData.paymentType === "CHEQUE" &&
+    formData.direction === "OUT";
+  const isSupplierCustomerCheque =
+    isSupplierChequePayment && formData.chequeSource === "CUSTOMER";
+  const isSupplierOwnCheque =
+    isSupplierChequePayment && formData.chequeSource === "OWN";
   const selectedAvailableCheque = availableCheques.find(
     (cheque) => cheque.id === formData.chequeId,
   );
-  const isChequeOutMode =
-    (formData.module === "MISC" || formData.module === "SUPPLIER_PAYMENT") &&
+  const shouldLoadAvailableCheques =
+    !editingEntry &&
+    isDialogOpen &&
+    (formData.module === "MISC" || isSupplierCustomerCheque) &&
     formData.paymentType === "CHEQUE" &&
     formData.direction === "OUT";
+  const isChequeOutMode =
+    ((formData.module === "MISC" && formData.direction === "OUT") ||
+      isSupplierCustomerCheque) &&
+    formData.paymentType === "CHEQUE";
 
   const isRecordInFlow = lockedDirection === "IN" && !editingEntry;
   const isRecordOutFlow = lockedDirection === "OUT" && !editingEntry;
@@ -226,9 +284,62 @@ export function Roznamcha() {
     localStorage.setItem("roznamcha.activeSection", activeSection);
   }, [activeSection]);
 
+  const createLaborRoznamchaEntry = async (laborAmount: number) => {
+    const basePayload = {
+      date: formData.date,
+      laborId: formData.laborId,
+      module: "LABOR" as const,
+      paymentType: formData.paymentType,
+      amount: laborAmount,
+      description: formData.description,
+      actorUsername: sessionUser?.username,
+      actorRole: sessionUser?.role,
+    };
+
+    if (formData.paymentType === "KHATA") {
+      await expenseApi.createExpense({
+        ...basePayload,
+        moduleData: {
+          laborId: formData.laborId,
+          date: formData.date,
+          amount: laborAmount,
+          reason: formData.description,
+        },
+      });
+      return;
+    }
+
+    await expenseApi.createExpense(basePayload);
+  };
+
+  const buildExpenseAuditMeta = (entry: ApiExpenseEntry) => ({
+    itemLabel: formData.description || getPartyLaborLabel(entry),
+    previousValues: {
+      amount: entry.amount,
+      description: entry.description,
+      paymentType: entry.paymentType,
+      module: entry.module,
+      date: entry.date,
+    },
+  });
+
+  const replaceExpenseWithLaborEntry = async (
+    entry: ApiExpenseEntry,
+    laborAmount: number,
+  ) => {
+    await expenseApi.deleteExpense(entry.id, buildExpenseAuditMeta(entry));
+    await createLaborRoznamchaEntry(laborAmount);
+  };
+
   const buildRoznamchaPayload = (
     report: ApiRoznamchaSummaryReport,
   ): ReportExportPayload => {
+    const formatModuleLabel = (value: string) =>
+      value
+        .toLowerCase()
+        .split("_")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
     const moduleColumns = Array.from(
       new Set(
         report.buckets.flatMap((bucket) =>
@@ -246,7 +357,7 @@ export function Roznamcha() {
           "Total Outflow",
           "Net Cash Flow",
           "Entries",
-          ...moduleColumns,
+          ...moduleColumns.map(formatModuleLabel),
         ],
         rows: report.buckets.map((bucket) => [
           bucket.key,
@@ -260,13 +371,22 @@ export function Roznamcha() {
         ]),
       },
       metadata: {
-        generatedAt: new Date().toLocaleString(),
+        generatedAt: formatDateTime(new Date()),
         filters: [
           `Period: ${report.period}`,
-          `Range: ${new Date(report.range.start).toLocaleDateString()} - ${new Date(report.range.end).toLocaleDateString()}`,
+          `Range: ${formatDate(report.range.start)} - ${formatDate(report.range.end)}`,
         ],
       },
     };
+  };
+
+  const toUiPaymentType = (
+    entry: Pick<ApiExpenseEntry, "paymentType" | "laborAdvanceId">,
+  ): "CASH" | "KHATA" | "CHEQUE" => {
+    const normalized = String(entry.paymentType ?? "CASH").toUpperCase();
+    if (normalized === "CHEQUE") return "CHEQUE";
+    if (normalized !== "CASH" || entry.laborAdvanceId) return "KHATA";
+    return "CASH";
   };
 
   const exportRoznamchaReport = (type: "excel" | "pdf") => {
@@ -287,60 +407,9 @@ export function Roznamcha() {
   };
 
   useEffect(() => {
-    if (
-      !isDialogOpen ||
-      formData.module !== "BILL" ||
-      !formData.partyId ||
-      formData.partyId === "none"
-    ) {
-      setBillOptions([]);
-      return;
-    }
-
-    let active = true;
-    setIsLoadingBills(true);
-    billApi
-      .listBills()
-      .then((bills) => {
-        if (!active) return;
-        const filtered = bills.filter(
-          (bill) =>
-            bill.partyId === formData.partyId &&
-            Number(bill.remaining ?? 0) > 0,
-        );
-        setBillOptions(filtered);
-        const first = filtered[0];
-        if (first) {
-          setFormData((prev) => ({
-            ...prev,
-            billId: first.id,
-            amount: String(Number(first.remaining ?? 0)),
-          }));
-        } else {
-          setFormData((prev) => ({ ...prev, billId: "", amount: "" }));
-        }
-      })
-      .catch((error) => {
-        console.error(error);
-        if (active) toast.error("Failed to load bills for selected party.");
-      })
-      .finally(() => {
-        if (active) setIsLoadingBills(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [isDialogOpen, formData.module, formData.partyId]);
-
-  useEffect(() => {
-    if (
-      !isDialogOpen ||
-      (formData.module !== "MISC" && formData.module !== "SUPPLIER_PAYMENT") ||
-      formData.paymentType !== "CHEQUE" ||
-      formData.direction !== "OUT"
-    ) {
+    if (!shouldLoadAvailableCheques) {
       setAvailableCheques([]);
+      setIsLoadingCheques(false);
       return;
     }
 
@@ -372,10 +441,7 @@ export function Roznamcha() {
       active = false;
     };
   }, [
-    isDialogOpen,
-    formData.module,
-    formData.paymentType,
-    formData.direction,
+    shouldLoadAvailableCheques,
     formData.chequeId,
   ]);
 
@@ -438,6 +504,7 @@ export function Roznamcha() {
     if (formData.module !== "SUPPLIER_PAYMENT") return;
     if (!selectedSupplierPendingDue) return;
     if (editingEntry) return;
+    if (isSupplierCustomerCheque && selectedAvailableCheque) return;
 
     setFormData((prev) => {
       if (prev.module !== "SUPPLIER_PAYMENT") return prev;
@@ -451,17 +518,9 @@ export function Roznamcha() {
     formData.partyId,
     selectedSupplierPendingDue,
     editingEntry,
+    isSupplierCustomerCheque,
+    selectedAvailableCheque,
   ]);
-
-  useEffect(() => {
-    if (!isDialogOpen) {
-      setLaborSearch("");
-      setShowLaborSuggestions(false);
-      return;
-    }
-    const selectedLabor = labors.find((labor) => labor.id === formData.laborId);
-    setLaborSearch(selectedLabor?.name ?? "");
-  }, [isDialogOpen, formData.laborId, labors]);
 
   useEffect(() => {
     if (!isDialogOpen || formData.module !== "LABOR" || !formData.laborId) {
@@ -527,13 +586,44 @@ export function Roznamcha() {
 
     try {
       if (editingEntry) {
-        if (editingEntry.laborAdvanceId) {
-          await laborApi.updateAdvance(editingEntry.laborAdvanceId, {
-            laborId: formData.laborId,
-            date: formData.date,
-            amount,
-            reason: formData.description,
-          });
+        if (formData.module === "LABOR") {
+          if (!Number.isFinite(amount) || amount <= 0) {
+            toast.error("Enter a valid amount.");
+            return;
+          }
+          if (!formData.laborId) {
+            toast.error("Select a labor.");
+            return;
+          }
+
+          if (editingEntry.laborAdvanceId) {
+            if (formData.paymentType === "KHATA") {
+              await laborApi.updateAdvance(editingEntry.laborAdvanceId, {
+                laborId: formData.laborId,
+                date: formData.date,
+                amount,
+                reason: formData.description,
+                paymentType: "KHATA",
+              });
+            } else {
+              await replaceExpenseWithLaborEntry(editingEntry, amount);
+            }
+          } else if (formData.paymentType === "KHATA") {
+            await replaceExpenseWithLaborEntry(editingEntry, amount);
+          } else {
+            await expenseApi.updateExpense(
+              editingEntry.id,
+              {
+                date: formData.date,
+                laborId: formData.laborId,
+                module: "LABOR",
+                paymentType: "CASH",
+                amount,
+                description: formData.description,
+              },
+              buildExpenseAuditMeta(editingEntry),
+            );
+          }
         } else {
           await expenseApi.updateExpense(
             editingEntry.id,
@@ -552,17 +642,7 @@ export function Roznamcha() {
               amount,
               description: formData.description,
             },
-            {
-              itemLabel:
-                formData.description || getPartyLaborLabel(editingEntry),
-              previousValues: {
-                amount: editingEntry.amount,
-                description: editingEntry.description,
-                paymentType: editingEntry.paymentType,
-                module: editingEntry.module,
-                date: editingEntry.date,
-              },
-            },
+            buildExpenseAuditMeta(editingEntry),
           );
         }
         toast.success("Expense updated");
@@ -571,26 +651,24 @@ export function Roznamcha() {
           toast.error("Select a customer.");
           return;
         }
-        if (!formData.billId) {
-          toast.error("Select a customer bill.");
-          return;
-        }
         if (!Number.isFinite(amount) || amount <= 0) {
           toast.error("Enter a valid amount.");
           return;
         }
-        if (
-          selectedBill &&
-          formData.paymentType !== "CHEQUE" &&
-          amount > Number(selectedBill.remaining ?? 0)
-        ) {
-          toast.error("Amount exceeds bill remaining.");
-          return;
-        }
-        await billApi.receivePayment(formData.billId, {
+
+        await partyApi.createPayment(formData.partyId, {
           amount,
           date: formData.date,
           method: formData.paymentType,
+          direction: "RECEIVE",
+          chequeDate:
+            formData.paymentType === "CHEQUE"
+              ? formData.chequeDate || formData.date
+              : undefined,
+          chequeNumber:
+            formData.paymentType === "CHEQUE"
+              ? formData.chequeNumber || undefined
+              : undefined,
           description: formData.description || undefined,
         });
         toast.success("Customer payment recorded");
@@ -617,10 +695,16 @@ export function Roznamcha() {
           method: formData.paymentType,
           direction: "PAY",
           description: formData.description || undefined,
-          chequeId:
+          chequeDate:
             formData.paymentType === "CHEQUE"
+              ? formData.chequeDate || formData.date
+              : undefined,
+          chequeId:
+            isSupplierCustomerCheque
               ? formData.chequeId || undefined
               : undefined,
+          chequeNumber:
+            isSupplierOwnCheque ? formData.chequeNumber || undefined : undefined,
         });
         toast.success("Supplier payment recorded");
       } else if (isPurchaseModule) {
@@ -668,23 +752,10 @@ export function Roznamcha() {
           return;
         }
         if (!formData.laborId) {
-          toast.error("Select a labor from suggestions.");
+          toast.error("Select a labor.");
           return;
         }
-        await expenseApi.createExpense({
-          date: formData.date,
-          laborId: formData.laborId,
-          module: formData.module,
-          paymentType: formData.paymentType,
-          amount,
-          description: formData.description,
-          chequeId:
-            formData.paymentType === "CHEQUE" && formData.direction === "OUT"
-              ? formData.chequeId || undefined
-              : undefined,
-          actorUsername: sessionUser?.username,
-          actorRole: sessionUser?.role,
-        });
+        await createLaborRoznamchaEntry(amount);
         toast.success("Expense recorded");
       } else {
         if (!Number.isFinite(amount) || amount <= 0) {
@@ -718,22 +789,7 @@ export function Roznamcha() {
   };
 
   const resetForm = () => {
-    setFormData({
-      date: getCurrentDate(),
-      module: "MISC",
-      direction: "OUT",
-      paymentType: "CASH",
-      partyId: "none",
-      chequeId: "",
-      billId: "",
-      laborId: "",
-      quantity: "",
-      rate: "",
-      amount: "",
-      description: "",
-    });
-    setLaborSearch("");
-    setShowLaborSuggestions(false);
+    setFormData(buildFreshFormData());
     setSelectedLaborSummary(null);
     setEditingEntry(null);
     setLockedDirection(null);
@@ -742,21 +798,26 @@ export function Roznamcha() {
   const startEdit = (entry: ApiExpenseEntry) => {
     setLockedDirection(null);
     setEditingEntry(entry);
+    const isCustomerReceipt =
+      entry.sourceSystem === "BILL_PAYMENT_RECEIVED" ||
+      (entry.sourceSystem === "PARTY_PAYMENT_RECEIVED" &&
+        entry.party?.type === "CUSTOMER");
+    const isLaborEntry =
+      entry.module === "LABOR" || !!entry.laborId || !!entry.laborAdvanceId;
     setFormData({
       date: entry.date.slice(0, 10),
-      module: entry.sourceSystem === "BILL_PAYMENT_RECEIVED" ? "BILL" : "MISC",
+      module: isCustomerReceipt ? "BILL" : isLaborEntry ? "LABOR" : "MISC",
       direction: Number(entry.amount) < 0 ? "IN" : "OUT",
-      paymentType:
-        String(entry.paymentType ?? "CASH").toUpperCase() === "CHEQUE"
-          ? "CHEQUE"
-          : "CASH",
+      paymentType: toUiPaymentType(entry),
       partyId: entry.partyId || "none",
       chequeId: "",
-      billId: "",
+      chequeDate: entry.date.slice(0, 10),
+      chequeNumber: "",
+      chequeSource: "CUSTOMER",
       laborId: entry.laborId || entry.laborAdvance?.laborId || "",
       quantity: "",
       rate: "",
-      amount: String(entry.amount),
+      amount: String(Math.abs(Number(entry.amount ?? 0))),
       description: entry.description || "",
     });
     setIsDialogOpen(true);
@@ -793,20 +854,40 @@ export function Roznamcha() {
     return amount < 0 ? sum + Math.abs(amount) : sum;
   }, 0);
 
-  const getPartyLaborLabel = (entry: ApiExpenseEntry) =>
-    entry.party?.name ||
-    entry.labor?.name ||
-    entry.laborAdvance?.labor?.name ||
-    "-";
+  const getPartyLaborLabel = (entry: ApiExpenseEntry) => {
+    const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
+    if (
+      (sourceSystem === "B_MALL_SALE" || sourceSystem === "C_MALL_SALE") &&
+      entry.description
+    ) {
+      const [, reference] = entry.description.split(" - ");
+      return reference || entry.description;
+    }
+
+    return (
+      entry.party?.name ||
+      entry.labor?.name ||
+      entry.laborAdvance?.labor?.name ||
+      "-"
+    );
+  };
 
   const getReferenceLabel = (entry: ApiExpenseEntry) => {
-    if (entry.sourceSystem === "BILL_PAYMENT_RECEIVED") return "Customer";
-    if (entry.sourceSystem === "PARTY_PAYMENT_RECEIVED") return "Party";
-    if (entry.sourceSystem === "PARTY_PAYMENT_PAID") return "Party";
-    if (entry.sourceSystem === "LABOR_ADVANCE") return "Labor";
-    if (entry.sourceSystem === "CHEMICAL_PURCHASE") return "Chemical";
-    if (entry.sourceSystem === "REXINE_PURCHASE") return "Rexine";
-    if (entry.sourceSystem === "MATERIAL_PURCHASE") return "Material";
+    const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
+    if (sourceSystem === "BILL_PAYMENT_RECEIVED") return "Customer";
+    if (sourceSystem === "PARTY_PAYMENT_RECEIVED") {
+      return entry.party?.type === "CUSTOMER" ? "Customer" : "Party";
+    }
+    if (sourceSystem === "PARTY_PAYMENT_PAID") {
+      return entry.party?.type === "SUPPLIER" ? "Supplier" : "Party";
+    }
+    if (sourceSystem === "LABOR_ADVANCE") return "Labor";
+    if (sourceSystem === "CHEMICAL_PURCHASE") return "Chemical";
+    if (sourceSystem === "REXINE_PURCHASE") return "Rexine";
+    if (sourceSystem === "MATERIAL_PURCHASE") return "Material";
+    if (sourceSystem === "B_MALL_SALE") return "B-Mall Sale";
+    if (sourceSystem === "C_MALL_SALE") return "C-Mall Sale";
+    if (sourceSystem.startsWith("BILL_SALE|")) return "Sale";
 
     switch (entry.module) {
       case "CHEMICAL":
@@ -859,43 +940,209 @@ export function Roznamcha() {
   };
 
   const openCreateDialog = (direction: "IN" | "OUT") => {
-    resetForm();
+    setFormData(buildFreshFormData(direction));
+    setSelectedLaborSummary(null);
+    setEditingEntry(null);
     setLockedDirection(direction);
-    setFormData((prev) => ({ ...prev, direction }));
     setIsDialogOpen(true);
   };
 
-  const filteredEntries = entries.filter((entry) => {
-    const amount = Number(entry.amount ?? 0);
-    const isLaborEntry =
-      entry.module === "LABOR" || !!entry.laborId || !!entry.laborAdvanceId;
-    const isPartyEntry = !!entry.partyId;
+  const filteredEntries = useMemo(
+    () =>
+      entries.filter((entry) => {
+        const amount = Number(entry.amount ?? 0);
+        const isLaborEntry =
+          entry.module === "LABOR" || !!entry.laborId || !!entry.laborAdvanceId;
+        const isPartyEntry = !!entry.partyId;
 
-    const matchesFilter =
-      entryFilter === "ALL" ||
-      (entryFilter === "IN_ONLY" && amount < 0) ||
-      (entryFilter === "OUT_ONLY" && amount >= 0) ||
-      (entryFilter === "LABOR_ONLY" && isLaborEntry) ||
-      (entryFilter === "PARTY_ONLY" && isPartyEntry);
+        const matchesFilter =
+          entryFilter === "ALL" ||
+          (entryFilter === "IN_ONLY" && amount < 0) ||
+          (entryFilter === "OUT_ONLY" && amount >= 0) ||
+          (entryFilter === "LABOR_ONLY" && isLaborEntry) ||
+          (entryFilter === "PARTY_ONLY" && isPartyEntry);
 
-    if (!matchesFilter) return false;
+        if (!matchesFilter) return false;
 
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return true;
+        const query = searchQuery.trim().toLowerCase();
+        if (!query) return true;
 
-    const searchable = [
-      getReferenceLabel(entry),
-      getPartyLaborLabel(entry),
-      entry.description || "",
-      getPaymentTypeLabel(entry),
-      getInOut(amount),
-      String(Math.abs(amount)),
-    ]
-      .join(" ")
-      .toLowerCase();
+        const searchable = [
+          getReferenceLabel(entry),
+          getPartyLaborLabel(entry),
+          entry.description || "",
+          getPaymentTypeLabel(entry),
+          getInOut(amount),
+          String(Math.abs(amount)),
+        ]
+          .join(" ")
+          .toLowerCase();
 
-    return searchable.includes(query);
-  });
+        return searchable.includes(query);
+      }),
+    [entries, entryFilter, searchQuery],
+  );
+
+  const reportBuckets = useMemo(
+    () => roznamchaReport?.buckets ?? [],
+    [roznamchaReport],
+  );
+  const laborOptions = useMemo(
+    () =>
+      labors
+        .map((labor) => ({
+          value: labor.id,
+          label: labor.name,
+          description: labor.department || undefined,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [labors],
+  );
+
+  const filteredReportBuckets = useMemo(() => {
+    const query = roznamchaReportSearch.trim().toLowerCase();
+    if (!query) return reportBuckets;
+
+    return reportBuckets.filter((bucket) => {
+      const moduleLabels = Object.entries(bucket.moduleBreakdown ?? {})
+        .map(([module, amount]) => `${module} ${amount}`)
+        .join(" ");
+
+      return [
+        bucket.key,
+        String(bucket.totalInflow ?? ""),
+        String(bucket.totalOutflow ?? ""),
+        String(bucket.netCashFlow ?? ""),
+        String(bucket.entryCount ?? ""),
+        moduleLabels,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [reportBuckets, roznamchaReportSearch]);
+
+  const {
+    currentPage: reportPage,
+    setCurrentPage: setReportPage,
+    pageSize: reportPageSize,
+    setPageSize: setReportPageSize,
+    totalPages: reportTotalPages,
+    totalItems: reportTotalItems,
+    startItem: reportStartItem,
+    endItem: reportEndItem,
+    paginatedItems: paginatedReportBuckets,
+    goToPreviousPage: goToPreviousReportPage,
+    goToNextPage: goToNextReportPage,
+  } = useClientPagination(filteredReportBuckets);
+
+  const {
+    currentPage: entriesPage,
+    setCurrentPage: setEntriesPage,
+    pageSize: entriesPageSize,
+    setPageSize: setEntriesPageSize,
+    totalPages: entriesTotalPages,
+    totalItems: entriesTotalItems,
+    startItem: entriesStartItem,
+    endItem: entriesEndItem,
+    paginatedItems: paginatedEntries,
+    goToPreviousPage: goToPreviousEntriesPage,
+    goToNextPage: goToNextEntriesPage,
+  } = useClientPagination(filteredEntries);
+
+  const customerChequeOptions = useMemo(
+    () => [
+      { value: "none", label: "Select cheque" },
+      ...availableCheques.map((cheque) => ({
+        value: cheque.id,
+        label: `${cheque.sourceParty?.name || "Own"} - ${formatCurrency(Number(cheque.amount ?? 0))}${cheque.chequeNumber ? ` - ${cheque.chequeNumber}` : ""}`,
+      })),
+    ],
+    [availableCheques],
+  );
+
+  const clearEntryFilters = () => {
+    setFilterDate(getCurrentDate());
+    setSearchQuery("");
+    setEntryFilter("ALL");
+  };
+
+  const clearReportFilters = () => {
+    setRoznamchaReportPeriod("daily");
+    setRoznamchaReportStart("");
+    setRoznamchaReportEnd(getCurrentDate());
+    setRoznamchaReportSearch("");
+  };
+
+  const customerPartyOptions = useMemo(
+    () => customerParties.map((party) => ({ value: party.id, label: party.name })),
+    [customerParties],
+  );
+
+  const supplierPartyOptions = useMemo(() => {
+    const pendingByPartyId = new Map(
+      supplierPendingDues.map((row) => [
+        row.partyId,
+        Number(row.remainingDue ?? 0),
+      ]),
+    );
+
+    return supplierParties.map((party) => {
+      const remainingDue = pendingByPartyId.get(party.id);
+      return {
+        value: party.id,
+        label: party.name,
+        description:
+          typeof remainingDue === "number"
+            ? `Remaining ${formatCurrency(remainingDue)}`
+            : "No pending due",
+      };
+    });
+  }, [supplierParties, supplierPendingDues]);
+
+  const generalPartyOptions = useMemo(
+    () => [
+      { value: "none", label: "No party" },
+      ...parties.map((party) => ({
+        value: party.id,
+        label: party.name,
+        description: party.type === "CUSTOMER" ? "Customer" : "Supplier",
+      })),
+    ],
+    [parties],
+  );
+
+  const activePartyOptions = useMemo(() => {
+    if (formData.module === "BILL") return customerPartyOptions;
+    if (isSupplierLinkedModule(formData.module)) return supplierPartyOptions;
+    return generalPartyOptions;
+  }, [
+    customerPartyOptions,
+    formData.module,
+    generalPartyOptions,
+    supplierPartyOptions,
+  ]);
+
+  const partyFieldLabel =
+    formData.module === "BILL"
+      ? "Customer"
+      : isSupplierLinkedModule(formData.module)
+        ? "Supplier"
+        : "Party";
+
+  const partyFieldPlaceholder =
+    formData.module === "BILL"
+      ? "Select customer"
+      : isSupplierLinkedModule(formData.module)
+        ? "Select supplier"
+        : "Select party";
+
+  const partyFieldSearchPlaceholder =
+    formData.module === "BILL"
+      ? "Search customer..."
+      : isSupplierLinkedModule(formData.module)
+        ? "Search supplier..."
+        : "Search party...";
 
   return (
     <div className="space-y-6">
@@ -917,7 +1164,19 @@ export function Roznamcha() {
                     Daily, weekly, and monthly summary updates automatically.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-[240px] flex-1 md:max-w-[320px]">
+                    <Label className="mb-1 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                      Search
+                    </Label>
+                    <Input
+                      value={roznamchaReportSearch}
+                      onChange={(e) =>
+                        setRoznamchaReportSearch(e.target.value)
+                      }
+                      placeholder="Search period, totals, entries..."
+                    />
+                  </div>
                   <div>
                     <Label className="mb-1 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                       Period
@@ -963,6 +1222,14 @@ export function Roznamcha() {
                   {isLoadingRoznamchaReport && (
                     <p className="text-xs text-muted-foreground">Loading...</p>
                   )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={clearReportFilters}
+                  >
+                    <Filter className="mr-2 h-4 w-4" />
+                    Reset Filters
+                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => exportRoznamchaReport("excel")}
@@ -1033,17 +1300,19 @@ export function Roznamcha() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {roznamchaReport.buckets.length === 0 ? (
+                      {filteredReportBuckets.length === 0 ? (
                         <TableRow>
                           <TableCell
                             colSpan={5}
                             className="text-center text-muted-foreground"
                           >
-                            No report data found.
+                            {reportBuckets.length === 0
+                              ? "No report data found."
+                              : "No report rows match the current filters."}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        roznamchaReport.buckets.map((bucket) => (
+                        paginatedReportBuckets.map((bucket) => (
                           <TableRow key={bucket.key}>
                             <TableCell>{bucket.key}</TableCell>
                             <TableCell>
@@ -1061,6 +1330,18 @@ export function Roznamcha() {
                       )}
                     </TableBody>
                   </Table>
+                  <TablePagination
+                    currentPage={reportPage}
+                    totalPages={reportTotalPages}
+                    totalItems={reportTotalItems}
+                    startItem={reportStartItem}
+                    endItem={reportEndItem}
+                    pageSize={reportPageSize}
+                    setPageSize={setReportPageSize}
+                    goToPreviousPage={goToPreviousReportPage}
+                    goToNextPage={goToNextReportPage}
+                    setCurrentPage={setReportPage}
+                  />
                 </div>
               )}
             </CardContent>
@@ -1126,6 +1407,15 @@ export function Roznamcha() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearEntryFilters}
+                  >
+                    <Filter className="mr-2 h-4 w-4" />
+                    Reset Filters
+                  </Button>
                 </div>
                 <Dialog
                   open={isDialogOpen}
@@ -1148,7 +1438,14 @@ export function Roznamcha() {
                             type="date"
                             value={formData.date}
                             onChange={(e) =>
-                              setFormData({ ...formData, date: e.target.value })
+                              setFormData({
+                                ...formData,
+                                date: e.target.value,
+                                chequeDate:
+                                  formData.chequeDate === formData.date
+                                    ? e.target.value
+                                    : formData.chequeDate,
+                              })
                             }
                             required
                           />
@@ -1159,58 +1456,53 @@ export function Roznamcha() {
                             value={formData.module}
                             onValueChange={(value) => {
                               const nextModule = value as RoznamchaModule;
-                              if (isRecordInFlow) {
-                                setFormData({
-                                  ...formData,
+                              setFormData((prev) => {
+                                const nextPartyId = getPartyIdForModule(
+                                  nextModule,
+                                  prev.partyId,
+                                );
+                                if (isRecordInFlow) {
+                                  return {
+                                    ...prev,
+                                    module: nextModule,
+                                    direction: "IN",
+                                    paymentType: "CASH",
+                                    partyId: nextPartyId,
+                                    chequeId: "",
+                                    chequeDate: prev.date,
+                                    chequeNumber: "",
+                                    chequeSource: "CUSTOMER",
+                                  };
+                                }
+
+                                return {
+                                  ...prev,
                                   module: nextModule,
                                   direction:
-                                    nextModule === "BILL" ? "IN" : "OUT",
-                                  paymentType:
                                     nextModule === "BILL"
-                                      ? formData.paymentType === "CHEQUE"
-                                        ? "CHEQUE"
-                                        : "CASH"
-                                      : "CASH",
-                                  billId:
-                                    nextModule === "BILL"
-                                      ? ""
-                                      : formData.billId,
-                                  partyId: formData.partyId,
-                                });
-                                return;
-                              }
-
-                              setFormData({
-                                ...formData,
-                                module: nextModule,
-                                direction:
-                                  nextModule === "BILL"
-                                    ? "IN"
-                                    : nextModule === "SUPPLIER_PAYMENT"
-                                      ? "OUT"
-                                      : formData.direction,
-                                paymentType:
-                                  nextModule === "MISC"
-                                    ? "CASH"
-                                    : nextModule === "BILL"
-                                      ? "CASH"
+                                      ? "IN"
                                       : nextModule === "SUPPLIER_PAYMENT"
-                                        ? "KHATA"
-                                        : formData.paymentType,
-                                billId:
-                                  nextModule === "BILL" ? "" : formData.billId,
-                                chequeId:
-                                  nextModule === "MISC"
-                                    ? formData.chequeId
-                                    : "",
-                                partyId:
-                                  nextModule === "SUPPLIER_PAYMENT"
-                                    ? "none"
-                                    : formData.partyId,
-                                amount:
-                                  nextModule === "SUPPLIER_PAYMENT"
-                                    ? ""
-                                    : formData.amount,
+                                        ? "OUT"
+                                        : prev.direction,
+                                  paymentType:
+                                    nextModule === "MISC"
+                                      ? "CASH"
+                                      : nextModule === "BILL"
+                                        ? "CASH"
+                                        : nextModule === "SUPPLIER_PAYMENT"
+                                          ? "CASH"
+                                          : prev.paymentType,
+                                  chequeId:
+                                    nextModule === "MISC" ? prev.chequeId : "",
+                                  chequeDate: prev.date,
+                                  chequeNumber: "",
+                                  chequeSource: "CUSTOMER",
+                                  partyId: nextPartyId,
+                                  amount:
+                                    nextModule === "SUPPLIER_PAYMENT"
+                                      ? ""
+                                      : prev.amount,
+                                };
                               });
                             }}
                             disabled={!!editingEntry?.laborAdvanceId}
@@ -1292,14 +1584,25 @@ export function Roznamcha() {
                                 paymentType: value,
                                 chequeId:
                                   value === "CHEQUE" ? formData.chequeId : "",
+                                chequeDate:
+                                  value === "CHEQUE"
+                                    ? formData.chequeDate || formData.date
+                                    : formData.date,
+                                chequeNumber:
+                                  value === "CHEQUE"
+                                    ? formData.chequeNumber
+                                    : "",
+                                chequeSource:
+                                  value === "CHEQUE"
+                                    ? formData.chequeSource
+                                    : "CUSTOMER",
                               })
                             }
                             disabled={
                               isRecordInFlow
                                 ? formData.module === "MISC"
-                                : formData.module === "BILL" ||
-                                  (isRecordOutFlow &&
-                                    formData.module === "MISC")
+                                : isRecordOutFlow &&
+                                  formData.module === "MISC"
                             }
                           >
                             <SelectTrigger>
@@ -1308,96 +1611,203 @@ export function Roznamcha() {
                             <SelectContent>
                               <SelectItem value="CASH">Cash</SelectItem>
                               {!isRecordInFlow &&
-                                (formData.module === "SUPPLIER_PAYMENT" ||
-                                  formData.module === "LABOR") && (
+                                formData.module === "LABOR" && (
                                   <SelectItem value="KHATA">Khata</SelectItem>
                                 )}
-                              {formData.module === "BILL" && (
+                              {((!isRecordInFlow &&
+                                formData.module === "SUPPLIER_PAYMENT") ||
+                                formData.module === "BILL") && (
                                 <SelectItem value="CHEQUE">Cheque</SelectItem>
                               )}
-                              {!isRecordInFlow &&
-                                formData.module === "SUPPLIER_PAYMENT" && (
-                                  <SelectItem value="CHEQUE">Cheque</SelectItem>
-                                )}
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
 
-                      {!isRecordInFlow &&
-                        formData.module === "SUPPLIER_PAYMENT" &&
-                        formData.paymentType === "CHEQUE" &&
-                        formData.direction === "OUT" && (
-                          <div className="space-y-2">
-                            <Label>Select Cheque</Label>
-                            <Select
-                              value={formData.chequeId || "none"}
-                              onValueChange={(value) => {
-                                const nextChequeId =
-                                  value === "none" ? "" : value;
-                                const nextCheque = availableCheques.find(
-                                  (row) => row.id === nextChequeId,
-                                );
-                                setFormData({
-                                  ...formData,
-                                  chequeId: nextChequeId,
-                                  amount: nextCheque
-                                    ? String(Number(nextCheque.amount ?? 0))
-                                    : "",
-                                });
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    isLoadingCheques
-                                      ? "Loading available cheques..."
-                                      : "Select cheque"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">
-                                  Select cheque
-                                </SelectItem>
-                                {availableCheques.map((cheque) => (
-                                  <SelectItem key={cheque.id} value={cheque.id}>
-                                    {formatCurrency(Number(cheque.amount ?? 0))}
-                                    {cheque.chequeNumber
-                                      ? ` - ${cheque.chequeNumber}`
-                                      : ""}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {selectedAvailableCheque && (
-                              <div className="rounded border p-3 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">
-                                    Cheque Amount
-                                  </span>
-                                  <span>
-                                    {formatCurrency(
-                                      Number(
-                                        selectedAvailableCheque.amount ?? 0,
-                                      ),
-                                    )}
-                                  </span>
-                                </div>
-                                {selectedAvailableCheque.chequeNumber && (
-                                  <div className="flex justify-between">
-                                    <span className="text-muted-foreground">
-                                      Cheque Number
-                                    </span>
-                                    <span>
-                                      {selectedAvailableCheque.chequeNumber}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                      {formData.module === "BILL" &&
+                        formData.paymentType === "CHEQUE" && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label>Cheque Number</Label>
+                              <Input
+                                value={formData.chequeNumber}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    chequeNumber: e.target.value,
+                                  })
+                                }
+                                placeholder="Optional cheque number"
+                              />
+                            </div>
+                            <div>
+                              <Label>Cheque Cash Date</Label>
+                              <Input
+                                type="date"
+                                value={formData.chequeDate}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    chequeDate: e.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
                           </div>
                         )}
+
+                      {!isRecordInFlow && isSupplierChequePayment && (
+                        <div className="space-y-3">
+                          <div>
+                            <Label>Cheque Source</Label>
+                            <Select
+                              value={formData.chequeSource}
+                              onValueChange={(value: "CUSTOMER" | "OWN") =>
+                                setFormData({
+                                  ...formData,
+                                  chequeSource: value,
+                                  chequeId: value === "CUSTOMER" ? formData.chequeId : "",
+                                  chequeDate:
+                                    value === "OWN"
+                                      ? formData.chequeDate || formData.date
+                                      : formData.chequeDate,
+                                  chequeNumber:
+                                    value === "OWN" ? formData.chequeNumber : "",
+                                  amount:
+                                    value === "OWN"
+                                      ? selectedSupplierPendingDue
+                                        ? String(
+                                            Number(
+                                              selectedSupplierPendingDue.remainingDue ??
+                                                0,
+                                            ),
+                                          )
+                                        : formData.amount
+                                      : formData.amount,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="CUSTOMER">
+                                  Customer Cheque
+                                </SelectItem>
+                                <SelectItem value="OWN">Own Cheque</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {isSupplierCustomerCheque && (
+                            <div className="space-y-2">
+                              <Label>Select Cheque</Label>
+                              <SearchableSelect
+                                value={formData.chequeId || "none"}
+                                onValueChange={(value) => {
+                                  const nextChequeId =
+                                    value === "none" ? "" : value;
+                                  const nextCheque = availableCheques.find(
+                                    (row) => row.id === nextChequeId,
+                                  );
+                                  setFormData({
+                                    ...formData,
+                                    chequeId: nextChequeId,
+                                    amount: nextCheque
+                                      ? String(Number(nextCheque.amount ?? 0))
+                                      : "",
+                                  });
+                                }}
+                                options={customerChequeOptions}
+                                disabled={isLoadingCheques}
+                                placeholder={
+                                  isLoadingCheques
+                                    ? "Loading available cheques..."
+                                    : "Select cheque"
+                                }
+                                searchPlaceholder="Search cheque..."
+                                emptyMessage="No cheques found."
+                              />
+                              {selectedAvailableCheque && (
+                                <div className="rounded border p-3 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">
+                                      From
+                                    </span>
+                                    <span>
+                                      {selectedAvailableCheque.sourceParty?.name ||
+                                        "Own / Unlinked"}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">
+                                      Cheque Date
+                                    </span>
+                                    <span>
+                                      {formatDate(selectedAvailableCheque.date)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">
+                                      Cheque Amount
+                                    </span>
+                                    <span>
+                                      {formatCurrency(
+                                        Number(
+                                          selectedAvailableCheque.amount ?? 0,
+                                        ),
+                                      )}
+                                    </span>
+                                  </div>
+                                  {selectedAvailableCheque.chequeNumber && (
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">
+                                        Cheque Number
+                                      </span>
+                                      <span>
+                                        {selectedAvailableCheque.chequeNumber}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {isSupplierOwnCheque && (
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label>Cheque Number</Label>
+                                <Input
+                                  value={formData.chequeNumber}
+                                  onChange={(e) =>
+                                    setFormData({
+                                      ...formData,
+                                      chequeNumber: e.target.value,
+                                    })
+                                  }
+                                  placeholder="Optional cheque number"
+                                />
+                              </div>
+                              <div>
+                                <Label>Cheque Cash Date</Label>
+                                <Input
+                                  type="date"
+                                  value={formData.chequeDate}
+                                  onChange={(e) =>
+                                    setFormData({
+                                      ...formData,
+                                      chequeDate: e.target.value,
+                                    })
+                                  }
+                                  required
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {formData.module === "BILL" ||
                       formData.module === "SUPPLIER_PAYMENT" ||
@@ -1405,118 +1815,24 @@ export function Roznamcha() {
                       formData.module === "MATERIAL" ||
                       formData.module === "REXINE" ? (
                         <div>
-                          <Label>
-                            {formData.module === "BILL" ? "Customer" : "Party"}
-                          </Label>
-                          <Select
+                          <Label>{partyFieldLabel}</Label>
+                          <SearchableSelect
+                            key={`party-${formData.module}`}
                             value={formData.partyId}
                             onValueChange={(value) =>
                               setFormData({
                                 ...formData,
                                 partyId: value,
-                                billId:
-                                  formData.module === "BILL"
-                                    ? ""
-                                    : formData.billId,
                               })
                             }
-                          >
-                            <SelectTrigger>
-                              <SelectValue
-                                placeholder={
-                                  formData.module === "BILL"
-                                    ? "Select customer"
-                                    : "Select party"
-                                }
-                              />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {formData.module !== "BILL" &&
-                                formData.module !== "SUPPLIER_PAYMENT" && (
-                                  <SelectItem value="none">No party</SelectItem>
-                                )}
-                              {formData.module === "SUPPLIER_PAYMENT"
-                                ? supplierPendingDues.map((row) => (
-                                    <SelectItem
-                                      key={row.partyId}
-                                      value={row.partyId}
-                                    >
-                                      {row.partyName}
-                                    </SelectItem>
-                                  ))
-                                : parties.map((party) => (
-                                    <SelectItem key={party.id} value={party.id}>
-                                      {party.name}
-                                    </SelectItem>
-                                  ))}
-                            </SelectContent>
-                          </Select>
+                            options={activePartyOptions}
+                            placeholder={partyFieldPlaceholder}
+                            searchPlaceholder={partyFieldSearchPlaceholder}
+                            emptyMessage="No matching parties found."
+                            disabled={activePartyOptions.length === 0}
+                          />
                         </div>
                       ) : null}
-
-                      {formData.module === "BILL" && (
-                        <div className="space-y-2">
-                          <Label>Customer Bill</Label>
-                          <Select
-                            value={formData.billId}
-                            onValueChange={(value) => {
-                              const bill = billOptions.find(
-                                (item) => item.id === value,
-                              );
-                              setFormData({
-                                ...formData,
-                                billId: value,
-                                amount: bill
-                                  ? String(Number(bill.remaining ?? 0))
-                                  : formData.amount,
-                                direction: "IN",
-                              });
-                            }}
-                            disabled={
-                              isLoadingBills || billOptions.length === 0
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue
-                                placeholder={
-                                  isLoadingBills
-                                    ? "Loading bills..."
-                                    : billOptions.length === 0
-                                      ? "No pending bills"
-                                      : "Select bill"
-                                }
-                              />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {billOptions.map((bill) => (
-                                <SelectItem key={bill.id} value={bill.id}>
-                                  {bill.billNumber}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {selectedBill && (
-                            <div className="rounded border p-3 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">
-                                  Bill No
-                                </span>
-                                <span>{selectedBill.billNumber}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">
-                                  Remaining
-                                </span>
-                                <span>
-                                  {formatCurrency(
-                                    Number(selectedBill.remaining ?? 0),
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
 
                       {formData.module === "SUPPLIER_PAYMENT" && (
                         <div className="space-y-2">
@@ -1554,7 +1870,7 @@ export function Roznamcha() {
                             </div>
                           ) : (
                             <p className="text-sm text-muted-foreground">
-                              Select a supplier to view pending due.
+                              No pending due for this supplier yet.
                             </p>
                           )}
                         </div>
@@ -1612,71 +1928,26 @@ export function Roznamcha() {
                       )}
 
                       {formData.module === "LABOR" && (
-                        <div className="relative">
+                        <div>
                           <Label>Labor</Label>
-                          <Input
-                            value={laborSearch}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setLaborSearch(value);
-                              const exact = labors.find(
-                                (labor) =>
-                                  labor.name.toLowerCase() ===
-                                  value.trim().toLowerCase(),
-                              );
-                              setFormData({
-                                ...formData,
-                                laborId: exact?.id ?? "",
-                              });
-                              setShowLaborSuggestions(true);
-                            }}
-                            onFocus={() => setShowLaborSuggestions(true)}
-                            onBlur={() => {
-                              setTimeout(() => {
-                                setShowLaborSuggestions(false);
-                                const exact = labors.find(
-                                  (labor) =>
-                                    labor.name.toLowerCase() ===
-                                    laborSearch.trim().toLowerCase(),
-                                );
-                                if (!exact) {
-                                  setFormData((prev) => ({
-                                    ...prev,
-                                    laborId: "",
-                                  }));
-                                }
-                              }, 120);
-                            }}
-                            placeholder="Type labor name..."
+                          <SearchableSelect
+                            value={formData.laborId}
+                            onValueChange={(value) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                laborId: value,
+                              }))
+                            }
+                            options={laborOptions}
+                            placeholder={
+                              laborOptions.length === 0
+                                ? "No labor profiles found"
+                                : "Select labor"
+                            }
+                            searchPlaceholder="Search labor..."
+                            emptyMessage="No labor found."
+                            disabled={laborOptions.length === 0}
                           />
-                          {showLaborSuggestions && laborSearch.trim() && (
-                            <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-background p-1 shadow-md">
-                              {filteredLaborOptions.length === 0 ? (
-                                <div className="px-2 py-2 text-xs text-muted-foreground">
-                                  No labor found
-                                </div>
-                              ) : (
-                                filteredLaborOptions.map((labor) => (
-                                  <button
-                                    type="button"
-                                    key={labor.id}
-                                    className="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      setFormData({
-                                        ...formData,
-                                        laborId: labor.id,
-                                      });
-                                      setLaborSearch(labor.name);
-                                      setShowLaborSuggestions(false);
-                                    }}
-                                  >
-                                    {labor.name}
-                                  </button>
-                                ))
-                              )}
-                            </div>
-                          )}
                         </div>
                       )}
 
@@ -1761,13 +2032,6 @@ export function Roznamcha() {
                             isChequeOutMode
                           }
                         />
-                        {formData.module === "BILL" && exceedsBillAmount && (
-                          <p className="mt-1 text-xs text-red-600">
-                            Amount cannot exceed{" "}
-                            {formatCurrency(selectedBillRemaining)} for this
-                            bill.
-                          </p>
-                        )}
                         {formData.module === "SUPPLIER_PAYMENT" &&
                           exceedsSupplierDue && (
                             <p className="mt-1 text-xs text-red-600">
@@ -1804,13 +2068,20 @@ export function Roznamcha() {
                         <Button
                           type="submit"
                           disabled={
-                            (formData.module === "BILL" && exceedsBillAmount) ||
+                            (formData.module === "LABOR" &&
+                              !formData.laborId) ||
                             (formData.module === "SUPPLIER_PAYMENT" &&
                               exceedsSupplierDue) ||
                             (formData.module === "SUPPLIER_PAYMENT" &&
                               formData.paymentType === "CHEQUE" &&
                               formData.direction === "OUT" &&
-                              !formData.chequeId)
+                              ((isSupplierCustomerCheque &&
+                                !formData.chequeId) ||
+                                (isSupplierOwnCheque &&
+                                  !formData.chequeDate))) ||
+                            (formData.module === "BILL" &&
+                              formData.paymentType === "CHEQUE" &&
+                              !formData.chequeDate)
                           }
                         >
                           {editingEntry ? "Update Entry" : "Record Entry"}
@@ -1887,7 +2158,7 @@ export function Roznamcha() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredEntries.map((entry) => (
+                    paginatedEntries.map((entry) => (
                       <TableRow key={entry.id}>
                         <TableCell>{formatTime(entry)}</TableCell>
                         <TableCell>{getReferenceLabel(entry)}</TableCell>
@@ -1928,6 +2199,18 @@ export function Roznamcha() {
                   )}
                 </TableBody>
               </Table>
+              <TablePagination
+                currentPage={entriesPage}
+                totalPages={entriesTotalPages}
+                totalItems={entriesTotalItems}
+                startItem={entriesStartItem}
+                endItem={entriesEndItem}
+                pageSize={entriesPageSize}
+                setPageSize={setEntriesPageSize}
+                goToPreviousPage={goToPreviousEntriesPage}
+                goToNextPage={goToNextEntriesPage}
+                setCurrentPage={setEntriesPage}
+              />
             </CardContent>
           </Card>
         </TabsContent>

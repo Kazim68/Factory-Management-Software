@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { Plus, UserRound } from 'lucide-react';
+import { Filter, Plus, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { auth } from '../lib/auth';
+import { useClientPagination } from '../hooks/useClientPagination';
 import type { AppUser, UserRole } from '../types';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -22,6 +23,7 @@ import {
   SelectValue,
 } from './ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { TablePagination } from './ui/table-pagination';
 import { Badge } from './ui/badge';
 
 interface UserManagementProps {
@@ -40,11 +42,44 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [form, setForm] = useState(initialForm);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole>('ALL');
 
   const sortedUsers = useMemo(
     () => [...users].sort((a, b) => a.name.localeCompare(b.name)),
     [users],
   );
+
+  const filteredUsers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return sortedUsers.filter((user) => {
+      if (roleFilter !== 'ALL' && user.role !== roleFilter) {
+        return false;
+      }
+
+      if (!query) return true;
+
+      return [user.name, user.username, auth.formatRoleLabel(user.role)]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [roleFilter, searchQuery, sortedUsers]);
+
+  const {
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startItem,
+    endItem,
+    paginatedItems,
+    goToPreviousPage,
+    goToNextPage,
+  } = useClientPagination(filteredUsers);
 
   const loadData = () => {
     setUsers(auth.listUsers());
@@ -125,6 +160,11 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to delete user');
     }
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setRoleFilter('ALL');
   };
 
   return (
@@ -210,6 +250,41 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
           </Dialog>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Search
+              </Label>
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search by name or username..."
+              />
+            </div>
+            <div className="min-w-[200px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Role
+              </Label>
+              <Select
+                value={roleFilter}
+                onValueChange={(value) => setRoleFilter(value as typeof roleFilter)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Roles</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                  <SelectItem value="sub_admin">Sub Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+              <Filter className="mr-2 h-4 w-4" />
+              Reset Filters
+            </Button>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -220,14 +295,16 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedUsers.length === 0 ? (
+              {filteredUsers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No users found.
+                    {users.length === 0
+                      ? 'No users found.'
+                      : 'No users match the current filters.'}
                   </TableCell>
                 </TableRow>
               ) : (
-                sortedUsers.map((user) => (
+                paginatedItems.map((user) => (
                   <TableRow key={user.id}>
                     <TableCell className="flex items-center gap-2">
                       <UserRound className="h-4 w-4 text-muted-foreground" />
@@ -251,10 +328,22 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                     </TableCell>
                   </TableRow>
                 ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
+            )}
+          </TableBody>
+        </Table>
+        <TablePagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          startItem={startItem}
+          endItem={endItem}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          goToPreviousPage={goToPreviousPage}
+          goToNextPage={goToNextPage}
+          setCurrentPage={setCurrentPage}
+        />
+      </CardContent>
       </Card>
 
     </div>

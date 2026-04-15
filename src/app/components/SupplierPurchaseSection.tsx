@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -29,16 +30,17 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Plus, Trash2, Eye, Filter, Printer } from "lucide-react";
-import { chequeApi, configApi, purchaseApi } from "../lib/api";
+import { configApi, purchaseApi } from "../lib/api";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
+import { useClientPagination } from "../hooks/useClientPagination";
 import type {
   ApiArticle,
-  ApiCheque,
   ApiChemicalPurchase,
   ApiMaterialPurchase,
   ApiPaymentMethod,
   ApiRexinePurchase,
 } from "../types/api";
+import { TablePagination } from "./ui/table-pagination";
 import { toast } from "sonner";
 
 type SupplierOption = {
@@ -151,21 +153,20 @@ export function SupplierCombinedPurchase({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingRecords, setIsLoadingRecords] = useState(false);
-  const [isLoadingCheques, setIsLoadingCheques] = useState(false);
 
   const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [records, setRecords] = useState<UnifiedPurchaseRecord[]>([]);
-  const [availableCheques, setAvailableCheques] = useState<ApiCheque[]>([]);
 
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(getCurrentDate());
-  const [paymentType, setPaymentType] = useState<ApiPaymentMethod>("KHATA");
-  const [amountPaid, setAmountPaid] = useState("");
-  const [selectedChequeId, setSelectedChequeId] = useState("");
   const [rows, setRows] = useState<PurchaseRow[]>([createEmptyRow()]);
   const [recordTypeFilters, setRecordTypeFilters] = useState<PurchaseType[]>([
     ...PURCHASE_TYPES,
   ]);
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
+  const [supplierBalanceFilter, setSupplierBalanceFilter] = useState<
+    "ALL" | "POSITIVE" | "NEGATIVE" | "ZERO"
+  >("ALL");
   const [recordsTimePreset, setRecordsTimePreset] =
     useState<RecordsTimePreset>("THIS_MONTH");
   const [recordsDateFrom, setRecordsDateFrom] = useState("");
@@ -260,39 +261,6 @@ export function SupplierCombinedPurchase({
     );
   }, [suppliers]);
 
-  useEffect(() => {
-    if (!isDialogOpen || paymentType !== "CHEQUE") {
-      setAvailableCheques([]);
-      setSelectedChequeId("");
-      setIsLoadingCheques(false);
-      return;
-    }
-
-    let active = true;
-    setIsLoadingCheques(true);
-    chequeApi
-      .listAvailableCheques()
-      .then((cheques) => {
-        if (!active) return;
-        setAvailableCheques(cheques);
-      })
-      .catch((error) => {
-        console.error(error);
-        if (active) {
-          toast.error("Failed to load available cheques.");
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setIsLoadingCheques(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [isDialogOpen, paymentType]);
-
   const grossTotal = useMemo(
     () =>
       roundMoney(
@@ -345,39 +313,63 @@ export function SupplierCombinedPurchase({
   const selectedSupplier = suppliers.find(
     (supplier) => supplier.id === supplierId,
   );
-  const selectedCheque = availableCheques.find(
-    (cheque) => cheque.id === selectedChequeId,
+  const filteredSuppliers = useMemo(() => {
+    const query = supplierSearchQuery.trim().toLowerCase();
+
+    return suppliers.filter((supplier) => {
+      const balance = Number(supplier.currentBalance ?? 0);
+      const isZero = Math.abs(balance) < 0.0001;
+
+      if (supplierBalanceFilter === "POSITIVE" && balance <= 0) return false;
+      if (supplierBalanceFilter === "NEGATIVE" && balance >= 0) return false;
+      if (supplierBalanceFilter === "ZERO" && !isZero) return false;
+
+      if (!query) return true;
+
+      return [supplier.name, String(balance)].join(" ").toLowerCase().includes(query);
+    });
+  }, [supplierBalanceFilter, supplierSearchQuery, suppliers]);
+
+  const {
+    currentPage: suppliersPage,
+    setCurrentPage: setSuppliersPage,
+    pageSize: suppliersPageSize,
+    setPageSize: setSuppliersPageSize,
+    totalPages: suppliersTotalPages,
+    totalItems: suppliersTotalItems,
+    startItem: suppliersStartItem,
+    endItem: suppliersEndItem,
+    paginatedItems: paginatedSuppliers,
+    goToPreviousPage: goToPreviousSuppliersPage,
+    goToNextPage: goToNextSuppliersPage,
+  } = useClientPagination(filteredSuppliers);
+
+  const {
+    currentPage: recordsPage,
+    setCurrentPage: setRecordsPage,
+    pageSize: recordsPageSize,
+    setPageSize: setRecordsPageSize,
+    totalPages: recordsTotalPages,
+    totalItems: recordsTotalItems,
+    startItem: recordsStartItem,
+    endItem: recordsEndItem,
+    paginatedItems: paginatedRecords,
+    goToPreviousPage: goToPreviousRecordsPage,
+    goToNextPage: goToNextRecordsPage,
+  } = useClientPagination(filteredRecords);
+
+  const supplierSelectOptions = useMemo(
+    () =>
+      suppliers.map((supplier) => ({
+        value: supplier.id,
+        label: supplier.name,
+        description: `Balance: ${formatCurrency(supplier.currentBalance)}`,
+      })),
+    [suppliers],
   );
-
-  useEffect(() => {
-    if (paymentType === "CASH") {
-      setAmountPaid(String(grossTotal));
-      return;
-    }
-
-    if (paymentType === "KHATA") {
-      setAmountPaid((prev) => {
-        const numeric = Number.parseFloat(prev || "0");
-        if (!Number.isFinite(numeric) || numeric <= 0) return "";
-        return String(Math.min(numeric, grossTotal));
-      });
-      return;
-    }
-
-    if (paymentType === "CHEQUE") {
-      if (selectedCheque) {
-        setAmountPaid(String(Number(selectedCheque.amount ?? 0)));
-      } else {
-        setAmountPaid("");
-      }
-    }
-  }, [paymentType, grossTotal, selectedCheque]);
 
   const resetDialog = () => {
     setDate(getCurrentDate());
-    setPaymentType("KHATA");
-    setAmountPaid("");
-    setSelectedChequeId("");
     setRows([createEmptyRow()]);
   };
 
@@ -395,6 +387,11 @@ export function SupplierCombinedPurchase({
     setRecordsTimePreset("THIS_MONTH");
     setRecordsDateFrom("");
     setRecordsDateTo("");
+  };
+
+  const clearSupplierFilters = () => {
+    setSupplierSearchQuery("");
+    setSupplierBalanceFilter("ALL");
   };
 
   const setRow = (rowId: string, patch: Partial<PurchaseRow>) => {
@@ -510,40 +507,11 @@ export function SupplierCombinedPurchase({
       });
     }
 
-    const parsedAmountPaid = Number.parseFloat(amountPaid || "0");
-    const safeAmountPaid = Number.isFinite(parsedAmountPaid)
-      ? parsedAmountPaid
-      : 0;
-
-    if (paymentType === "KHATA" && safeAmountPaid > grossTotal) {
-      toast.error("Amount paid cannot exceed gross total for khata.");
-      return;
-    }
-
-    if (paymentType === "CHEQUE") {
-      if (!selectedChequeId) {
-        toast.error("Please select a cheque.");
-        return;
-      }
-      if (!selectedCheque) {
-        toast.error("Selected cheque is invalid.");
-        return;
-      }
-      const chequeAmount = Number(selectedCheque.amount ?? 0);
-      if (Math.abs(chequeAmount - safeAmountPaid) > 0.0001) {
-        toast.error("Amount paid must match selected cheque amount.");
-        return;
-      }
-    }
-
     setIsSaving(true);
     try {
       await purchaseApi.createCombined({
         date,
         partyId: supplierId,
-        paymentType,
-        amountPaid: safeAmountPaid,
-        chequeId: paymentType === "CHEQUE" ? selectedChequeId : undefined,
         rows: payloadRows,
       });
 
@@ -625,7 +593,7 @@ export function SupplierCombinedPurchase({
           </div>
 
           <TabsContent value="suppliers" className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-sm font-medium">Suppliers</h3>
               <div className="flex gap-2">
                 <Button type="button" variant="outline" onClick={onAddSupplier}>
@@ -633,6 +601,49 @@ export function SupplierCombinedPurchase({
                   Add Supplier
                 </Button>
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+              <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Search
+                </Label>
+                <Input
+                  value={supplierSearchQuery}
+                  onChange={(event) => setSupplierSearchQuery(event.target.value)}
+                  placeholder="Search supplier name..."
+                />
+              </div>
+              <div className="min-w-[200px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Balance
+                </Label>
+                <Select
+                  value={supplierBalanceFilter}
+                  onValueChange={(value) =>
+                    setSupplierBalanceFilter(value as typeof supplierBalanceFilter)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Balances</SelectItem>
+                    <SelectItem value="POSITIVE">Positive Balance</SelectItem>
+                    <SelectItem value="NEGATIVE">Negative Balance</SelectItem>
+                    <SelectItem value="ZERO">Zero Balance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={clearSupplierFilters}
+              >
+                <Filter className="mr-2 h-4 w-4" />
+                Reset Filters
+              </Button>
             </div>
 
             <Table>
@@ -653,17 +664,19 @@ export function SupplierCombinedPurchase({
                       Loading suppliers...
                     </TableCell>
                   </TableRow>
-                ) : suppliers.length === 0 ? (
+                ) : filteredSuppliers.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={3}
                       className="text-center text-muted-foreground"
                     >
-                      No suppliers yet
+                      {suppliers.length === 0
+                        ? "No suppliers yet"
+                        : "No suppliers match the current filters."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  suppliers.map((supplier) => (
+                  paginatedSuppliers.map((supplier) => (
                     <TableRow key={supplier.id}>
                       <TableCell>{supplier.name}</TableCell>
                       <TableCell>
@@ -702,6 +715,18 @@ export function SupplierCombinedPurchase({
                 )}
               </TableBody>
             </Table>
+            <TablePagination
+              currentPage={suppliersPage}
+              totalPages={suppliersTotalPages}
+              totalItems={suppliersTotalItems}
+              startItem={suppliersStartItem}
+              endItem={suppliersEndItem}
+              pageSize={suppliersPageSize}
+              setPageSize={setSuppliersPageSize}
+              goToPreviousPage={goToPreviousSuppliersPage}
+              goToNextPage={goToNextSuppliersPage}
+              setCurrentPage={setSuppliersPage}
+            />
           </TabsContent>
 
           <TabsContent value="records" className="space-y-4">
@@ -819,24 +844,17 @@ export function SupplierCombinedPurchase({
                   </DialogHeader>
 
                   <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div>
                         <Label>Supplier</Label>
-                        <Select
+                        <SearchableSelect
                           value={supplierId}
                           onValueChange={setSupplierId}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select supplier" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {suppliers.map((supplier) => (
-                              <SelectItem key={supplier.id} value={supplier.id}>
-                                {supplier.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={supplierSelectOptions}
+                          placeholder="Select supplier"
+                          searchPlaceholder="Search supplier..."
+                          emptyMessage="No suppliers found."
+                        />
                         <p className="mt-1 text-xs text-muted-foreground">
                           Current Balance:{" "}
                           {formatCurrency(
@@ -853,88 +871,7 @@ export function SupplierCombinedPurchase({
                           onChange={(event) => setDate(event.target.value)}
                         />
                       </div>
-
-                      <div>
-                        <Label>Payment Type</Label>
-                        <Select
-                          value={paymentType}
-                          onValueChange={(value) =>
-                            setPaymentType(value as ApiPaymentMethod)
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select payment type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="KHATA">KHATA</SelectItem>
-                            <SelectItem value="CASH">CASH</SelectItem>
-                            <SelectItem value="CHEQUE">CHEQUE</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div>
-                        <Label>Amount Paid</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={amountPaid}
-                          onChange={(event) => {
-                            if (
-                              paymentType === "CASH" ||
-                              paymentType === "CHEQUE"
-                            )
-                              return;
-                            const next = Number.parseFloat(
-                              event.target.value || "0",
-                            );
-                            if (!Number.isFinite(next)) {
-                              setAmountPaid("");
-                              return;
-                            }
-                            setAmountPaid(String(Math.min(next, grossTotal)));
-                          }}
-                          disabled={
-                            paymentType === "CASH" || paymentType === "CHEQUE"
-                          }
-                        />
-                      </div>
                     </div>
-
-                    {paymentType === "CHEQUE" && (
-                      <div>
-                        <Label>Select Cheque</Label>
-                        <Select
-                          value={selectedChequeId}
-                          onValueChange={setSelectedChequeId}
-                        >
-                          <SelectTrigger>
-                            <SelectValue
-                              placeholder={
-                                isLoadingCheques
-                                  ? "Loading cheques..."
-                                  : "Select available cheque"
-                              }
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableCheques.length === 0 ? (
-                              <SelectItem value="__none" disabled>
-                                No available cheques
-                              </SelectItem>
-                            ) : (
-                              availableCheques.map((cheque) => (
-                                <SelectItem key={cheque.id} value={cheque.id}>
-                                  {cheque.chequeNumber || "No Cheque #"} -{" "}
-                                  {formatCurrency(Number(cheque.amount ?? 0))}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
 
                     <div>
                       <div className="mb-2 flex items-center justify-between">
@@ -1014,28 +951,21 @@ export function SupplierCombinedPurchase({
                                 </TableCell>
                                 <TableCell>
                                   {row.type === "MATERIAL" ? (
-                                    <Select
+                                    <SearchableSelect
                                       value={row.articleId}
                                       onValueChange={(value) =>
                                         setRow(row.id, { articleId: value })
                                       }
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Select article" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {availableMaterialArticles.map(
-                                          (article) => (
-                                            <SelectItem
-                                              key={article.id}
-                                              value={article.id}
-                                            >
-                                              {article.name}
-                                            </SelectItem>
-                                          ),
-                                        )}
-                                      </SelectContent>
-                                    </Select>
+                                      options={availableMaterialArticles.map(
+                                        (article) => ({
+                                          value: article.id,
+                                          label: article.name,
+                                        }),
+                                      )}
+                                      placeholder="Select article"
+                                      searchPlaceholder="Search article..."
+                                      emptyMessage="No articles found."
+                                    />
                                   ) : (
                                     <span className="text-sm text-muted-foreground">
                                       Raw Material
@@ -1112,26 +1042,15 @@ export function SupplierCombinedPurchase({
                       </div>
                       <div className="rounded bg-background/70 p-3">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                          Amount Paid
+                          Added To Khata
                         </p>
-                        <p className="mt-1 font-medium">
-                          {formatCurrency(
-                            Number.parseFloat(amountPaid || "0") || 0,
-                          )}
-                        </p>
+                        <p className="mt-1 font-medium">{formatCurrency(grossTotal)}</p>
                       </div>
                       <div className="rounded bg-background/70 p-3">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                          Pending
+                          Payment Mode
                         </p>
-                        <p className="mt-1 font-medium">
-                          {formatCurrency(
-                            roundMoney(
-                              grossTotal -
-                                (Number.parseFloat(amountPaid || "0") || 0),
-                            ),
-                          )}
-                        </p>
+                        <p className="mt-1 font-medium">Khata</p>
                       </div>
                     </div>
 
@@ -1189,7 +1108,7 @@ export function SupplierCombinedPurchase({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredRecords.map((record) => (
+                  paginatedRecords.map((record) => (
                     <TableRow key={`${record.type}-${record.id}`}>
                       <TableCell>{formatDate(record.date)}</TableCell>
                       <TableCell>{record.supplierName}</TableCell>
@@ -1200,12 +1119,26 @@ export function SupplierCombinedPurchase({
                       <TableCell>
                         {formatCurrency(record.totalAmount)}
                       </TableCell>
-                      <TableCell>{record.paymentType}</TableCell>
+                      <TableCell>
+                        {formatPaymentMethodLabel(record.paymentType)}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
+            <TablePagination
+              currentPage={recordsPage}
+              totalPages={recordsTotalPages}
+              totalItems={recordsTotalItems}
+              startItem={recordsStartItem}
+              endItem={recordsEndItem}
+              pageSize={recordsPageSize}
+              setPageSize={setRecordsPageSize}
+              goToPreviousPage={goToPreviousRecordsPage}
+              goToNextPage={goToNextRecordsPage}
+              setCurrentPage={setRecordsPage}
+            />
           </TabsContent>
         </Tabs>
       </CardContent>
@@ -1221,6 +1154,14 @@ const toTitle = (value: string) =>
       (_, prefix: string, letter: string) =>
         `${prefix === "_" ? " " : ""}${letter.toUpperCase()}`,
     );
+
+const formatPaymentMethodLabel = (value: ApiPaymentMethod) => {
+  const normalized = String(value ?? "KHATA").toUpperCase();
+  if (normalized === "KHATA" || normalized === "CREDIT") return "Khata";
+  if (normalized === "CHEQUE") return "Cheque";
+  if (normalized === "BANK") return "Bank";
+  return "Cash";
+};
 
 const mapChemicalToRecord = (
   entry: ApiChemicalPurchase,

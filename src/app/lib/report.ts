@@ -1,3 +1,11 @@
+import { formatDateTime } from "./utils";
+import {
+  getDirectionForLanguage,
+  getStoredLanguage,
+  translateRows,
+  translateText,
+} from "./i18n";
+
 export interface ReportRow {
   section: string;
   metric: string;
@@ -51,10 +59,11 @@ function sanitizeCsvValue(value: string | number) {
 }
 
 function normalizeFileName(title: string) {
-  return title
+  const normalized = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+  return normalized || "report";
 }
 
 function buildCsv(columns: string[], rows: string[][]) {
@@ -82,15 +91,26 @@ function downloadBlob(filename: string, content: string, mimeType: string) {
 }
 
 function buildHtmlTable(payload: ReportExportPayload) {
+  const language = getStoredLanguage();
+  const direction = getDirectionForLanguage(language);
+  const languageCode = language === "ur" ? "ur" : "en";
+  const fontFamily =
+    language === "ur"
+      ? '"Noto Nastaliq Urdu", "Noto Naskh Arabic", "Segoe UI", Arial, sans-serif'
+      : "Arial, sans-serif";
   const generatedAt =
-    payload.metadata?.generatedAt || new Date().toLocaleString();
+    payload.metadata?.generatedAt || formatDateTime(new Date());
   const filters = payload.metadata?.filters ?? [];
+  const translatedColumns = payload.table.columns.map((column) =>
+    translateText(column, language),
+  );
+  const translatedRows = translateRows(payload.table.rows, language);
 
-  const header = payload.table.columns
+  const header = translatedColumns
     .map((column) => `<th>${escapeHtml(column)}</th>`)
     .join("");
 
-  const rows = payload.table.rows
+  const rows = translatedRows
     .map(
       (row) =>
         `<tr>${row.map((value) => `<td>${escapeHtml(String(value))}</td>`).join("")}</tr>`,
@@ -98,22 +118,22 @@ function buildHtmlTable(payload: ReportExportPayload) {
     .join("");
 
   return `
-    <html>
+    <html lang="${languageCode}" dir="${direction}">
       <head>
-        <title>${escapeHtml(payload.title)}</title>
+        <title>${escapeHtml(translateText(payload.title, language))}</title>
         <style>
-          body { font-family: Arial, sans-serif; margin: 20px; color: #222; }
+          body { font-family: ${fontFamily}; margin: 20px; color: #222; direction: ${direction}; text-align: ${direction === "rtl" ? "right" : "left"}; }
           h1 { margin-bottom: 6px; }
           .meta { margin: 4px 0; color: #555; font-size: 12px; }
           table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-          th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; }
+          th, td { border: 1px solid #ccc; padding: 8px; text-align: ${direction === "rtl" ? "right" : "left"}; font-size: 12px; }
           th { background: #f4f4f4; }
         </style>
       </head>
       <body>
-        <h1>${escapeHtml(payload.title)}</h1>
-        <p class="meta">Generated on ${escapeHtml(generatedAt)}</p>
-        ${filters.length > 0 ? `<p class="meta">Filters: ${escapeHtml(filters.join(", "))}</p>` : ""}
+        <h1>${escapeHtml(translateText(payload.title, language))}</h1>
+        <p class="meta">${escapeHtml(translateText("Generated on", language))} ${escapeHtml(generatedAt)}</p>
+        ${filters.length > 0 ? `<p class="meta">${escapeHtml(translateText("Filters", language))}: ${escapeHtml(filters.map((filter) => translateText(filter, language)).join(", "))}</p>` : ""}
         <table>
           <thead><tr>${header}</tr></thead>
           <tbody>${rows}</tbody>
@@ -195,7 +215,7 @@ export function buildCombinedTablePayload(
       rows,
     },
     metadata: {
-      generatedAt: new Date().toLocaleString(),
+      generatedAt: formatDateTime(new Date()),
       filters: Array.from(new Set(tables.flatMap((table) => table.filters))),
       sort: Array.from(new Set(tables.flatMap((table) => table.sort))),
     },
@@ -205,7 +225,15 @@ export function buildCombinedTablePayload(
 // Export actions are disabled until backend report endpoints are implemented.
 export function exportTableToExcel(payload: ReportExportPayload): boolean {
   try {
-    const csv = `\uFEFF${buildCsv(payload.table.columns, payload.table.rows)}`;
+    const language = getStoredLanguage();
+    const translatedColumns = payload.table.columns.map((column) =>
+      translateText(column, language),
+    );
+    const translatedRows = translateRows(payload.table.rows, language);
+    const csv = `\uFEFF${buildCsv(
+      translatedColumns,
+      translatedRows.map((row) => row.map((value) => String(value))),
+    )}`;
     downloadBlob(
       `${normalizeFileName(payload.title)}.csv`,
       csv,

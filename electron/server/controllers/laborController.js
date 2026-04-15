@@ -1,10 +1,27 @@
 import prisma from "../prisma.js";
-import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
+import {
+  formatDateKey,
+  formatDateTime,
+  formatMonthKey,
+  getWeekStart,
+  groupByPeriod,
+  toDate,
+  withDateRange,
+} from "../utils/date.js";
 import { normalizeLaborDepartment } from "../constants/laborDepartments.js";
 import {
   getLaborDepartmentLabelFromMap,
   getLaborDepartmentLabelMap,
 } from "../services/laborDepartmentService.js";
+import {
+  formatPrintNumber,
+  getPrintDirection,
+  getPrintFontFamily,
+  getPrintLocale,
+  getPrintTextAlign,
+  normalizePrintLanguage,
+  translatePrintText,
+} from "../utils/printLanguage.js";
 
 const withCategory = (profile, labelMap) => ({
   ...profile,
@@ -23,17 +40,16 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-const formatDateText = (value) => {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleDateString("en-GB");
+const formatDateText = (value, language) => {
+  return formatDateTime(value, getPrintLocale(language, "date"), {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 };
 
-const formatNumberText = (value) => {
-  const n = Number(value ?? 0);
-  if (!Number.isFinite(n)) return "0";
-  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-};
+const formatNumberText = (value, language) =>
+  formatPrintNumber(value, language, { maximumFractionDigits: 2 });
 
 export const listLaborProfiles = async (req, res) => {
   const { status = "ACTIVE" } = req.query;
@@ -131,8 +147,8 @@ export const createLaborWorkEntry = async (req, res) => {
       laborId: req.body.laborId,
       articleId: req.body.articleId,
       unitId: req.body.unitId,
-      startDate: new Date(req.body.startDate),
-      endDate: new Date(req.body.endDate),
+      startDate: toDate(req.body.startDate, "start"),
+      endDate: toDate(req.body.endDate, "start"),
       quantity: req.body.quantity,
       rate: req.body.rate,
       total: req.body.total,
@@ -148,8 +164,8 @@ export const updateLaborWorkEntry = async (req, res) => {
       laborId: req.body.laborId,
       articleId: req.body.articleId,
       unitId: req.body.unitId,
-      startDate: req.body.startDate ? new Date(req.body.startDate) : undefined,
-      endDate: req.body.endDate ? new Date(req.body.endDate) : undefined,
+      startDate: req.body.startDate ? toDate(req.body.startDate, "start") : undefined,
+      endDate: req.body.endDate ? toDate(req.body.endDate, "start") : undefined,
       quantity: req.body.quantity,
       rate: req.body.rate,
       total: req.body.total,
@@ -164,8 +180,9 @@ export const deleteLaborWorkEntry = async (req, res) => {
 };
 
 export const getPrintableLaborWorkEntries = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const language = normalizePrintLanguage(req.query.lang);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const departmentRaw = String(req.query.department ?? "ALL").trim();
   const department =
     departmentRaw && departmentRaw !== "ALL"
@@ -212,71 +229,88 @@ export const getPrintableLaborWorkEntries = async (req, res) => {
 
   const rowsHtml = filteredEntries
     .map((entry) => {
-      const departmentLabel = getLaborDepartmentLabelFromMap(
-        entry.labor?.department,
-        labelMap,
+      const departmentLabel = translatePrintText(
+        getLaborDepartmentLabelFromMap(entry.labor?.department, labelMap),
+        language,
       );
       return `
         <tr>
-          <td>${escapeHtml(formatDateText(entry.startDate))}</td>
+          <td>${escapeHtml(formatDateText(entry.startDate, language))}</td>
           <td>${escapeHtml(entry.labor?.name || "-")}</td>
           <td>${escapeHtml(departmentLabel || "-")}</td>
           <td>${escapeHtml(entry.article?.name || "-")}</td>
-          <td>${escapeHtml(formatNumberText(entry.quantity))}</td>
-          <td>${escapeHtml(formatNumberText(entry.rate))}</td>
-          <td>${escapeHtml(formatNumberText(entry.total))}</td>
+          <td>${escapeHtml(formatNumberText(entry.quantity, language))}</td>
+          <td>${escapeHtml(formatNumberText(entry.rate, language))}</td>
+          <td>${escapeHtml(formatNumberText(entry.total, language))}</td>
         </tr>`;
     })
     .join("");
 
+  const title = translatePrintText("Labor Work Entries", language);
+  const direction = getPrintDirection(language);
+  const textAlign = getPrintTextAlign(language);
+  const fontFamily = getPrintFontFamily(language);
+  const languageCode = language === "ur" ? "ur" : "en";
+
   const html = `<!DOCTYPE html>
-  <html>
+  <html lang="${languageCode}" dir="${direction}">
     <head>
       <meta charset="utf-8" />
-      <title>Labor Work Entries</title>
+      <title>${escapeHtml(title)}</title>
       <style>
-        body { font-family: Arial, sans-serif; padding: 18px; color: #111; }
+        body { font-family: ${fontFamily}; padding: 18px; color: #111; direction: ${direction}; text-align: ${textAlign}; }
         h1 { margin: 0 0 8px; font-size: 22px; }
         .meta { margin-bottom: 14px; font-size: 13px; }
         .meta p { margin: 3px 0; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: left; font-size: 12px; }
+        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: ${textAlign}; font-size: 12px; }
         th { background: #f5f5f5; }
         .totals { margin-top: 12px; font-size: 13px; }
         @media print { body { padding: 8px; } }
       </style>
     </head>
     <body>
-      <h1>Labor Work Entries</h1>
+      <h1>${escapeHtml(title)}</h1>
       <div class="meta">
-        <p><strong>Generated At:</strong> ${escapeHtml(new Date().toLocaleString("en-GB"))}</p>
-        <p><strong>Department:</strong> ${escapeHtml(
-          department === "ALL"
-            ? "All Departments"
-            : getLaborDepartmentLabelFromMap(department, labelMap),
+        <p><strong>${escapeHtml(translatePrintText("Generated At", language))}:</strong> ${escapeHtml(
+          formatDateTime(new Date(), getPrintLocale(language, "date"), {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
         )}</p>
-        <p><strong>Search:</strong> ${escapeHtml(search || "All")}</p>
-        <p><strong>Date Range:</strong> ${escapeHtml(start ? formatDateText(start) : "All")} - ${escapeHtml(end ? formatDateText(end) : "All")}</p>
-        <p><strong>Total Rows:</strong> ${filteredEntries.length}</p>
+        <p><strong>${escapeHtml(translatePrintText("Department", language))}:</strong> ${escapeHtml(
+          department === "ALL"
+            ? translatePrintText("All Departments", language)
+            : translatePrintText(
+                getLaborDepartmentLabelFromMap(department, labelMap),
+                language,
+              ),
+        )}</p>
+        <p><strong>${escapeHtml(translatePrintText("Search", language))}:</strong> ${escapeHtml(search || translatePrintText("All", language))}</p>
+        <p><strong>${escapeHtml(translatePrintText("Date Range", language))}:</strong> ${escapeHtml(start ? formatDateText(start, language) : translatePrintText("All", language))} - ${escapeHtml(end ? formatDateText(end, language) : translatePrintText("All", language))}</p>
+        <p><strong>${escapeHtml(translatePrintText("Total Rows", language))}:</strong> ${filteredEntries.length}</p>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Labor</th>
-            <th>Department</th>
-            <th>Article</th>
-            <th>Quantity</th>
-            <th>Rate</th>
-            <th>Total</th>
+            <th>${escapeHtml(translatePrintText("Date", language))}</th>
+            <th>${escapeHtml(translatePrintText("Labor", language))}</th>
+            <th>${escapeHtml(translatePrintText("Department", language))}</th>
+            <th>${escapeHtml(translatePrintText("Article", language))}</th>
+            <th>${escapeHtml(translatePrintText("Quantity", language))}</th>
+            <th>${escapeHtml(translatePrintText("Rate", language))}</th>
+            <th>${escapeHtml(translatePrintText("Total", language))}</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml || '<tr><td colspan="7">No work entries for selected filters.</td></tr>'}
+          ${rowsHtml || `<tr><td colspan="7">${escapeHtml(translatePrintText("No work entries for selected filters.", language))}</td></tr>`}
         </tbody>
       </table>
       <div class="totals">
-        <p><strong>Total Amount:</strong> ${escapeHtml(formatNumberText(totalAmount))}</p>
+        <p><strong>${escapeHtml(translatePrintText("Total Amount", language))}:</strong> ${escapeHtml(formatNumberText(totalAmount, language))}</p>
       </div>
       <script>window.onload = () => { window.focus(); window.print(); };</script>
     </body>
@@ -290,15 +324,15 @@ export const createLaborAdvance = async (req, res) => {
   const advance = await prisma.laborAdvance.create({
     data: {
       laborId: req.body.laborId,
-      date: new Date(req.body.date),
+      date: toDate(req.body.date, "start"),
       amount: req.body.amount,
       reason: req.body.reason,
     },
   });
 
   const expense = await prisma.expenseEntry.create({
-    data: {
-      date: new Date(req.body.date),
+      data: {
+      date: toDate(req.body.date, "start"),
       partyId: req.body.partyId,
       laborId: req.body.laborId,
       module: "LABOR",
@@ -319,7 +353,7 @@ export const updateLaborAdvance = async (req, res) => {
     where: { id: req.params.advanceId },
     data: {
       laborId: req.body.laborId,
-      date: req.body.date ? new Date(req.body.date) : undefined,
+      date: req.body.date ? toDate(req.body.date, "start") : undefined,
       amount: req.body.amount,
       reason: req.body.reason,
     },
@@ -333,7 +367,7 @@ export const updateLaborAdvance = async (req, res) => {
     await prisma.expenseEntry.update({
       where: { id: expense.id },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         paymentType: req.body.paymentType
           ? String(req.body.paymentType).toUpperCase() === "KHATA"
             ? "CREDIT"
@@ -362,8 +396,8 @@ export const deleteLaborAdvance = async (req, res) => {
 };
 
 export const getLaborLedger = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const [workEntries, advances] = await Promise.all([
     prisma.laborWorkEntry.findMany({
       where: {
@@ -400,34 +434,30 @@ export const getLaborLedger = async (req, res) => {
 };
 
 export const getWeeklyLaborSummary = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const entries = await prisma.laborWorkEntry.findMany({
     where: { startDate: withDateRange(start, end) },
     orderBy: { startDate: "asc" },
   });
 
   const grouped = groupByPeriod(entries, (entry) => {
-    const date = new Date(entry.startDate);
-    const day = date.getUTCDay() || 7;
-    const weekStart = new Date(date);
-    weekStart.setUTCDate(date.getUTCDate() - day + 1);
-    return weekStart.toISOString().slice(0, 10);
+    return formatDateKey(getWeekStart(entry.startDate));
   });
 
   res.json(Object.values(grouped));
 };
 
 export const getMonthlyLaborSummary = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const entries = await prisma.laborWorkEntry.findMany({
     where: { startDate: withDateRange(start, end) },
     orderBy: { startDate: "asc" },
   });
 
   const grouped = groupByPeriod(entries, (entry) =>
-    entry.startDate.toISOString().slice(0, 7),
+    formatMonthKey(entry.startDate),
   );
 
   res.json(Object.values(grouped));

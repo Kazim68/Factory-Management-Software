@@ -23,7 +23,8 @@ const isSchemaMismatchError = (error) => {
   return (
     message.includes("does not exist in the current database") ||
     message.includes("no such table:") ||
-    (message.includes("column") && message.includes("does not exist"))
+    (message.includes("column") && message.includes("does not exist")) ||
+    message.includes("Unknown argument")
   );
 };
 
@@ -85,9 +86,10 @@ const resolveDelegate = (tx, entity) => {
   return tx[key];
 };
 
-const runtimeModels = prisma._runtimeDataModel?.models ?? {};
-const modelScalarFieldsCache = new Map();
-const modelRelationsCache = new Map();
+const getRuntimeModels = (client) => client?._runtimeDataModel?.models ?? {};
+const localRuntimeModels = getRuntimeModels(prisma);
+const modelScalarFieldsCache = new WeakMap();
+const modelRelationsCache = new WeakMap();
 
 const toModelName = (entity) => {
   const camel = snakeToCamel(String(entity ?? ""));
@@ -95,15 +97,25 @@ const toModelName = (entity) => {
   return camel[0].toUpperCase() + camel.slice(1);
 };
 
-const getModelScalarFields = (entity) => {
+const getRuntimeModelCache = (weakMap, runtimeModels) => {
+  let cache = weakMap.get(runtimeModels);
+  if (!cache) {
+    cache = new Map();
+    weakMap.set(runtimeModels, cache);
+  }
+  return cache;
+};
+
+const getModelScalarFields = (runtimeModels, entity) => {
   const modelName = toModelName(entity);
-  if (modelScalarFieldsCache.has(modelName)) {
-    return modelScalarFieldsCache.get(modelName);
+  const cache = getRuntimeModelCache(modelScalarFieldsCache, runtimeModels);
+  if (cache.has(modelName)) {
+    return cache.get(modelName);
   }
 
   const model = runtimeModels[modelName];
   if (!model?.fields) {
-    modelScalarFieldsCache.set(modelName, null);
+    cache.set(modelName, null);
     return null;
   }
 
@@ -113,14 +125,14 @@ const getModelScalarFields = (entity) => {
       .map((field) => field.name),
   );
 
-  modelScalarFieldsCache.set(modelName, scalarFields);
+  cache.set(modelName, scalarFields);
   return scalarFields;
 };
 
-const sanitizeIncoming = (entity, incoming) => {
+const sanitizeIncoming = (runtimeModels, entity, incoming) => {
   if (!incoming || typeof incoming !== "object") return incoming;
 
-  const scalarFields = getModelScalarFields(entity);
+  const scalarFields = getModelScalarFields(runtimeModels, entity);
   if (!scalarFields) return incoming;
 
   const sanitized = {};
@@ -133,7 +145,7 @@ const sanitizeIncoming = (entity, incoming) => {
   return sanitized;
 };
 
-const getUniqueScalarFields = (entity) => {
+const getUniqueScalarFields = (runtimeModels, entity) => {
   const modelName = toModelName(entity);
   const model = runtimeModels[modelName];
   if (!model?.fields) return [];
@@ -160,12 +172,12 @@ const parseUniqueTargetsFromMessage = (error) => {
     .filter(Boolean);
 };
 
-const getConflictTargets = (entity, incoming, error) => {
+const getConflictTargets = (runtimeModels, entity, incoming, error) => {
   const rawTargets = Array.isArray(error?.meta?.target)
     ? error.meta.target
     : parseUniqueTargetsFromMessage(error);
 
-  const uniqueScalarFields = getUniqueScalarFields(entity);
+  const uniqueScalarFields = getUniqueScalarFields(runtimeModels, entity);
 
   const candidates = (rawTargets.length ? rawTargets : uniqueScalarFields)
     .filter((field) => field !== "id")
@@ -209,6 +221,7 @@ const updateExistingOnConflict = async (
 
 const upsertWithConflictRecovery = async ({
   delegate,
+  runtimeModels,
   entity,
   incoming,
   sanitizedIncoming,
@@ -225,7 +238,12 @@ const upsertWithConflictRecovery = async ({
       throw error;
     }
 
-    const conflictTargets = getConflictTargets(entity, incoming, error);
+    const conflictTargets = getConflictTargets(
+      runtimeModels,
+      entity,
+      incoming,
+      error,
+    );
     for (const field of conflictTargets) {
       const conflicting = await delegate.findFirst({
         where: { [field]: incoming[field] },
@@ -259,15 +277,16 @@ const upsertWithConflictRecovery = async ({
   }
 };
 
-const getModelRelations = (entity) => {
+const getModelRelations = (runtimeModels, entity) => {
   const modelName = toModelName(entity);
-  if (modelRelationsCache.has(modelName)) {
-    return modelRelationsCache.get(modelName);
+  const cache = getRuntimeModelCache(modelRelationsCache, runtimeModels);
+  if (cache.has(modelName)) {
+    return cache.get(modelName);
   }
 
   const model = runtimeModels[modelName];
   if (!model?.fields) {
-    modelRelationsCache.set(modelName, []);
+    cache.set(modelName, []);
     return [];
   }
 
@@ -281,7 +300,7 @@ const getModelRelations = (entity) => {
       fromFields: field.relationFromFields,
     }));
 
-  modelRelationsCache.set(modelName, relations);
+  cache.set(modelName, relations);
   return relations;
 };
 
@@ -290,8 +309,8 @@ const toDelegateKey = (modelName) => {
   return modelName[0].toLowerCase() + modelName.slice(1);
 };
 
-const areForeignKeysSatisfied = async (tx, entity, incoming) => {
-  const relations = getModelRelations(entity);
+const areForeignKeysSatisfied = async (tx, runtimeModels, entity, incoming) => {
+  const relations = getModelRelations(runtimeModels, entity);
   if (!relations.length) return true;
 
   for (const relation of relations) {
@@ -317,6 +336,7 @@ const areForeignKeysSatisfied = async (tx, entity, incoming) => {
 const applyChangeToRemote = async (cloud, change, deviceId) => {
   const delegate = resolveDelegate(cloud, String(change.entity ?? ""));
   if (!delegate) return { applied: false, deferred: false };
+  const cloudRuntimeModels = getRuntimeModels(cloud);
 
   const incoming = change.data;
   if (!incoming?.id) return { applied: false, deferred: false };
@@ -371,6 +391,7 @@ const applyChangeToRemote = async (cloud, change, deviceId) => {
 
   const canApply = await areForeignKeysSatisfied(
     cloud,
+    cloudRuntimeModels,
     change.entity,
     incoming,
   );
@@ -378,10 +399,15 @@ const applyChangeToRemote = async (cloud, change, deviceId) => {
     return { applied: false, deferred: true };
   }
 
-  const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
+  const sanitizedIncoming = sanitizeIncoming(
+    cloudRuntimeModels,
+    change.entity,
+    incoming,
+  );
 
   const upsertResult = await upsertWithConflictRecovery({
     delegate,
+    runtimeModels: cloudRuntimeModels,
     entity: change.entity,
     incoming,
     sanitizedIncoming,
@@ -446,14 +472,24 @@ const applyChangeToLocal = async (tx, change) => {
     return { applied: true, deferred: false, skipped: true };
   }
 
-  const canApply = await areForeignKeysSatisfied(tx, change.entity, incoming);
+  const canApply = await areForeignKeysSatisfied(
+    tx,
+    localRuntimeModels,
+    change.entity,
+    incoming,
+  );
   if (!canApply) {
     return { applied: false, deferred: true };
   }
 
-  const sanitizedIncoming = sanitizeIncoming(change.entity, incoming);
+  const sanitizedIncoming = sanitizeIncoming(
+    localRuntimeModels,
+    change.entity,
+    incoming,
+  );
   await upsertWithConflictRecovery({
     delegate,
+    runtimeModels: localRuntimeModels,
     entity: change.entity,
     incoming,
     sanitizedIncoming,

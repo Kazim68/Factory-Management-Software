@@ -1,5 +1,12 @@
 import prisma from "../prisma.js";
-import { groupByPeriod, toDate, withDateRange } from "../utils/date.js";
+import {
+  formatDateKey,
+  formatMonthKey,
+  getWeekStart,
+  groupByPeriod,
+  toDate,
+  withDateRange,
+} from "../utils/date.js";
 
 const toDbPaymentType = (paymentType) => {
   const normalized = String(paymentType ?? "CASH").toUpperCase();
@@ -12,8 +19,8 @@ const isKhata = (paymentType) =>
   ["CREDIT", "KHATA"].includes(String(paymentType ?? "CASH").toUpperCase());
 
 export const listExpenses = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
     where: {
       date: withDateRange(start, end),
@@ -65,7 +72,7 @@ export const createExpense = async (req, res) => {
     if (module === "CHEMICAL" && moduleData) {
       const purchase = await tx.chemicalPurchase.create({
         data: {
-          date: new Date(moduleData.date ?? date),
+          date: toDate(moduleData.date ?? date, "start"),
           partyId: moduleData.partyId ?? partyId,
           quantityKg: moduleData.quantityKg,
           ratePerKg: moduleData.ratePerKg,
@@ -91,7 +98,7 @@ export const createExpense = async (req, res) => {
     if (module === "REXINE" && moduleData) {
       const purchase = await tx.rexinePurchase.create({
         data: {
-          date: new Date(moduleData.date ?? date),
+          date: toDate(moduleData.date ?? date, "start"),
           partyId: moduleData.partyId ?? partyId,
           quantityMeter: moduleData.quantityMeter,
           ratePerMeter: moduleData.ratePerMeter,
@@ -117,7 +124,7 @@ export const createExpense = async (req, res) => {
     if (module === "MATERIAL" && moduleData) {
       const purchase = await tx.materialPurchase.create({
         data: {
-          date: new Date(moduleData.date ?? date),
+          date: toDate(moduleData.date ?? date, "start"),
           partyId: moduleData.partyId ?? partyId,
           articleId: moduleData.articleId,
           unitId: moduleData.unitId,
@@ -146,7 +153,7 @@ export const createExpense = async (req, res) => {
       const advance = await tx.laborAdvance.create({
         data: {
           laborId: moduleData.laborId,
-          date: new Date(moduleData.date ?? date),
+          date: toDate(moduleData.date ?? date, "start"),
           amount: moduleData.amount ?? amount,
           reason: moduleData.reason ?? description,
         },
@@ -161,7 +168,7 @@ export const createExpense = async (req, res) => {
 
     const expense = await tx.expenseEntry.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         laborId,
         module: module ?? "MISC",
@@ -253,7 +260,7 @@ export const updateExpense = async (req, res) => {
   const expense = await prisma.expenseEntry.update({
     where: { id: req.params.expenseId },
     data: {
-      date: req.body.date ? new Date(req.body.date) : undefined,
+      date: req.body.date ? toDate(req.body.date, "start") : undefined,
       partyId: req.body.partyId,
       laborId: req.body.laborId,
       module: req.body.module,
@@ -322,48 +329,44 @@ export const deleteExpense = async (req, res) => {
 };
 
 export const getDailySummary = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
     where: { date: withDateRange(start, end) },
     orderBy: { date: "asc" },
   });
 
   const grouped = groupByPeriod(expenses, (expense) =>
-    expense.date.toISOString().slice(0, 10),
+    formatDateKey(expense.date),
   );
   res.json(Object.values(grouped));
 };
 
 export const getWeeklySummary = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
     where: { date: withDateRange(start, end) },
     orderBy: { date: "asc" },
   });
 
   const grouped = groupByPeriod(expenses, (expense) => {
-    const date = new Date(expense.date);
-    const day = date.getUTCDay() || 7;
-    const weekStart = new Date(date);
-    weekStart.setUTCDate(date.getUTCDate() - day + 1);
-    return weekStart.toISOString().slice(0, 10);
+    return formatDateKey(getWeekStart(expense.date));
   });
 
   res.json(Object.values(grouped));
 };
 
 export const getMonthlySummary = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
     where: { date: withDateRange(start, end) },
     orderBy: { date: "asc" },
   });
 
   const grouped = groupByPeriod(expenses, (expense) =>
-    expense.date.toISOString().slice(0, 7),
+    formatMonthKey(expense.date),
   );
 
   res.json(Object.values(grouped));

@@ -1,5 +1,24 @@
 import prisma from "../prisma.js";
-import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
+import {
+  endOfDay,
+  formatDateKey,
+  formatDateTime,
+  getMonthEnd,
+  getMonthStart,
+  getWeekStart,
+  startOfDay,
+  toDate,
+} from "../utils/date.js";
+import {
+  formatPrintNumber,
+  getPrintDirection,
+  getPrintFontFamily,
+  getPrintLocale,
+  getPrintTextAlign,
+  normalizePrintLanguage,
+  translatePrintList,
+  translatePrintText,
+} from "../utils/printLanguage.js";
 
 const toDbPaymentType = (paymentType) => {
   const normalized = String(paymentType ?? "CASH").toUpperCase();
@@ -11,15 +30,13 @@ const toDbPaymentType = (paymentType) => {
 const isKhata = (paymentType) =>
   ["CREDIT", "KHATA"].includes(String(paymentType ?? "CASH").toUpperCase());
 
-const toNormalizedPurchaseType = (value) =>
-  String(value ?? "KHATA").toUpperCase();
-
-const toSupplierPaymentMethod = (paymentType) =>
-  paymentType === "CHEQUE"
-    ? "CHEQUE"
-    : paymentType === "CASH"
-      ? "CASH"
-      : "CREDIT";
+const toPurchasePaymentLabel = (paymentType) => {
+  const normalized = String(paymentType ?? "KHATA").toUpperCase();
+  if (normalized === "KHATA" || normalized === "CREDIT") return "Khata";
+  if (normalized === "CHEQUE") return "Cheque";
+  if (normalized === "BANK") return "Bank";
+  return "Cash";
+};
 
 const PURCHASE_PRINT_TYPES = new Set(["CHEMICAL", "REXINE", "MATERIAL"]);
 const PURCHASE_PRINT_PRESETS = new Set([
@@ -39,12 +56,18 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-const formatMoney = (value) => `Rs ${Number(value ?? 0).toFixed(2)}`;
+const formatMoney = (value, language) =>
+  `Rs ${formatPrintNumber(value, language, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
-const formatPrintDate = (value) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("en-GB");
+const formatPrintDate = (value, language) => {
+  return formatDateTime(value, getPrintLocale(language, "date"), {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 };
 
 const parsePrintTypes = (typesValue) => {
@@ -66,12 +89,10 @@ const getPrintDateRange = ({ timePreset, start, end }) => {
     : "THIS_MONTH";
 
   const now = new Date();
-  const from = new Date(now);
-  const to = new Date(now);
 
   if (preset === "CUSTOM") {
-    const customStart = start ? new Date(`${start}T00:00:00`) : null;
-    const customEnd = end ? new Date(`${end}T23:59:59.999`) : null;
+    const customStart = start ? toDate(start, "start") : null;
+    const customEnd = end ? toDate(end, "end") : null;
     return {
       preset,
       from:
@@ -83,34 +104,27 @@ const getPrintDateRange = ({ timePreset, start, end }) => {
   }
 
   if (preset === "DAILY") {
-    from.setHours(0, 0, 0, 0);
-    to.setHours(23, 59, 59, 999);
-    return { preset, from, to };
+    return { preset, from: startOfDay(now), to: endOfDay(now) };
   }
 
   if (preset === "WEEKLY") {
-    const day = now.getDay();
-    const mondayOffset = (day + 6) % 7;
-    from.setDate(now.getDate() - mondayOffset);
-    from.setHours(0, 0, 0, 0);
-    to.setDate(from.getDate() + 6);
-    to.setHours(23, 59, 59, 999);
-    return { preset, from, to };
+    const weekStart = getWeekStart(now);
+    const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
+    return {
+      preset,
+      from: weekStart,
+      to: endOfDay(weekEnd),
+    };
   }
 
   if (preset === "YEARLY") {
-    from.setMonth(0, 1);
-    from.setHours(0, 0, 0, 0);
-    to.setMonth(11, 31);
-    to.setHours(23, 59, 59, 999);
-    return { preset, from, to };
+    const currentYear = formatDateKey(now).slice(0, 4);
+    const startYear = startOfDay(`${currentYear}-01-01`);
+    const endYear = endOfDay(`${currentYear}-12-31`);
+    return { preset, from: startYear, to: endYear };
   }
 
-  from.setDate(1);
-  from.setHours(0, 0, 0, 0);
-  to.setMonth(now.getMonth() + 1, 0);
-  to.setHours(23, 59, 59, 999);
-  return { preset, from, to };
+  return { preset, from: getMonthStart(now), to: getMonthEnd(now) };
 };
 
 const whereDateRange = (from, to) => {
@@ -121,6 +135,7 @@ const whereDateRange = (from, to) => {
 };
 
 export const getPrintableSupplierPurchases = async (req, res) => {
+  const language = normalizePrintLanguage(req.query.lang);
   const selectedTypes = parsePrintTypes(req.query.types);
   const range = getPrintDateRange({
     timePreset: req.query.timePreset,
@@ -157,35 +172,47 @@ export const getPrintableSupplierPurchases = async (req, res) => {
   const rows = [
     ...chemicalData.map((entry) => ({
       date: entry.date,
-      supplierName: entry.party?.name || "Unknown",
-      type: "CHEMICAL",
-      itemName: "Raw Material",
-      quantity: `${Number(entry.quantityKg)} kg`,
-      rate: `${formatMoney(entry.ratePerKg)}/kg`,
+      supplierName:
+        entry.party?.name || translatePrintText("Unknown", language),
+      type: translatePrintText("CHEMICAL", language),
+      itemName: translatePrintText("Raw Material", language),
+      quantity: `${formatPrintNumber(entry.quantityKg, language)} ${translatePrintText("kg", language)}`,
+      rate: `${formatMoney(entry.ratePerKg, language)}/${translatePrintText("kg", language)}`,
       total: Number(entry.totalAmount ?? 0),
-      paymentType: entry.paymentType,
+      paymentType: translatePrintText(
+        toPurchasePaymentLabel(entry.paymentType),
+        language,
+      ),
     })),
     ...rexineData.map((entry) => ({
       date: entry.date,
-      supplierName: entry.party?.name || "Unknown",
-      type: "REXINE",
-      itemName: "Raw Material",
-      quantity: `${Number(entry.quantityMeter)} meter`,
-      rate: `${formatMoney(entry.ratePerMeter)}/meter`,
+      supplierName:
+        entry.party?.name || translatePrintText("Unknown", language),
+      type: translatePrintText("REXINE", language),
+      itemName: translatePrintText("Raw Material", language),
+      quantity: `${formatPrintNumber(entry.quantityMeter, language)} ${translatePrintText("meter", language)}`,
+      rate: `${formatMoney(entry.ratePerMeter, language)}/${translatePrintText("meter", language)}`,
       total: Number(entry.totalAmount ?? 0),
-      paymentType: entry.paymentType,
+      paymentType: translatePrintText(
+        toPurchasePaymentLabel(entry.paymentType),
+        language,
+      ),
     })),
     ...materialData.map((entry) => {
       const unitLabel = entry.unit?.symbol || entry.unit?.name || "unit";
       return {
         date: entry.date,
-        supplierName: entry.party?.name || "Unknown",
-        type: "MATERIAL",
+        supplierName:
+          entry.party?.name || translatePrintText("Unknown", language),
+        type: translatePrintText("MATERIAL", language),
         itemName: entry.article?.name || "-",
-        quantity: `${Number(entry.quantity)} ${unitLabel}`,
-        rate: `${formatMoney(entry.pricePerUnit)}/${unitLabel}`,
+        quantity: `${formatPrintNumber(entry.quantity, language)} ${unitLabel}`,
+        rate: `${formatMoney(entry.pricePerUnit, language)}/${unitLabel}`,
         total: Number(entry.totalAmount ?? 0),
-        paymentType: entry.paymentType,
+        paymentType: translatePrintText(
+          toPurchasePaymentLabel(entry.paymentType),
+          language,
+        ),
       };
     }),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -196,68 +223,82 @@ export const getPrintableSupplierPurchases = async (req, res) => {
     .map(
       (row) => `
       <tr>
-        <td>${escapeHtml(formatPrintDate(row.date))}</td>
+        <td>${escapeHtml(formatPrintDate(row.date, language))}</td>
         <td>${escapeHtml(row.supplierName)}</td>
         <td>${escapeHtml(row.type)}</td>
         <td>${escapeHtml(row.itemName)}</td>
         <td>${escapeHtml(row.quantity)}</td>
         <td>${escapeHtml(row.rate)}</td>
-        <td>${escapeHtml(formatMoney(row.total))}</td>
+        <td>${escapeHtml(formatMoney(row.total, language))}</td>
         <td>${escapeHtml(row.paymentType)}</td>
       </tr>
     `,
     )
     .join("");
 
-  const title = "Supplier Purchase Report";
-  const generatedAt = new Date().toLocaleString("en-GB");
-  const fromText = range.from ? formatPrintDate(range.from) : "-";
-  const toText = range.to ? formatPrintDate(range.to) : "-";
+  const title = translatePrintText("Supplier Purchase Report", language);
+  const generatedAt = formatDateTime(
+    new Date(),
+    getPrintLocale(language, "date"),
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  );
+  const fromText = range.from ? formatPrintDate(range.from, language) : "-";
+  const toText = range.to ? formatPrintDate(range.to, language) : "-";
+  const direction = getPrintDirection(language);
+  const textAlign = getPrintTextAlign(language);
+  const fontFamily = getPrintFontFamily(language);
+  const languageCode = language === "ur" ? "ur" : "en";
 
   const html = `<!DOCTYPE html>
-  <html>
+  <html lang="${languageCode}" dir="${direction}">
     <head>
       <meta charset="utf-8" />
       <title>${escapeHtml(title)}</title>
       <style>
-        body { font-family: Arial, sans-serif; padding: 18px; color: #111; }
+        body { font-family: ${fontFamily}; padding: 18px; color: #111; direction: ${direction}; text-align: ${textAlign}; }
         h1 { margin: 0 0 8px; font-size: 22px; }
         .meta { margin-bottom: 14px; font-size: 13px; }
         .meta p { margin: 3px 0; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: left; font-size: 12px; }
+        th, td { border: 1px solid #d4d4d4; padding: 7px; text-align: ${textAlign}; font-size: 12px; }
         th { background: #f5f5f5; }
-        .totals { margin-top: 12px; text-align: right; font-weight: 700; }
+        .totals { margin-top: 12px; text-align: ${direction === "rtl" ? "left" : "right"}; font-weight: 700; }
         @media print { body { padding: 8px; } }
       </style>
     </head>
     <body>
       <h1>${escapeHtml(title)}</h1>
       <div class="meta">
-        <p><strong>Generated At:</strong> ${escapeHtml(generatedAt)}</p>
-        <p><strong>Type Filters:</strong> ${escapeHtml(selectedTypes.join(", "))}</p>
-        <p><strong>Time Filter:</strong> ${escapeHtml(range.preset)}</p>
-        <p><strong>Date Range:</strong> ${escapeHtml(fromText)} to ${escapeHtml(toText)}</p>
-        <p><strong>Total Rows:</strong> ${rows.length}</p>
+        <p><strong>${escapeHtml(translatePrintText("Generated At", language))}:</strong> ${escapeHtml(generatedAt)}</p>
+        <p><strong>${escapeHtml(translatePrintText("Type Filters", language))}:</strong> ${escapeHtml(translatePrintList(selectedTypes, language))}</p>
+        <p><strong>${escapeHtml(translatePrintText("Time Filter", language))}:</strong> ${escapeHtml(translatePrintText(range.preset, language))}</p>
+        <p><strong>${escapeHtml(translatePrintText("Date Range", language))}:</strong> ${escapeHtml(fromText)} ${escapeHtml(translatePrintText("To", language))} ${escapeHtml(toText)}</p>
+        <p><strong>${escapeHtml(translatePrintText("Total Rows", language))}:</strong> ${rows.length}</p>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Supplier</th>
-            <th>Type</th>
-            <th>Item</th>
-            <th>Quantity</th>
-            <th>Rate</th>
-            <th>Total</th>
-            <th>Payment</th>
+            <th>${escapeHtml(translatePrintText("Date", language))}</th>
+            <th>${escapeHtml(translatePrintText("Supplier", language))}</th>
+            <th>${escapeHtml(translatePrintText("Type", language))}</th>
+            <th>${escapeHtml(translatePrintText("Item", language))}</th>
+            <th>${escapeHtml(translatePrintText("Quantity", language))}</th>
+            <th>${escapeHtml(translatePrintText("Rate", language))}</th>
+            <th>${escapeHtml(translatePrintText("Total", language))}</th>
+            <th>${escapeHtml(translatePrintText("Payment", language))}</th>
           </tr>
         </thead>
         <tbody>
-          ${htmlRows || '<tr><td colspan="8">No records found for selected filters.</td></tr>'}
+          ${htmlRows || `<tr><td colspan="8">${escapeHtml(translatePrintText("No records found for selected filters.", language))}</td></tr>`}
         </tbody>
       </table>
-      <div class="totals">Grand Total: ${escapeHtml(formatMoney(grandTotal))}</div>
+      <div class="totals">${escapeHtml(translatePrintText("Grand Total", language))}: ${escapeHtml(formatMoney(grandTotal, language))}</div>
       <script>window.onload = () => { window.focus(); window.print(); };</script>
     </body>
   </html>`;
@@ -267,8 +308,7 @@ export const getPrintableSupplierPurchases = async (req, res) => {
 };
 
 export const createCombinedSupplierPurchase = async (req, res) => {
-  const { date, partyId, paymentType, amountPaid, chequeId, rows } =
-    req.body ?? {};
+  const { date, partyId, rows } = req.body ?? {};
 
   if (!partyId) {
     res.status(400).json({ error: "Supplier is required." });
@@ -277,12 +317,6 @@ export const createCombinedSupplierPurchase = async (req, res) => {
 
   if (!Array.isArray(rows) || rows.length === 0) {
     res.status(400).json({ error: "At least one purchase row is required." });
-    return;
-  }
-
-  const normalizedPaymentType = toNormalizedPurchaseType(paymentType);
-  if (!["KHATA", "CASH", "CHEQUE"].includes(normalizedPaymentType)) {
-    res.status(400).json({ error: "Invalid payment type." });
     return;
   }
 
@@ -330,24 +364,7 @@ export const createCombinedSupplierPurchase = async (req, res) => {
     (sum, row) => sum + row.totalAmount,
     0,
   );
-  const safeAmountPaid = Number.isFinite(Number(amountPaid))
-    ? Math.max(0, Number(amountPaid))
-    : 0;
-
-  if (normalizedPaymentType === "KHATA" && safeAmountPaid > grossTotal) {
-    res
-      .status(400)
-      .json({ error: "Amount paid cannot exceed gross total for khata." });
-    return;
-  }
-
-  if (normalizedPaymentType === "CHEQUE" && !chequeId) {
-    res.status(400).json({ error: "Please select a cheque." });
-    return;
-  }
-
-  const dbPurchasePaymentType =
-    normalizedPaymentType === "CASH" ? "CASH" : "CREDIT";
+  const dbPurchasePaymentType = "CREDIT";
 
   const result = await prisma
     .$transaction(async (tx) => {
@@ -356,27 +373,12 @@ export const createCombinedSupplierPurchase = async (req, res) => {
         throw new Error("Selected party must be a supplier.");
       }
 
-      let selectedCheque = null;
-      if (normalizedPaymentType === "CHEQUE") {
-        selectedCheque = await tx.cheque.findUnique({
-          where: { id: chequeId },
-        });
-        if (!selectedCheque || selectedCheque.status !== "AVAILABLE") {
-          throw new Error("Selected cheque is not available.");
-        }
-
-        const chequeAmount = Number(selectedCheque.amount ?? 0);
-        if (Math.abs(chequeAmount - safeAmountPaid) > 0.0001) {
-          throw new Error("Amount paid must match selected cheque amount.");
-        }
-      }
-
       const created = [];
       for (const row of normalizedRows) {
         if (row.type === "CHEMICAL") {
           const purchase = await tx.chemicalPurchase.create({
             data: {
-              date: new Date(date),
+              date: toDate(date, "start"),
               partyId,
               quantityKg: row.quantity,
               ratePerKg: row.rate,
@@ -405,7 +407,7 @@ export const createCombinedSupplierPurchase = async (req, res) => {
         if (row.type === "REXINE") {
           const purchase = await tx.rexinePurchase.create({
             data: {
-              date: new Date(date),
+              date: toDate(date, "start"),
               partyId,
               quantityMeter: row.quantity,
               ratePerMeter: row.rate,
@@ -433,7 +435,7 @@ export const createCombinedSupplierPurchase = async (req, res) => {
 
         const purchase = await tx.materialPurchase.create({
           data: {
-            date: new Date(date),
+            date: toDate(date, "start"),
             partyId,
             articleId: row.articleId,
             quantity: row.quantity,
@@ -459,61 +461,11 @@ export const createCombinedSupplierPurchase = async (req, res) => {
         created.push({ type: "MATERIAL", id: purchase.id });
       }
 
-      let payment = null;
-      if (safeAmountPaid > 0) {
-        const method = toSupplierPaymentMethod(normalizedPaymentType);
-        if (normalizedPaymentType !== "CASH") {
-          payment = await tx.partyPayment.create({
-            data: {
-              partyId,
-              date: new Date(date),
-              amount: safeAmountPaid,
-              method,
-              reference: "Supplier Purchase Payment",
-              description: "Supplier purchase payment",
-            },
-          });
-
-          await tx.partyLedgerEntry.create({
-            data: {
-              partyId,
-              date: new Date(date),
-              reference: "Supplier Purchase Payment",
-              description: "Supplier purchase payment",
-              balance: safeAmountPaid,
-            },
-          });
-        }
-
-        await createSystemRoznamchaEntry(tx, {
-          date: new Date(date),
-          amount: safeAmountPaid,
-          description: "Supplier purchase payment",
-          partyId,
-          paymentType: method,
-          sourceSystem: "PARTY_PAYMENT_PAID",
-        });
-
-        if (method === "CHEQUE") {
-          await tx.cheque.update({
-            where: { id: selectedCheque.id },
-            data: {
-              status: "USED",
-              usedPaymentId: payment.id,
-              usedPartyId: partyId,
-              notes: selectedCheque.notes,
-              chequeNumber: selectedCheque.chequeNumber,
-            },
-          });
-        }
-      }
-
       return {
         grossTotal,
-        amountPaid: safeAmountPaid,
-        paymentType: normalizedPaymentType,
+        amountPaid: 0,
+        paymentType: "KHATA",
         created,
-        payment,
       };
     })
     .catch((error) => {
@@ -534,7 +486,7 @@ export const createChemicalPurchase = async (req, res) => {
   const result = await prisma.$transaction(async (tx) => {
     const purchase = await tx.chemicalPurchase.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         quantityKg,
         ratePerKg,
@@ -545,7 +497,7 @@ export const createChemicalPurchase = async (req, res) => {
 
     const expense = await tx.expenseEntry.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         module: "CHEMICAL",
         paymentType: purchase.paymentType,
@@ -589,7 +541,7 @@ export const updateChemicalPurchase = async (req, res) => {
     const updated = await tx.chemicalPurchase.update({
       where: { id: req.params.purchaseId },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         partyId: req.body.partyId,
         quantityKg: req.body.quantityKg,
         ratePerKg: req.body.ratePerKg,
@@ -601,7 +553,7 @@ export const updateChemicalPurchase = async (req, res) => {
     await tx.expenseEntry.updateMany({
       where: { chemicalPurchaseId: updated.id },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         partyId: req.body.partyId,
         paymentType: updated.paymentType,
         amount: req.body.totalAmount,
@@ -676,7 +628,7 @@ export const createRexinePurchase = async (req, res) => {
   const result = await prisma.$transaction(async (tx) => {
     const purchase = await tx.rexinePurchase.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         quantityMeter,
         ratePerMeter,
@@ -687,7 +639,7 @@ export const createRexinePurchase = async (req, res) => {
 
     const expense = await tx.expenseEntry.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         module: "REXINE",
         paymentType: purchase.paymentType,
@@ -731,7 +683,7 @@ export const updateRexinePurchase = async (req, res) => {
     const updated = await tx.rexinePurchase.update({
       where: { id: req.params.purchaseId },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         partyId: req.body.partyId,
         quantityMeter: req.body.quantityMeter,
         ratePerMeter: req.body.ratePerMeter,
@@ -743,7 +695,7 @@ export const updateRexinePurchase = async (req, res) => {
     await tx.expenseEntry.updateMany({
       where: { rexinePurchaseId: updated.id },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         partyId: req.body.partyId,
         paymentType: updated.paymentType,
         amount: req.body.totalAmount,
@@ -820,7 +772,7 @@ export const createMaterialPurchase = async (req, res) => {
   const result = await prisma.$transaction(async (tx) => {
     const purchase = await tx.materialPurchase.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         articleId,
         unitId,
@@ -833,7 +785,7 @@ export const createMaterialPurchase = async (req, res) => {
 
     const expense = await tx.expenseEntry.create({
       data: {
-        date: new Date(date),
+        date: toDate(date, "start"),
         partyId,
         module: "MATERIAL",
         paymentType: purchase.paymentType,
@@ -877,7 +829,7 @@ export const updateMaterialPurchase = async (req, res) => {
     const updated = await tx.materialPurchase.update({
       where: { id: req.params.purchaseId },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         partyId: req.body.partyId,
         articleId: req.body.articleId,
         unitId: req.body.unitId,
@@ -891,7 +843,7 @@ export const updateMaterialPurchase = async (req, res) => {
     await tx.expenseEntry.updateMany({
       where: { materialPurchaseId: updated.id },
       data: {
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        date: req.body.date ? toDate(req.body.date, "start") : undefined,
         partyId: req.body.partyId,
         paymentType: updated.paymentType,
         amount: req.body.totalAmount,

@@ -1,8 +1,10 @@
 import prisma from "../prisma.js";
+import { toDate } from "../utils/date.js";
 
 const toApiCheque = (cheque) => ({
   ...cheque,
   amount: Number(cheque.amount ?? 0),
+  originType: cheque.sourcePartyId ? "CUSTOMER" : "OWN",
 });
 
 export const listCheques = async (req, res) => {
@@ -64,7 +66,7 @@ export const updateCheque = async (req, res) => {
   const updated = await prisma.cheque.update({
     where: { id: cheque.id },
     data: {
-      date: req.body.date ? new Date(req.body.date) : undefined,
+      date: req.body.date ? toDate(req.body.date, "start") : undefined,
       amount,
       chequeNumber:
         req.body.chequeNumber == null
@@ -94,14 +96,14 @@ export const cashCheque = async (req, res) => {
     return;
   }
 
-  if (cheque.status !== "AVAILABLE") {
+  if (cheque.status === "CASHED") {
     res
       .status(400)
-      .json({ error: "Only available cheques can be marked cashed." });
+      .json({ error: "Cheque is already marked as cashed." });
     return;
   }
 
-  const cashDate = req.body.date ? new Date(req.body.date) : new Date();
+  const cashDate = req.body.date ? toDate(req.body.date, "start") : new Date();
   const updated = await prisma.cheque.update({
     where: { id: cheque.id },
     data: {

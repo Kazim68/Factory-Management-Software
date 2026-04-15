@@ -1,16 +1,10 @@
-import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Filter, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -29,12 +23,14 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { configApi } from "../lib/api";
+import { useClientPagination } from "../hooks/useClientPagination";
 import type {
   ApiArticle,
   ApiLaborCategory,
   ApiPaymentType,
   ApiUnit,
 } from "../types/api";
+import { TablePagination } from "./ui/table-pagination";
 
 type LoadState = "idle" | "loading" | "error";
 
@@ -68,6 +64,7 @@ export function Configuration() {
   });
   const [laborForm, setLaborForm] = useState({ name: "" });
   const [activeTab, setActiveTab] = useState("units");
+  const [configSearchQuery, setConfigSearchQuery] = useState("");
 
   const loadConfig = async () => {
     setStatus("loading");
@@ -267,6 +264,133 @@ export function Configuration() {
 
   const isLoading = status === "loading";
 
+  const unitSelectOptions = useMemo(
+    () => [
+      { value: "none", label: "No unit" },
+      ...units.map((unit) => ({
+        value: unit.id,
+        label: unit.name,
+        description: unit.symbol || undefined,
+      })),
+    ],
+    [units],
+  );
+
+  const normalizedConfigQuery = configSearchQuery.trim().toLowerCase();
+
+  const filteredUnits = useMemo(
+    () =>
+      units.filter((unit) =>
+        [unit.name, unit.symbol || ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedConfigQuery),
+      ),
+    [normalizedConfigQuery, units],
+  );
+
+  const filteredArticles = useMemo(
+    () =>
+      articles.filter((article) =>
+        [article.name, article.code || ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedConfigQuery),
+      ),
+    [articles, normalizedConfigQuery],
+  );
+
+  const filteredPaymentTypes = useMemo(
+    () =>
+      paymentTypes.filter((paymentType) =>
+        [paymentType.name, paymentType.unit?.name || ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedConfigQuery),
+      ),
+    [normalizedConfigQuery, paymentTypes],
+  );
+
+  const filteredLaborCategories = useMemo(
+    () =>
+      laborCategories.filter((category) =>
+        [category.id, category.name]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedConfigQuery),
+      ),
+    [laborCategories, normalizedConfigQuery],
+  );
+
+  const {
+    currentPage: unitsPage,
+    setCurrentPage: setUnitsPage,
+    pageSize: unitsPageSize,
+    setPageSize: setUnitsPageSize,
+    totalPages: unitsTotalPages,
+    totalItems: unitsTotalItems,
+    startItem: unitsStartItem,
+    endItem: unitsEndItem,
+    paginatedItems: paginatedUnits,
+    goToPreviousPage: goToPreviousUnitsPage,
+    goToNextPage: goToNextUnitsPage,
+  } = useClientPagination(filteredUnits);
+
+  const {
+    currentPage: articlesPage,
+    setCurrentPage: setArticlesPage,
+    pageSize: articlesPageSize,
+    setPageSize: setArticlesPageSize,
+    totalPages: articlesTotalPages,
+    totalItems: articlesTotalItems,
+    startItem: articlesStartItem,
+    endItem: articlesEndItem,
+    paginatedItems: paginatedArticles,
+    goToPreviousPage: goToPreviousArticlesPage,
+    goToNextPage: goToNextArticlesPage,
+  } = useClientPagination(filteredArticles);
+
+  const {
+    currentPage: paymentTypesPage,
+    setCurrentPage: setPaymentTypesPage,
+    pageSize: paymentTypesPageSize,
+    setPageSize: setPaymentTypesPageSize,
+    totalPages: paymentTypesTotalPages,
+    totalItems: paymentTypesTotalItems,
+    startItem: paymentTypesStartItem,
+    endItem: paymentTypesEndItem,
+    paginatedItems: paginatedPaymentTypes,
+    goToPreviousPage: goToPreviousPaymentTypesPage,
+    goToNextPage: goToNextPaymentTypesPage,
+  } = useClientPagination(filteredPaymentTypes);
+
+  const {
+    currentPage: laborCategoriesPage,
+    setCurrentPage: setLaborCategoriesPage,
+    pageSize: laborCategoriesPageSize,
+    setPageSize: setLaborCategoriesPageSize,
+    totalPages: laborCategoriesTotalPages,
+    totalItems: laborCategoriesTotalItems,
+    startItem: laborCategoriesStartItem,
+    endItem: laborCategoriesEndItem,
+    paginatedItems: paginatedLaborCategories,
+    goToPreviousPage: goToPreviousLaborCategoriesPage,
+    goToNextPage: goToNextLaborCategoriesPage,
+  } = useClientPagination(filteredLaborCategories);
+
+  const clearConfigFilters = () => {
+    setConfigSearchQuery("");
+  };
+
+  const configSearchPlaceholder =
+    activeTab === "articles"
+      ? "Search articles by name or code..."
+      : activeTab === "payment"
+        ? "Search payment types or linked units..."
+        : activeTab === "labor-categories"
+          ? "Search departments by id or name..."
+          : "Search units by name or symbol...";
+
   return (
     <div className="space-y-6">
       <Card>
@@ -288,6 +412,28 @@ export function Configuration() {
                   Labor Categories
                 </TabsTrigger>
               </TabsList>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+              <div className="min-w-[240px] flex-1 md:max-w-[420px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Search Current Tab
+                </Label>
+                <Input
+                  value={configSearchQuery}
+                  onChange={(event) => setConfigSearchQuery(event.target.value)}
+                  placeholder={configSearchPlaceholder}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={clearConfigFilters}
+              >
+                <Filter className="mr-2 h-4 w-4" />
+                Reset Filters
+              </Button>
             </div>
 
             <TabsContent
@@ -374,9 +520,14 @@ export function Configuration() {
                 <TableBody>
                   {isLoading
                     ? renderEmpty(3, "Loading units...")
-                    : units.length === 0
-                      ? renderEmpty(3, "No units yet")
-                      : units.map((unit) => (
+                    : filteredUnits.length === 0
+                      ? renderEmpty(
+                          3,
+                          units.length === 0
+                            ? "No units yet"
+                            : "No units match the current filters.",
+                        )
+                      : paginatedUnits.map((unit) => (
                           <TableRow key={unit.id}>
                             <TableCell>{unit.name}</TableCell>
                             <TableCell>{unit.symbol || "-"}</TableCell>
@@ -402,6 +553,18 @@ export function Configuration() {
                         ))}
                 </TableBody>
               </Table>
+              <TablePagination
+                currentPage={unitsPage}
+                totalPages={unitsTotalPages}
+                totalItems={unitsTotalItems}
+                startItem={unitsStartItem}
+                endItem={unitsEndItem}
+                pageSize={unitsPageSize}
+                setPageSize={setUnitsPageSize}
+                goToPreviousPage={goToPreviousUnitsPage}
+                goToNextPage={goToNextUnitsPage}
+                setCurrentPage={setUnitsPage}
+              />
             </TabsContent>
 
             <TabsContent
@@ -488,9 +651,14 @@ export function Configuration() {
                 <TableBody>
                   {isLoading
                     ? renderEmpty(3, "Loading articles...")
-                    : articles.length === 0
-                      ? renderEmpty(3, "No articles yet")
-                      : articles.map((article) => (
+                    : filteredArticles.length === 0
+                      ? renderEmpty(
+                          3,
+                          articles.length === 0
+                            ? "No articles yet"
+                            : "No articles match the current filters.",
+                        )
+                      : paginatedArticles.map((article) => (
                           <TableRow key={article.id}>
                             <TableCell>{article.name}</TableCell>
                             <TableCell>{article.code || "-"}</TableCell>
@@ -516,6 +684,18 @@ export function Configuration() {
                         ))}
                 </TableBody>
               </Table>
+              <TablePagination
+                currentPage={articlesPage}
+                totalPages={articlesTotalPages}
+                totalItems={articlesTotalItems}
+                startItem={articlesStartItem}
+                endItem={articlesEndItem}
+                pageSize={articlesPageSize}
+                setPageSize={setArticlesPageSize}
+                goToPreviousPage={goToPreviousArticlesPage}
+                goToNextPage={goToNextArticlesPage}
+                setCurrentPage={setArticlesPage}
+              />
             </TabsContent>
 
             <TabsContent
@@ -569,24 +749,16 @@ export function Configuration() {
                       </div>
                       <div>
                         <Label>Unit (optional)</Label>
-                        <Select
+                        <SearchableSelect
                           value={paymentForm.unitId}
                           onValueChange={(value) =>
                             setPaymentForm({ ...paymentForm, unitId: value })
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="No unit" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No unit</SelectItem>
-                            {units.map((unit) => (
-                              <SelectItem key={unit.id} value={unit.id}>
-                                {unit.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          options={unitSelectOptions}
+                          placeholder="No unit"
+                          searchPlaceholder="Search unit..."
+                          emptyMessage="No units found."
+                        />
                       </div>
                       <div className="flex justify-end gap-2">
                         <Button
@@ -613,9 +785,14 @@ export function Configuration() {
                 <TableBody>
                   {isLoading
                     ? renderEmpty(3, "Loading payment types...")
-                    : paymentTypes.length === 0
-                      ? renderEmpty(3, "No payment types yet")
-                      : paymentTypes.map((type) => (
+                    : filteredPaymentTypes.length === 0
+                      ? renderEmpty(
+                          3,
+                          paymentTypes.length === 0
+                            ? "No payment types yet"
+                            : "No payment types match the current filters.",
+                        )
+                      : paginatedPaymentTypes.map((type) => (
                           <TableRow key={type.id}>
                             <TableCell>{type.name}</TableCell>
                             <TableCell>{type.unit?.name || "-"}</TableCell>
@@ -641,6 +818,18 @@ export function Configuration() {
                         ))}
                 </TableBody>
               </Table>
+              <TablePagination
+                currentPage={paymentTypesPage}
+                totalPages={paymentTypesTotalPages}
+                totalItems={paymentTypesTotalItems}
+                startItem={paymentTypesStartItem}
+                endItem={paymentTypesEndItem}
+                pageSize={paymentTypesPageSize}
+                setPageSize={setPaymentTypesPageSize}
+                goToPreviousPage={goToPreviousPaymentTypesPage}
+                goToNextPage={goToNextPaymentTypesPage}
+                setCurrentPage={setPaymentTypesPage}
+              />
             </TabsContent>
 
             <TabsContent
@@ -701,9 +890,14 @@ export function Configuration() {
                 <TableBody>
                   {isLoading
                     ? renderEmpty(3, "Loading labor categories...")
-                    : laborCategories.length === 0
-                      ? renderEmpty(3, "No labor categories yet")
-                      : laborCategories.map((category) => (
+                    : filteredLaborCategories.length === 0
+                      ? renderEmpty(
+                          3,
+                          laborCategories.length === 0
+                            ? "No labor categories yet"
+                            : "No departments match the current filters.",
+                        )
+                      : paginatedLaborCategories.map((category) => (
                           <TableRow key={category.id}>
                             <TableCell>{category.id}</TableCell>
                             <TableCell>{category.name}</TableCell>
@@ -720,6 +914,18 @@ export function Configuration() {
                         ))}
                 </TableBody>
               </Table>
+              <TablePagination
+                currentPage={laborCategoriesPage}
+                totalPages={laborCategoriesTotalPages}
+                totalItems={laborCategoriesTotalItems}
+                startItem={laborCategoriesStartItem}
+                endItem={laborCategoriesEndItem}
+                pageSize={laborCategoriesPageSize}
+                setPageSize={setLaborCategoriesPageSize}
+                goToPreviousPage={goToPreviousLaborCategoriesPage}
+                goToNextPage={goToNextLaborCategoriesPage}
+                setCurrentPage={setLaborCategoriesPage}
+              />
             </TabsContent>
           </Tabs>
         </CardContent>

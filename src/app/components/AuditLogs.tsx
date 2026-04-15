@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { auth } from '../lib/auth';
 import type { AuditLog } from '../types';
+import { useClientPagination } from '../hooks/useClientPagination';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import {
@@ -11,6 +12,9 @@ import {
   SelectValue,
 } from './ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { TablePagination } from './ui/table-pagination';
+import { SearchableSelect } from './ui/searchable-select';
+import { formatDateTime } from '../lib/utils';
 
 export function AuditLogs() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -25,6 +29,13 @@ export function AuditLogs() {
   const actorOptions = useMemo(
     () => Array.from(new Set(auditLogs.map((log) => log.actorName))).sort((a, b) => a.localeCompare(b)),
     [auditLogs],
+  );
+  const actorFilterOptions = useMemo(
+    () => [
+      { value: 'ALL', label: 'All users' },
+      ...actorOptions.map((actorName) => ({ value: actorName, label: actorName })),
+    ],
+    [actorOptions],
   );
 
   const filteredLogs = useMemo(() => {
@@ -44,6 +55,20 @@ export function AuditLogs() {
       return matchesAction && matchesActor && matchesSearch;
     });
   }, [actionFilter, actorFilter, auditLogs, search]);
+
+  const {
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalItems,
+    startItem,
+    endItem,
+    paginatedItems,
+    goToPreviousPage,
+    goToNextPage,
+  } = useClientPagination(filteredLogs);
 
   return (
     <Card>
@@ -70,19 +95,14 @@ export function AuditLogs() {
             </SelectContent>
           </Select>
 
-          <Select value={actorFilter} onValueChange={setActorFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filter by user" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All users</SelectItem>
-              {actorOptions.map((actorName) => (
-                <SelectItem key={actorName} value={actorName}>
-                  {actorName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={actorFilter}
+            onValueChange={setActorFilter}
+            options={actorFilterOptions}
+            placeholder="Filter by user"
+            searchPlaceholder="Search user..."
+            emptyMessage="No users found."
+          />
         </div>
 
         <Table>
@@ -103,9 +123,9 @@ export function AuditLogs() {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredLogs.map((log) => (
+              paginatedItems.map((log) => (
                 <TableRow key={log.id}>
-                  <TableCell>{new Date(log.timestamp).toLocaleString()}</TableCell>
+                  <TableCell>{formatDateTime(log.timestamp)}</TableCell>
                   <TableCell>{log.action}</TableCell>
                   <TableCell>{log.actorName}</TableCell>
                   <TableCell>{log.targetUserName ?? '-'}</TableCell>
@@ -115,6 +135,18 @@ export function AuditLogs() {
             )}
           </TableBody>
         </Table>
+        <TablePagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          startItem={startItem}
+          endItem={endItem}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          goToPreviousPage={goToPreviousPage}
+          goToNextPage={goToNextPage}
+          setCurrentPage={setCurrentPage}
+        />
       </CardContent>
     </Card>
   );

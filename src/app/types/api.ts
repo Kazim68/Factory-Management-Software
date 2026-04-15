@@ -142,6 +142,7 @@ export interface ApiCheque {
   chequeNumber?: string | null;
   notes?: string | null;
   status: ApiChequeStatus;
+  originType: "CUSTOMER" | "OWN";
   sourcePartyId?: string | null;
   usedPartyId?: string | null;
   sourcePaymentId?: string | null;
@@ -322,6 +323,7 @@ export interface ApiProductionOrder {
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
+  orderDate: string;
   status: ApiProductionOrderStatus;
   article?: ApiArticle | null;
   labor?: ApiLaborProfile | null;
@@ -329,6 +331,8 @@ export interface ApiProductionOrder {
 }
 
 export type ApiStockMode = "IN_STOCK" | "PACKED";
+export type ApiMallStockType = "B_MALL" | "C_MALL";
+export type ApiStockMovementDirection = "IN" | "OUT";
 
 export interface ApiStockEntry {
   id: string;
@@ -346,6 +350,9 @@ export interface ApiStockSummary {
   wipDozen: number;
   readyStockDozen: number;
   packedStockDozen: number;
+  packedAMallDozen: number;
+  packedBMallDozen: number;
+  packedCMallDozen: number;
 }
 
 export interface ApiStockArticleRow {
@@ -356,6 +363,20 @@ export interface ApiStockArticleRow {
   quantityDozen: number;
   bMallDozen: number;
   cMallDozen: number;
+}
+
+export interface ApiMallStockMovement {
+  id: string;
+  mallType: ApiMallStockType;
+  direction: ApiStockMovementDirection;
+  date: string;
+  quantityDozen: number;
+  ratePerDozen?: number | null;
+  totalAmount?: number | null;
+  reference?: string | null;
+  note?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type ApiReportPeriod = "daily" | "weekly" | "monthly";

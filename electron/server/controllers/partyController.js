@@ -1,5 +1,5 @@
 import prisma from "../prisma.js";
-import { toDate, withDateRange } from "../utils/date.js";
+import { endOfDay, toDate, withDateRange } from "../utils/date.js";
 import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
 
 export const listParties = async (req, res) => {
@@ -34,8 +34,8 @@ const normalizePartyType = (value) => {
 };
 
 export const listSupplierPendingDues = async (req, res) => {
-  const asOfDate = toDate(req.query.asOf);
-  const end = asOfDate ?? new Date();
+  const asOfDate = toDate(req.query.asOf, "end");
+  const end = asOfDate ?? endOfDay(new Date());
 
   const [suppliers, ledgerEntries] = await Promise.all([
     prisma.party.findMany({
@@ -141,8 +141,8 @@ export const deleteParty = async (req, res) => {
 };
 
 export const getPartyLedger = async (req, res) => {
-  const start = toDate(req.query.start);
-  const end = toDate(req.query.end);
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
   const [ledger, payments, chemicalCash, rexineCash, materialCash] =
     await Promise.all([
       prisma.partyLedgerEntry.findMany({
@@ -333,7 +333,10 @@ export const createPartyPayment = async (req, res) => {
         ? "Cash payment"
         : "Khata settlement");
 
-  const paymentDate = new Date(req.body.date);
+  const paymentDate = toDate(req.body.date, "start");
+  const chequeDate = req.body.chequeDate
+    ? toDate(req.body.chequeDate, "start")
+    : paymentDate;
   const payment = await prisma
     .$transaction(async (tx) => {
       const party = await tx.party.findUnique({
@@ -343,28 +346,36 @@ export const createPartyPayment = async (req, res) => {
         throw new Error("Party not found.");
       }
 
+      if (
+        party.type === "SUPPLIER" &&
+        normalizedDirection === "PAY" &&
+        !["CASH", "CHEQUE"].includes(method)
+      ) {
+        throw new Error("Supplier payments only support cash or cheque.");
+      }
+
       let selectedCheque = null;
+      const chequeId =
+        method === "CHEQUE" ? String(req.body.chequeId ?? "").trim() : "";
       if (method === "CHEQUE" && normalizedDirection === "PAY") {
-        const chequeId = String(req.body.chequeId ?? "").trim();
-        if (!chequeId) {
-          throw new Error("Please select an available cheque.");
-        }
         if (party.type !== "SUPPLIER") {
           throw new Error(
             "Cheque payment is only allowed to supplier parties.",
           );
         }
 
-        selectedCheque = await tx.cheque.findUnique({
-          where: { id: chequeId },
-        });
-        if (!selectedCheque || selectedCheque.status !== "AVAILABLE") {
-          throw new Error("Selected cheque is not available.");
-        }
+        if (chequeId) {
+          selectedCheque = await tx.cheque.findUnique({
+            where: { id: chequeId },
+          });
+          if (!selectedCheque || selectedCheque.status !== "AVAILABLE") {
+            throw new Error("Selected cheque is not available.");
+          }
 
-        const chequeAmount = Number(selectedCheque.amount ?? 0);
-        if (Math.abs(chequeAmount - amount) > 0.0001) {
-          throw new Error("Payment amount must match selected cheque amount.");
+          const chequeAmount = Number(selectedCheque.amount ?? 0);
+          if (Math.abs(chequeAmount - amount) > 0.0001) {
+            throw new Error("Payment amount must match selected cheque amount.");
+          }
         }
       }
 
@@ -376,10 +387,6 @@ export const createPartyPayment = async (req, res) => {
         !req.body.rexinePurchaseId &&
         !req.body.materialPurchaseId
       ) {
-        if (method === "CHEQUE") {
-          throw new Error("Please select a bill when receiving by cheque.");
-        }
-
         const bills = await tx.bill.findMany({
           where: {
             partyId: req.params.partyId,
@@ -464,25 +471,40 @@ export const createPartyPayment = async (req, res) => {
         }
 
         if (normalizedDirection === "PAY") {
-          await tx.cheque.update({
-            where: { id: selectedCheque.id },
-            data: {
-              status: "USED",
-              usedPaymentId: createdPayments[0].id,
-              usedPartyId: req.params.partyId,
-              notes: chequeNotes || selectedCheque.notes,
-              chequeNumber: chequeNumber || selectedCheque.chequeNumber,
-            },
-          });
+          if (selectedCheque) {
+            await tx.cheque.update({
+              where: { id: selectedCheque.id },
+              data: {
+                status: "USED",
+                usedPaymentId: createdPayments[0].id,
+                usedPartyId: req.params.partyId,
+                notes: chequeNotes || selectedCheque.notes,
+                chequeNumber: chequeNumber || selectedCheque.chequeNumber,
+              },
+            });
+          } else {
+            await tx.cheque.create({
+              data: {
+                date: chequeDate,
+                amount,
+                chequeNumber: chequeNumber || null,
+                notes: chequeNotes || description || null,
+                usedPartyId: req.params.partyId,
+                usedPaymentId: createdPayments[0].id,
+                status: "USED",
+              },
+            });
+          }
         } else {
           await tx.cheque.create({
             data: {
-              date: paymentDate,
+              date: chequeDate,
               amount,
               chequeNumber: chequeNumber || null,
               notes: chequeNotes || description || null,
               sourcePartyId: req.params.partyId,
-              sourcePaymentId: createdPayments[0].id,
+              sourcePaymentId:
+                createdPayments.length === 1 ? createdPayments[0].id : null,
               status: "AVAILABLE",
             },
           });

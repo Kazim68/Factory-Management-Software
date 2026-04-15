@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
+import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -28,24 +29,28 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Plus,
   Minus,
+  Filter,
   Printer,
-  Eye,
-  Banknote,
   Pencil,
   Trash2,
   BadgeCheck,
-  CheckCircle2,
 } from "lucide-react";
 import { billApi, configApi, partyApi, productionApi } from "../lib/api";
+import {
+  FILTER_TIME_PRESET_OPTIONS,
+  getPresetDateRange,
+  type FilterTimePreset,
+} from "../lib/time-presets";
+import { printBillInvoice } from "../lib/bill-print";
 import { formatCurrency, formatDate, getCurrentDate } from "../lib/utils";
+import { useClientPagination } from "../hooks/useClientPagination";
 import type {
   ApiArticle,
   ApiBill,
-  ApiBillLedgerEntry,
-  ApiPaymentMethod,
   ApiParty,
   ApiStockArticleRow,
 } from "../types/api";
+import { TablePagination } from "./ui/table-pagination";
 import { toast } from "sonner";
 
 type BillItemForm = {
@@ -67,6 +72,14 @@ type StockVariantOption = {
   quantityDozen: number;
 };
 
+type BillTotalsInput = {
+  quantity: number | string;
+  price: number | string;
+  discount?: number | string | null;
+};
+
+const PAIRS_PER_DOZEN = 12;
+
 const normalizeSize = (value?: string | null) => {
   const normalized = String(value ?? "").trim();
   return normalized || "-";
@@ -82,11 +95,13 @@ const toBillLineSize = (size: string) => {
 
 const roundMoney = (value: number) => Number(value.toFixed(2));
 
+const formatQuantityValue = (value: number) => String(Number(value.toFixed(2)));
+
 const calculateLineDiscount = (
   quantity: number,
   price: number,
   discount: number,
-) => roundMoney(discount * quantity);
+) => roundMoney(discount * quantity * PAIRS_PER_DOZEN);
 
 const calculateLineTotal = (
   quantity: number,
@@ -94,8 +109,96 @@ const calculateLineTotal = (
   discount: number,
 ) =>
   roundMoney(
-    quantity * price - calculateLineDiscount(quantity, price, discount),
+    quantity * PAIRS_PER_DOZEN * price -
+      calculateLineDiscount(quantity, price, discount),
   );
+
+const calculateGrossLineTotal = (quantity: number, price: number) =>
+  roundMoney(quantity * PAIRS_PER_DOZEN * price);
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const calculateBillTotals = (lines: BillTotalsInput[]) => {
+  const totalQuantityDozen = Number(
+    lines
+      .reduce((sum, line) => sum + Number(line.quantity || 0), 0)
+      .toFixed(2),
+  );
+  const grossTotal = roundMoney(
+    lines.reduce(
+      (sum, line) =>
+        sum +
+        Number(line.quantity || 0) *
+          PAIRS_PER_DOZEN *
+          Number(line.price || 0),
+      0,
+    ),
+  );
+  const discountTotal = roundMoney(
+    lines.reduce(
+      (sum, line) =>
+        sum +
+        calculateLineDiscount(
+          Number(line.quantity || 0),
+          Number(line.price || 0),
+          Number(line.discount || 0),
+        ),
+      0,
+    ),
+  );
+
+  return {
+    totalQuantityDozen,
+    totalQuantityPairs: totalQuantityDozen * PAIRS_PER_DOZEN,
+    grossTotal,
+    discountTotal,
+    grandTotal: roundMoney(grossTotal - discountTotal),
+  };
+};
+
+const isCompleteBillItem = (item: BillItemForm) =>
+  Boolean(item.stockVariantKey && item.articleId) &&
+  Number(item.quantity) > 0 &&
+  Number(item.price) > 0 &&
+  Number(item.discount) >= 0 &&
+  Number(item.discount) <= Number(item.price);
+
+const getBillTotalsFromBill = (bill: ApiBill) => {
+  if (!Array.isArray(bill.lines) || bill.lines.length === 0) {
+    const grandTotal = roundMoney(Number(bill.total ?? 0));
+    const totalPaid = roundMoney(Number(bill.totalPaid ?? 0));
+    return {
+      totalQuantityDozen: 0,
+      totalQuantityPairs: 0,
+      grossTotal: grandTotal,
+      discountTotal: 0,
+      grandTotal,
+      totalPaid,
+      remaining: roundMoney(Math.max(grandTotal - totalPaid, 0)),
+    };
+  }
+
+  const totals = calculateBillTotals(
+    bill.lines.map((line) => ({
+      quantity: line.quantity,
+      price: line.price,
+      discount: line.discount,
+    })),
+  );
+  const totalPaid = roundMoney(Number(bill.totalPaid ?? 0));
+
+  return {
+    ...totals,
+    totalPaid,
+    remaining: roundMoney(Math.max(totals.grandTotal - totalPaid, 0)),
+  };
+};
 
 const createEmptyBillItem = (): BillItemForm => ({
   stockVariantKey: "",
@@ -129,19 +232,14 @@ export function BillManagement() {
   const [availableStockByVariant, setAvailableStockByVariant] = useState<
     Record<string, number>
   >({});
-
-  const [ledgerBill, setLedgerBill] = useState<ApiBill | null>(null);
-  const [ledgerEntries, setLedgerEntries] = useState<ApiBillLedgerEntry[]>([]);
-  const [isLedgerOpen, setIsLedgerOpen] = useState(false);
-
-  const [paymentBill, setPaymentBill] = useState<ApiBill | null>(null);
-  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
-  const [paymentData, setPaymentData] = useState({
-    date: getCurrentDate(),
-    amount: "",
-    method: "KHATA" as ApiPaymentMethod,
-    description: "",
-  });
+  const [billSearchQuery, setBillSearchQuery] = useState("");
+  const [billStatusFilter, setBillStatusFilter] = useState<
+    "ALL" | "UNPAID" | "PARTIAL_PAID" | "PAID"
+  >("ALL");
+  const [billTimePreset, setBillTimePreset] =
+    useState<FilterTimePreset>("THIS_MONTH");
+  const [billDateFrom, setBillDateFrom] = useState("");
+  const [billDateTo, setBillDateTo] = useState("");
 
   const [formData, setFormData] = useState({
     date: getCurrentDate(),
@@ -149,6 +247,56 @@ export function BillManagement() {
   });
 
   const [items, setItems] = useState<BillItemForm[]>(ensureMinimumRows([]));
+  const stockVariantOptionsByKey = useMemo(
+    () => new Map(stockVariantOptions.map((variant) => [variant.key, variant])),
+    [stockVariantOptions],
+  );
+
+  const applyPackedStockRows = (stockRows: ApiStockArticleRow[]) => {
+    const rows = (stockRows ?? []) as ApiStockArticleRow[];
+    const byVariant = rows.reduce<Record<string, number>>((acc, row) => {
+      const key = getStockVariantKey(row.articleId, row.size);
+      acc[key] = (acc[key] ?? 0) + Number(row.quantityDozen ?? 0);
+      return acc;
+    }, {});
+
+    const options = rows
+      .map((row) => {
+        const key = getStockVariantKey(row.articleId, row.size);
+        return {
+          key,
+          articleId: row.articleId,
+          articleName: row.articleName,
+          size: normalizeSize(row.size),
+          quantityDozen: Number(byVariant[key] ?? 0),
+        };
+      })
+      .filter(
+        (row, index, all) => all.findIndex((r) => r.key === row.key) === index,
+      )
+      .filter((row) => row.quantityDozen > 0)
+      .sort((a, b) => {
+        const byName = a.articleName.localeCompare(b.articleName);
+        if (byName !== 0) return byName;
+        return a.size.localeCompare(b.size);
+      });
+
+    setStockVariantOptions(options);
+    setAvailableStockByVariant(byVariant);
+  };
+
+  const loadPackedStockOptions = async (excludeBillId?: string) => {
+    try {
+      const stockRows = await productionApi.listStockByArticle({
+        mode: "PACKED",
+        excludeBillId,
+      });
+      applyPackedStockRows(stockRows);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load packed stock.");
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -162,37 +310,7 @@ export function BillManagement() {
       setBills(billData);
       setParties(partyData);
       setArticles(articleData);
-      const rows = (stockRows ?? []) as ApiStockArticleRow[];
-      const byVariant = rows.reduce<Record<string, number>>((acc, row) => {
-        const key = getStockVariantKey(row.articleId, row.size);
-        acc[key] = (acc[key] ?? 0) + Number(row.quantityDozen ?? 0);
-        return acc;
-      }, {});
-
-      const options = rows
-        .map((row) => {
-          const key = getStockVariantKey(row.articleId, row.size);
-          return {
-            key,
-            articleId: row.articleId,
-            articleName: row.articleName,
-            size: normalizeSize(row.size),
-            quantityDozen: Number(byVariant[key] ?? 0),
-          };
-        })
-        .filter(
-          (row, index, all) =>
-            all.findIndex((r) => r.key === row.key) === index,
-        )
-        .filter((row) => row.quantityDozen > 0)
-        .sort((a, b) => {
-          const byName = a.articleName.localeCompare(b.articleName);
-          if (byName !== 0) return byName;
-          return a.size.localeCompare(b.size);
-        });
-
-      setStockVariantOptions(options);
-      setAvailableStockByVariant(byVariant);
+      applyPackedStockRows(stockRows);
     } catch (error) {
       console.error(error);
       toast.error("Failed to load bills.");
@@ -204,6 +322,11 @@ export function BillManagement() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!isDialogOpen || editingBillId) return;
+    void loadPackedStockOptions();
+  }, [editingBillId, isDialogOpen]);
 
   const addItem = () => {
     setItems([...items, createEmptyBillItem()]);
@@ -259,6 +382,7 @@ export function BillManagement() {
     });
     setItems(ensureMinimumRows([]));
     setEditingBillId(null);
+    void loadPackedStockOptions();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -270,8 +394,44 @@ export function BillManagement() {
       return;
     }
 
-    const validItems = items.filter(
+    const resolvedItems = items.map((item) => {
+      const selectedVariant = item.stockVariantKey
+        ? stockVariantOptionsByKey.get(item.stockVariantKey)
+        : undefined;
+      const articleId = selectedVariant?.articleId || item.articleId;
+      const articleName = selectedVariant?.articleName || item.articleName;
+      const size = selectedVariant?.size || normalizeSize(item.size);
+      const stockVariantKey =
+        selectedVariant?.key ||
+        item.stockVariantKey ||
+        (articleId ? getStockVariantKey(articleId, size) : "");
+
+      return {
+        ...item,
+        articleId,
+        articleName,
+        size,
+        stockVariantKey,
+      };
+    });
+
+    const hasIncompleteVariantSelection = resolvedItems.some(
       (item) =>
+        (item.articleId ||
+          item.quantity > 0 ||
+          item.price > 0 ||
+          item.discount > 0) &&
+        !item.stockVariantKey,
+    );
+
+    if (hasIncompleteVariantSelection) {
+      toast.error("Please select a packed stock variant for each bill line.");
+      return;
+    }
+
+    const validItems = resolvedItems.filter(
+      (item) =>
+        item.stockVariantKey &&
         item.articleId &&
         item.quantity > 0 &&
         item.price > 0 &&
@@ -285,20 +445,27 @@ export function BillManagement() {
 
     const requestedByVariant = validItems.reduce<Record<string, number>>(
       (acc, item) => {
-        const key = getStockVariantKey(item.articleId, item.size);
-        acc[key] = (acc[key] ?? 0) + Number(item.quantity);
+        acc[item.stockVariantKey] =
+          (acc[item.stockVariantKey] ?? 0) + Number(item.quantity);
         return acc;
       },
+      {},
     );
 
     for (const [variantKey, requested] of Object.entries(requestedByVariant)) {
       const available = Number(availableStockByVariant[variantKey] ?? 0);
       if (requested > available) {
-        const selected = stockVariantOptions.find(
-          (option) => option.key === variantKey,
+        const selected = stockVariantOptionsByKey.get(variantKey);
+        const matchingItem = validItems.find(
+          (item) => item.stockVariantKey === variantKey,
         );
-        const articleName = selected?.articleName || "Selected article";
-        const sizeLabel = selected?.size || "-";
+        const [, rawSize = "-"] = variantKey.split("::");
+        const articleName =
+          selected?.articleName ||
+          matchingItem?.articleName ||
+          "Selected article";
+        const sizeLabel =
+          selected?.size || matchingItem?.size || rawSize || "-";
         toast.error(
           `${articleName} (${sizeLabel}) has only ${available} dozen available in packed stock.`,
         );
@@ -344,7 +511,7 @@ export function BillManagement() {
     }
   };
 
-  const startEdit = (bill: ApiBill) => {
+  const startEdit = async (bill: ApiBill) => {
     setEditingBillId(bill.id);
     setFormData({
       date: bill.date.slice(0, 10),
@@ -370,6 +537,7 @@ export function BillManagement() {
         })),
       ),
     );
+    await loadPackedStockOptions(bill.id);
     setIsDialogOpen(true);
   };
 
@@ -385,56 +553,6 @@ export function BillManagement() {
     }
   };
 
-  const openLedger = async (bill: ApiBill) => {
-    try {
-      const entries = await billApi.getLedger(bill.id);
-      setLedgerBill(bill);
-      setLedgerEntries(entries);
-      setIsLedgerOpen(true);
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to load bill ledger.");
-    }
-  };
-
-  const openPayment = (bill: ApiBill) => {
-    setPaymentBill(bill);
-    setPaymentData({
-      date: getCurrentDate(),
-      amount: String(Number(bill.remaining ?? 0)),
-      method: "KHATA",
-      description: "",
-    });
-    setIsPaymentOpen(true);
-  };
-
-  const handleReceivePayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!paymentBill) return;
-
-    const amount = Math.abs(Number(paymentData.amount));
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast.error("Enter valid amount.");
-      return;
-    }
-
-    try {
-      await billApi.receivePayment(paymentBill.id, {
-        amount,
-        date: paymentData.date,
-        method: paymentData.method,
-        description: paymentData.description || undefined,
-      });
-      toast.success("Payment received");
-      setIsPaymentOpen(false);
-      setPaymentBill(null);
-      await loadData();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to receive payment.");
-    }
-  };
-
   const handleVerify = async (bill: ApiBill) => {
     try {
       await billApi.verifyBill(bill.id);
@@ -447,105 +565,123 @@ export function BillManagement() {
   };
 
   const printBill = (bill: ApiBill) => {
-    const printWindow = window.open("", "", "width=800,height=600");
-    if (!printWindow) return;
-
-    const rows = bill.lines
-      .map((line) => {
-        const articleName =
-          line.article?.name ||
-          articles.find((article) => article.id === line.articleId)?.name ||
-          "Unknown";
-        return `
-                <tr>
-                  <td>${articleName}</td>
-                  <td>${line.size ?? "-"}</td>
-                  <td>${line.quantity}</td>
-                  <td>${formatCurrency(Number(line.price))}</td>
-                  <td>${formatCurrency(Number(line.total))}</td>
-                </tr>
-              `;
-      })
-      .join("");
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Bill ${bill.billNumber}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .info { margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
-            .total { text-align: right; font-size: 18px; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>SALES BILL</h1>
-            <p>Bill No: ${bill.billNumber}</p>
-          </div>
-          <div class="info">
-            <p><strong>Date:</strong> ${formatDate(bill.date)}</p>
-            <p><strong>Party:</strong> ${bill.party?.name || "-"}</p>
-            <p><strong>Grand Total:</strong> ${formatCurrency(Number(bill.total))}</p>
-            <p><strong>Remaining:</strong> ${formatCurrency(Number(bill.remaining ?? 0))}</p>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Article</th>
-                <th>Size</th>
-                <th>Quantity</th>
-                <th>Price</th>
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.print();
+    const printed = printBillInvoice(bill, {
+      fallbackArticleNames: new Map(
+        articles.map((article) => [article.id, article.name]),
+      ),
+    });
+    if (!printed) {
+      toast.error("Unable to open print preview.");
+    }
   };
 
-  const grossTotal = items.reduce(
-    (sum, item) => sum + Number(item.quantity || 0) * Number(item.price || 0),
-    0,
+  const completedItems = useMemo(
+    () => items.filter(isCompleteBillItem),
+    [items],
   );
-  const discountTotal = items.reduce(
-    (sum, item) =>
-      sum +
-      calculateLineDiscount(
-        Number(item.quantity || 0),
-        Number(item.price || 0),
-        Number(item.discount || 0),
-      ),
-    0,
+  const { totalQuantityDozen, grossTotal, discountTotal, grandTotal } = useMemo(
+    () => calculateBillTotals(completedItems),
+    [completedItems],
   );
-  const grandTotal = roundMoney(grossTotal - discountTotal);
 
   const getAvailableQuantity = (stockVariantKey: string) =>
     Number(availableStockByVariant[stockVariantKey] ?? 0);
 
-  const getStatusLabel = (bill: ApiBill) => {
-    if (bill.paymentStatus === "PAID") return "Paid";
-    if (bill.paymentStatus === "PARTIAL_PAID") return "Partial Paid";
-    return "Unpaid";
-  };
+  const sortedBills = useMemo(
+    () =>
+      [...bills].sort((a, b) => {
+        const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return String(b.billNumber).localeCompare(String(a.billNumber));
+      }),
+    [bills],
+  );
 
-  const getStatusClass = (bill: ApiBill) => {
-    if (bill.paymentStatus === "PAID") return "text-green-600";
-    if (bill.paymentStatus === "PARTIAL_PAID") return "text-orange-600";
-    return "text-red-600";
+  const filteredBills = useMemo(() => {
+    const query = billSearchQuery.trim().toLowerCase();
+    let fromTs: number | null = null;
+    let toTs: number | null = null;
+
+    if (billTimePreset === "CUSTOM") {
+      fromTs = billDateFrom
+        ? new Date(`${billDateFrom}T00:00:00`).getTime()
+        : null;
+      toTs = billDateTo
+        ? new Date(`${billDateTo}T23:59:59.999`).getTime()
+        : null;
+    } else {
+      const range = getPresetDateRange(billTimePreset, new Date());
+      fromTs = range?.from.getTime() ?? null;
+      toTs = range?.to.getTime() ?? null;
+    }
+
+    return sortedBills.filter((bill) => {
+      if (billStatusFilter !== "ALL" && bill.paymentStatus !== billStatusFilter) {
+        return false;
+      }
+
+      const billTs = new Date(bill.date).getTime();
+      if (fromTs !== null && billTs < fromTs) return false;
+      if (toTs !== null && billTs > toTs) return false;
+
+      if (!query) return true;
+
+      const searchable = [
+        bill.billNumber,
+        bill.party?.name || "",
+        bill.paymentStatus,
+        String(bill.total ?? ""),
+        String(bill.remaining ?? ""),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return searchable.includes(query);
+    });
+  }, [
+    billDateFrom,
+    billDateTo,
+    billSearchQuery,
+    billStatusFilter,
+    billTimePreset,
+    sortedBills,
+  ]);
+
+  const {
+    currentPage: billsPage,
+    setCurrentPage: setBillsPage,
+    pageSize: billsPageSize,
+    setPageSize: setBillsPageSize,
+    totalPages: billsTotalPages,
+    totalItems: billsTotalItems,
+    startItem: billsStartItem,
+    endItem: billsEndItem,
+    paginatedItems: paginatedBills,
+    goToPreviousPage: goToPreviousBillsPage,
+    goToNextPage: goToNextBillsPage,
+  } = useClientPagination(filteredBills);
+
+  const partyOptions = useMemo(
+    () => parties.map((party) => ({ value: party.id, label: party.name })),
+    [parties],
+  );
+
+  const stockVariantSelectOptions = useMemo(
+    () =>
+      stockVariantOptions.map((variant) => ({
+        value: variant.key,
+        label: `${variant.articleName} (${variant.size})`,
+        description: `${variant.quantityDozen} dozen available`,
+      })),
+    [stockVariantOptions],
+  );
+
+  const clearBillFilters = () => {
+    setBillSearchQuery("");
+    setBillStatusFilter("ALL");
+    setBillTimePreset("THIS_MONTH");
+    setBillDateFrom("");
+    setBillDateTo("");
   };
 
   return (
@@ -588,23 +724,16 @@ export function BillManagement() {
                     </div>
                     <div>
                       <Label>Party</Label>
-                      <Select
+                      <SearchableSelect
                         value={formData.partyId}
                         onValueChange={(value) =>
                           setFormData({ ...formData, partyId: value })
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select party" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {parties.map((party) => (
-                            <SelectItem key={party.id} value={party.id}>
-                              {party.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        options={partyOptions}
+                        placeholder="Select party"
+                        searchPlaceholder="Search party..."
+                        emptyMessage="No parties found."
+                      />
                     </div>
                   </div>
 
@@ -620,8 +749,8 @@ export function BillManagement() {
                         <TableRow>
                           <TableHead>Article</TableHead>
                           <TableHead>Size</TableHead>
-                          <TableHead>Quantity</TableHead>
-                          <TableHead>Price</TableHead>
+                          <TableHead>Quantity (Dozen)</TableHead>
+                          <TableHead>Price / Pair</TableHead>
                           <TableHead>Discount / Pair</TableHead>
                           <TableHead>Total</TableHead>
                           <TableHead></TableHead>
@@ -632,26 +761,16 @@ export function BillManagement() {
                           <TableRow key={index}>
                             <TableCell>
                               <div className="space-y-1.5">
-                                <Select
+                                <SearchableSelect
                                   value={item.stockVariantKey}
                                   onValueChange={(value) =>
                                     updateItem(index, "stockVariantKey", value)
                                   }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select stock variant" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {stockVariantOptions.map((variant) => (
-                                      <SelectItem
-                                        key={variant.key}
-                                        value={variant.key}
-                                      >
-                                        {variant.articleName} ({variant.size})
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                  options={stockVariantSelectOptions}
+                                  placeholder="Select stock variant"
+                                  searchPlaceholder="Search article or size..."
+                                  emptyMessage="No stock variants found."
+                                />
                                 {item.stockVariantKey && (
                                   <p className="text-xs text-muted-foreground">
                                     Available packed stock:{" "}
@@ -735,15 +854,24 @@ export function BillManagement() {
                       </TableBody>
                     </Table>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Discount is deducted directly from the pair price.
+                      Quantity is entered in dozen, while price and discount are
+                      per pair.
                       Example:{" "}
                       <span className="font-medium">
-                        price 1200, discount 100, net 1100
+                        12 dozen x 12 pairs x price 100 = 14,400
                       </span>
                     </p>
                   </div>
 
-                  <div className="grid gap-3 rounded bg-muted p-4 md:grid-cols-3">
+                  <div className="grid gap-3 rounded bg-muted p-4 md:grid-cols-4">
+                    <div className="rounded bg-background/70 p-3">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Total Quantity
+                      </p>
+                      <p className="mt-1 font-medium">
+                        {formatQuantityValue(totalQuantityDozen)} dozen
+                      </p>
+                    </div>
                     <div className="rounded bg-background/70 p-3">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">
                         Gross Total
@@ -788,15 +916,104 @@ export function BillManagement() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="min-w-[240px] flex-1 md:max-w-[360px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Search
+              </Label>
+              <Input
+                value={billSearchQuery}
+                onChange={(event) => setBillSearchQuery(event.target.value)}
+                placeholder="Search bill number or party..."
+              />
+            </div>
+            <div className="min-w-[200px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Status
+              </Label>
+              <Select
+                value={billStatusFilter}
+                onValueChange={(value) =>
+                  setBillStatusFilter(value as typeof billStatusFilter)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Statuses</SelectItem>
+                  <SelectItem value="UNPAID">Unpaid</SelectItem>
+                  <SelectItem value="PARTIAL_PAID">Partial Paid</SelectItem>
+                  <SelectItem value="PAID">Paid</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="min-w-[200px]">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Time
+              </Label>
+              <Select
+                value={billTimePreset}
+                onValueChange={(value) =>
+                  setBillTimePreset(value as FilterTimePreset)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FILTER_TIME_PRESET_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {billTimePreset === "CUSTOM" && (
+              <>
+                <div>
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    From
+                  </Label>
+                  <Input
+                    type="date"
+                    value={billDateFrom}
+                    onChange={(event) => setBillDateFrom(event.target.value)}
+                    className="w-40"
+                  />
+                </div>
+                <div>
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    To
+                  </Label>
+                  <Input
+                    type="date"
+                    value={billDateTo}
+                    onChange={(event) => setBillDateTo(event.target.value)}
+                    className="w-40"
+                  />
+                </div>
+              </>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={clearBillFilters}
+            >
+              <Filter className="mr-2 h-4 w-4" />
+              Reset Filters
+            </Button>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Bill Number</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Party</TableHead>
+                <TableHead>Total Qty</TableHead>
                 <TableHead>Grand Total</TableHead>
-                <TableHead>Remaining</TableHead>
-                <TableHead>Payment Status</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -804,7 +1021,7 @@ export function BillManagement() {
               {isLoading ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={6}
                     className="text-center text-muted-foreground"
                   >
                     Loading bills...
@@ -813,40 +1030,32 @@ export function BillManagement() {
               ) : bills.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={6}
                     className="text-center text-muted-foreground"
                   >
                     No bills yet
                   </TableCell>
                 </TableRow>
               ) : (
-                bills.map((bill) => {
-                  const total = Number(bill.total ?? 0);
-                  const remaining = Number(bill.remaining ?? 0);
-                  const totalPaid = Number(bill.totalPaid ?? 0);
+                paginatedBills.map((bill) => {
+                  const billTotals = getBillTotalsFromBill(bill);
+                  const total = billTotals.grandTotal;
+                  const remaining = billTotals.remaining;
+                  const totalPaid = billTotals.totalPaid;
                   const canDelete = remaining === total && totalPaid === 0;
                   const canEdit = remaining > 0;
-                  const canReceive = remaining > 0;
                   const canVerify = remaining === 0 && !bill.isVerified;
 
                   return (
                     <TableRow key={bill.id}>
                       <TableCell>{bill.billNumber}</TableCell>
-                      <TableCell>{formatDate(bill.date)}</TableCell>
-                      <TableCell>{bill.party?.name || "-"}</TableCell>
-                      <TableCell>{formatCurrency(total)}</TableCell>
-                      <TableCell>{formatCurrency(remaining)}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className={getStatusClass(bill)}>
-                            {getStatusLabel(bill)}
-                          </span>
-                          {bill.paymentStatus === "PAID" && bill.isVerified && (
-                            <CheckCircle2 className="h-4 w-4 text-green-600" />
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
+                    <TableCell>{formatDate(bill.date)}</TableCell>
+                    <TableCell>{bill.party?.name || "-"}</TableCell>
+                    <TableCell>
+                      {formatQuantityValue(billTotals.totalQuantityDozen)} dozen
+                    </TableCell>
+                    <TableCell>{formatCurrency(total)}</TableCell>
+                    <TableCell>
                         <div className="flex gap-2 flex-wrap">
                           <Button
                             size="icon"
@@ -856,24 +1065,6 @@ export function BillManagement() {
                           >
                             <Printer className="h-4 w-4" />
                           </Button>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            onClick={() => openLedger(bill)}
-                            title="View Ledger"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {canReceive && (
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              onClick={() => openPayment(bill)}
-                              title="Receive Payment"
-                            >
-                              <Banknote className="h-4 w-4" />
-                            </Button>
-                          )}
                           {canEdit && (
                             <Button
                               size="icon"
@@ -913,141 +1104,20 @@ export function BillManagement() {
               )}
             </TableBody>
           </Table>
+          <TablePagination
+            currentPage={billsPage}
+            totalPages={billsTotalPages}
+            totalItems={billsTotalItems}
+            startItem={billsStartItem}
+            endItem={billsEndItem}
+            pageSize={billsPageSize}
+            setPageSize={setBillsPageSize}
+            goToPreviousPage={goToPreviousBillsPage}
+            goToNextPage={goToNextBillsPage}
+            setCurrentPage={setBillsPage}
+          />
         </CardContent>
       </Card>
-
-      <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Receive Payment {paymentBill ? `- ${paymentBill.billNumber}` : ""}
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleReceivePayment} className="space-y-4">
-            <div>
-              <Label>Date</Label>
-              <Input
-                type="date"
-                value={paymentData.date}
-                onChange={(e) =>
-                  setPaymentData({ ...paymentData, date: e.target.value })
-                }
-                required
-              />
-            </div>
-            <div>
-              <Label>Amount</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={paymentData.amount}
-                onChange={(e) =>
-                  setPaymentData({ ...paymentData, amount: e.target.value })
-                }
-                required
-              />
-            </div>
-            <div>
-              <Label>Method</Label>
-              <Select
-                value={paymentData.method}
-                onValueChange={(value) =>
-                  setPaymentData({
-                    ...paymentData,
-                    method: value as ApiPaymentMethod,
-                  })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH">Cash</SelectItem>
-                  <SelectItem value="KHATA">Khata</SelectItem>
-                  <SelectItem value="CHEQUE">Cheque</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Input
-                value={paymentData.description}
-                onChange={(e) =>
-                  setPaymentData({
-                    ...paymentData,
-                    description: e.target.value,
-                  })
-                }
-                placeholder="Optional note"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsPaymentOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit">Receive</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isLedgerOpen} onOpenChange={setIsLedgerOpen}>
-        <DialogContent className="w-[50vw] max-w-[1400px] sm:max-w-[1400px] h-[82vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>
-              Bill Ledger {ledgerBill ? `- ${ledgerBill.billNumber}` : ""}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto mt-2">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Reference</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ledgerEntries.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center text-muted-foreground"
-                    >
-                      No bill ledger records
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  ledgerEntries.map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell>{formatDate(entry.date)}</TableCell>
-                      <TableCell>{entry.reference || "-"}</TableCell>
-                      <TableCell title={entry.description || "-"}>
-                        {entry.description
-                          ? entry.description.slice(0, 12)
-                          : "-"}
-                      </TableCell>
-                      <TableCell>
-                        {entry.kind === "RECEIVABLE" ? "Receivable" : "Payment"}
-                      </TableCell>
-                      <TableCell>
-                        {formatCurrency(Number(entry.amount ?? 0))}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

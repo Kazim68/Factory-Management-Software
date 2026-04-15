@@ -1,6 +1,9 @@
 import {
+  Component,
+  type ErrorInfo,
   type ElementType,
   type FormEvent,
+  type ReactNode,
   useEffect,
   useMemo,
   useState,
@@ -22,8 +25,17 @@ import { Label } from "./components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Badge } from "./components/ui/badge";
 import { Toaster } from "./components/ui/sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./components/ui/select";
 import { toast } from "sonner";
 import { auth, type SessionUser } from "./lib/auth";
+import { LANGUAGE_OPTIONS, type AppLanguage } from "./lib/i18n";
+import { I18nProvider, useI18n } from "./lib/i18n-react";
 import type { UserRole } from "./types";
 import {
   LayoutDashboard,
@@ -125,7 +137,45 @@ const navigation: NavItem[] = [
   },
 ];
 
+class PageErrorBoundary extends Component<
+  { pageName: string; children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`Page render failed for ${this.props.pageName}:`, error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <Card>
+          <CardHeader>
+            <CardTitle>Page Failed To Load</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {this.props.pageName} ran into a rendering problem.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {this.state.error.message || "An unexpected error occurred."}
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
+  const { language, setLanguage, t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -144,11 +194,32 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Sign In</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Use your credentials to continue. Default admin:{" "}
-            <b>admin / admin123</b>
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>{t("Sign In")}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {t("Use your credentials to continue. Default admin:")}{" "}
+                <b>admin / admin123</b>
+              </p>
+            </div>
+            <div className="w-[130px]">
+              <Select
+                value={language}
+                onValueChange={(value) => setLanguage(value as AppLanguage)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t("Language")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -158,7 +229,7 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
                 id="signin-username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                placeholder="Enter username"
+                placeholder={t("Enter username")}
                 required
               />
             </div>
@@ -169,12 +240,12 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter password"
+                placeholder={t("Enter password")}
                 required
               />
             </div>
             <Button className="w-full" type="submit">
-              Sign In
+              {t("Sign In")}
             </Button>
           </form>
         </CardContent>
@@ -183,7 +254,8 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   );
 }
 
-export default function App() {
+function AppShell() {
+  const { language, setLanguage, t } = useI18n();
   const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -200,6 +272,11 @@ export default function App() {
     );
   }, [currentUser]);
 
+  const currentNavItem = useMemo(
+    () => allowedNavigation.find((item) => item.page === currentPage) ?? null,
+    [allowedNavigation, currentPage],
+  );
+
   useEffect(() => {
     if (!currentUser || allowedNavigation.length === 0) return;
     const hasAccess = allowedNavigation.some(
@@ -213,34 +290,54 @@ export default function App() {
   const renderPage = () => {
     if (!currentUser) return null;
 
+    let pageContent: ReactNode;
     switch (currentPage) {
       case "dashboard":
-        return <Dashboard />;
+        pageContent = <Dashboard />;
+        break;
       case "party_customers":
-        return <PartyManagement partyType="customer" />;
+        pageContent = <PartyManagement partyType="customer" />;
+        break;
       case "party_suppliers":
-        return <PartyManagement partyType="supplier" />;
+        pageContent = <PartyManagement partyType="supplier" />;
+        break;
       case "labor":
-        return <LaborManagement />;
+        pageContent = <LaborManagement />;
+        break;
       case "stock_control":
-        return <StockControl currentUserRole={currentUser.role} />;
+        pageContent = <StockControl currentUserRole={currentUser.role} />;
+        break;
       case "production_control":
-        return <ProductionControl />;
+        pageContent = <ProductionControl />;
+        break;
       case "bills":
-        return <BillManagement />;
+        pageContent = <BillManagement />;
+        break;
       case "cheques":
-        return <ChequeManagement />;
+        pageContent = <ChequeManagement />;
+        break;
       case "roznamcha":
-        return <Roznamcha />;
+        pageContent = <Roznamcha />;
+        break;
       case "configuration":
-        return <Configuration />;
+        pageContent = <Configuration />;
+        break;
       case "users":
-        return <UserManagement currentUserId={currentUser.id} />;
+        pageContent = <UserManagement currentUserId={currentUser.id} />;
+        break;
       case "audit_logs":
-        return <AuditLogs />;
+        pageContent = <AuditLogs />;
+        break;
       default:
-        return <Dashboard />;
+        pageContent = <Dashboard />;
+        break;
     }
+
+    return (
+      <PageErrorBoundary key={currentPage} pageName={currentPage}>
+        {pageContent}
+      </PageErrorBoundary>
+    );
   };
 
   const handleLogout = () => {
@@ -269,7 +366,7 @@ export default function App() {
         <div className="p-6">
           <h1 className="text-xl mb-2">Factory Management</h1>
           <p className="text-xs text-muted-foreground mb-6">
-            Role: {auth.formatRoleLabel(currentUser.role)}
+            {t("Role")}: {t(auth.formatRoleLabel(currentUser.role))}
           </p>
           <nav className="space-y-2">
             {allowedNavigation.map((item) => {
@@ -305,14 +402,31 @@ export default function App() {
               )}
             </Button>
             <div className="ml-4">
-              <h2 className="capitalize">{currentPage.replace("_", " ")}</h2>
+              <h2>{currentNavItem?.name ?? currentPage.replace("_", " ")}</h2>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="w-[130px]">
+              <Select
+                value={language}
+                onValueChange={(value) => setLanguage(value as AppLanguage)}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue placeholder={t("Language")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Badge variant="secondary">{currentUser.name}</Badge>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" />
-              Logout
+              {t("Logout")}
             </Button>
           </div>
         </header>
@@ -322,5 +436,13 @@ export default function App() {
 
       <Toaster />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppShell />
+    </I18nProvider>
   );
 }
