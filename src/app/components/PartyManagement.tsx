@@ -1512,10 +1512,10 @@ export function PartyManagement({
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead>Bill No</TableHead>
-              <TableHead>Status</TableHead>
+              {/* <TableHead>Status</TableHead> */}
               <TableHead>Total</TableHead>
-              <TableHead>Paid</TableHead>
-              <TableHead>Remaining</TableHead>
+              {/* <TableHead>Paid</TableHead> */}
+              {/* <TableHead>Remaining</TableHead> */}
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -1545,16 +1545,16 @@ export function PartyManagement({
                 <TableRow key={bill.id}>
                   <TableCell>{formatDate(bill.date)}</TableCell>
                   <TableCell>{bill.billNumber}</TableCell>
-                  <TableCell>{bill.paymentStatus.replaceAll("_", " ")}</TableCell>
+                  {/* <TableCell>{bill.paymentStatus.replaceAll("_", " ")}</TableCell> */}
                   <TableCell>
                     {formatCurrency(Number(bill.total ?? 0))}
                   </TableCell>
-                  <TableCell>
+                  {/* <TableCell>
                     {formatCurrency(Number(bill.totalPaid ?? 0))}
                   </TableCell>
                   <TableCell>
                     {formatCurrency(Number(bill.remaining ?? 0))}
-                  </TableCell>
+                  </TableCell> */}
                   <TableCell>
                     <Button
                       type="button"

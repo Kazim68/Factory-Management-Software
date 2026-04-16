@@ -540,13 +540,13 @@ export function Configuration() {
                                 >
                                   Edit
                                 </Button>
-                                <Button
+                                {/* <Button
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => handleUnitDelete(unit)}
                                 >
                                   Delete
-                                </Button>
+                                </Button> */}
                               </div>
                             </TableCell>
                           </TableRow>
