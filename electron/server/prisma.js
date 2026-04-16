@@ -28,6 +28,17 @@ const basePrisma = new PrismaClient({
 
 const BILL_COUNTER_ID = "default";
 
+const getMaxStoredBillNumber = async (prisma) => {
+  const [row] = await prisma.$queryRawUnsafe(`
+    SELECT COALESCE(MAX(CAST("billNumber" AS INTEGER)), 0) AS lastNumber
+    FROM "Bill"
+    WHERE "billNumber" GLOB '[0-9][0-9][0-9][0-9]'
+      AND CAST("billNumber" AS INTEGER) BETWEEN 0 AND 9999
+  `);
+
+  return Number(row?.lastNumber ?? 0);
+};
+
 const ensureBillSchema = async (prisma) => {
   await prisma.$executeRawUnsafe(
     `DROP INDEX IF EXISTS "Bill_billNumber_key"`
@@ -52,24 +63,31 @@ const ensureBillSchema = async (prisma) => {
   }
 
   const existingCounter = await prisma.$queryRawUnsafe(
-    `SELECT "id" FROM bill_number_counter WHERE "id" = ? LIMIT 1`,
+    `SELECT "id", "lastNumber" FROM bill_number_counter WHERE "id" = ? LIMIT 1`,
     BILL_COUNTER_ID
   );
+  const maxStoredBillNumber = await getMaxStoredBillNumber(prisma);
 
-  if (existingCounter.length > 0) return;
+  if (existingCounter.length === 0) {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO bill_number_counter ("id", "lastNumber", "updatedAt") VALUES (?, ?, CURRENT_TIMESTAMP)`,
+      BILL_COUNTER_ID,
+      maxStoredBillNumber
+    );
+    return;
+  }
 
-  const [row] = await prisma.$queryRawUnsafe(`
-    SELECT COALESCE(MAX(CAST("billNumber" AS INTEGER)), 0) AS lastNumber
-    FROM "Bill"
-    WHERE "billNumber" GLOB '[0-9][0-9][0-9][0-9]'
-      AND CAST("billNumber" AS INTEGER) BETWEEN 0 AND 9999
-  `);
+  const counterLastNumber = Number(existingCounter[0]?.lastNumber ?? 0);
+  const reconciledLastNumber = Math.max(counterLastNumber, maxStoredBillNumber);
 
-  const lastNumber = Number(row?.lastNumber ?? 0);
+  if (reconciledLastNumber === counterLastNumber) return;
+
   await prisma.$executeRawUnsafe(
-    `INSERT INTO bill_number_counter ("id", "lastNumber", "updatedAt") VALUES (?, ?, CURRENT_TIMESTAMP)`,
-    BILL_COUNTER_ID,
-    lastNumber
+    `UPDATE bill_number_counter
+     SET "lastNumber" = ?, "updatedAt" = CURRENT_TIMESTAMP
+     WHERE "id" = ?`,
+    reconciledLastNumber,
+    BILL_COUNTER_ID
   );
 };
 

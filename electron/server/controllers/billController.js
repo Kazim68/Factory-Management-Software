@@ -13,6 +13,17 @@ const PAIRS_PER_DOZEN = 12;
 
 const formatBillNumber = (value) => String(value).padStart(4, "0");
 
+const getMaxStoredBillNumber = async (tx) => {
+  const [row] = await tx.$queryRawUnsafe(`
+    SELECT COALESCE(MAX(CAST("billNumber" AS INTEGER)), 0) AS lastNumber
+    FROM "Bill"
+    WHERE "billNumber" GLOB '[0-9][0-9][0-9][0-9]'
+      AND CAST("billNumber" AS INTEGER) BETWEEN 0 AND 9999
+  `);
+
+  return Number(row?.lastNumber ?? 0);
+};
+
 const toDbBillType = (type) => {
   const normalized = String(type ?? "CASH").toUpperCase();
   if (normalized === "RECEIVABLE" || normalized === "KHATA") return "CREDIT";
@@ -159,10 +170,13 @@ const reserveNextBillNumber = async (tx) => {
     create: { id: BILL_COUNTER_ID, lastNumber: 0 },
   });
 
+  const maxStoredBillNumber = await getMaxStoredBillNumber(tx);
+  const currentNumber = Math.max(
+    Number(counter.lastNumber ?? 0),
+    maxStoredBillNumber,
+  );
   const nextNumber =
-    Number(counter.lastNumber ?? 0) >= MAX_BILL_NUMBER
-      ? 1
-      : Number(counter.lastNumber ?? 0) + 1;
+    currentNumber >= MAX_BILL_NUMBER ? 1 : currentNumber + 1;
 
   await tx.billNumberCounter.update({
     where: { id: BILL_COUNTER_ID },
