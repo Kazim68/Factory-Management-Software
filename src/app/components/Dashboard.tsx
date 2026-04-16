@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { Filter } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import {
   formatCurrency,
   formatDateTime,
@@ -109,6 +116,12 @@ export function Dashboard() {
     toLocalDateKey(subtractDays(new Date(), 29)),
   );
   const [customEnd, setCustomEnd] = useState(() => getCurrentDate());
+
+  const clearFilters = () => {
+    setDateFilter("monthly");
+    setCustomStart(toLocalDateKey(subtractDays(new Date(), 29)));
+    setCustomEnd(getCurrentDate());
+  };
 
   useEffect(() => {
     let active = true;
@@ -478,59 +491,61 @@ export function Dashboard() {
     <div className="space-y-6">
       <Card>
         <CardContent className="pt-6">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={dateFilter === "daily" ? "default" : "outline"}
-                onClick={() => setDateFilter("daily")}
+          <div className="rounded-md border border-dashed bg-muted/30 p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[220px]">
+                <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                  Period
+                </Label>
+                <Select
+                  value={dateFilter}
+                  onValueChange={(value) => setDateFilter(value as DateFilter)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="yearly">Yearly</SelectItem>
+                    <SelectItem value="custom">Custom Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {dateFilter === "custom" && (
+                <>
+                  <div>
+                    <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                      Start
+                    </Label>
+                    <Input
+                      type="date"
+                      value={customStart}
+                      onChange={(e) => setCustomStart(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                      End
+                    </Label>
+                    <Input
+                      type="date"
+                      value={customEnd}
+                      onChange={(e) => setCustomEnd(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={clearFilters}
               >
-                Daily
-              </Button>
-              <Button
-                variant={dateFilter === "weekly" ? "default" : "outline"}
-                onClick={() => setDateFilter("weekly")}
-              >
-                Weekly
-              </Button>
-              <Button
-                variant={dateFilter === "monthly" ? "default" : "outline"}
-                onClick={() => setDateFilter("monthly")}
-              >
-                Monthly
-              </Button>
-              <Button
-                variant={dateFilter === "yearly" ? "default" : "outline"}
-                onClick={() => setDateFilter("yearly")}
-              >
-                Yearly
-              </Button>
-              <Button
-                variant={dateFilter === "custom" ? "default" : "outline"}
-                onClick={() => setDateFilter("custom")}
-              >
-                Custom Range
-              </Button>
+                <Filter className="mr-2 h-4 w-4" />
+                Reset Filters
+              </button>
             </div>
-            {dateFilter === "custom" && (
-              <>
-                <div>
-                  <Label className="mb-1 inline-block">Start</Label>
-                  <Input
-                    type="date"
-                    value={customStart}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1 inline-block">End</Label>
-                  <Input
-                    type="date"
-                    value={customEnd}
-                    onChange={(e) => setCustomEnd(e.target.value)}
-                  />
-                </div>
-              </>
-            )}
           </div>
         </CardContent>
       </Card>

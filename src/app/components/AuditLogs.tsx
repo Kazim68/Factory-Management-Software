@@ -4,6 +4,7 @@ import type { AuditLog } from '../types';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
+import { Label } from './ui/label';
 import {
   Select,
   SelectContent,
@@ -76,33 +77,50 @@ export function AuditLogs() {
         <CardTitle>Audit Logs</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="mb-4 grid gap-3 md:grid-cols-3">
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search action, user, or details"
-          />
+        <div className="mb-4 rounded-md border border-dashed bg-muted/30 p-3">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="min-w-0">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Search
+              </Label>
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search action, user, or details"
+              />
+            </div>
 
-          <Select value={actionFilter} onValueChange={(value) => setActionFilter(value as typeof actionFilter)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filter by action" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All actions</SelectItem>
-              <SelectItem value="CREATED">Created</SelectItem>
-              <SelectItem value="UPDATED">Updated</SelectItem>
-              <SelectItem value="DELETED">Deleted</SelectItem>
-            </SelectContent>
-          </Select>
+            <div className="min-w-0">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                Action
+              </Label>
+              <Select value={actionFilter} onValueChange={(value) => setActionFilter(value as typeof actionFilter)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by action" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All actions</SelectItem>
+                  <SelectItem value="CREATED">Created</SelectItem>
+                  <SelectItem value="UPDATED">Updated</SelectItem>
+                  <SelectItem value="DELETED">Deleted</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <SearchableSelect
-            value={actorFilter}
-            onValueChange={setActorFilter}
-            options={actorFilterOptions}
-            placeholder="Filter by user"
-            searchPlaceholder="Search user..."
-            emptyMessage="No users found."
-          />
+            <div className="min-w-0">
+              <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                User
+              </Label>
+              <SearchableSelect
+                value={actorFilter}
+                onValueChange={setActorFilter}
+                options={actorFilterOptions}
+                placeholder="Filter by user"
+                searchPlaceholder="Search user..."
+                emptyMessage="No users found."
+              />
+            </div>
+          </div>
         </div>
 
         <Table>

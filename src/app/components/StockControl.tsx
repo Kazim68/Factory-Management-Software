@@ -619,7 +619,7 @@ export function StockControl({
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
             <div className="min-w-[240px] max-w-[420px] flex-1">
               <Label
                 htmlFor="stock-article-search"
@@ -903,7 +903,7 @@ export function StockControl({
           )}
         </CardHeader>
         <CardContent>
-          <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
             <div className="min-w-[240px] flex-1 md:max-w-[360px]">
               <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                 Search
@@ -1219,7 +1219,7 @@ export function StockControl({
             </Dialog>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
               <div className="min-w-[240px] flex-1 md:max-w-[360px]">
                 <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                   Search

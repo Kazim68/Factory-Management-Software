@@ -250,7 +250,7 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
           </Dialog>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
             <div className="min-w-[240px] flex-1 md:max-w-[360px]">
               <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                 Search

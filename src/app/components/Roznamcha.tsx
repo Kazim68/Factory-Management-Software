@@ -1164,7 +1164,7 @@ export function Roznamcha() {
                     Daily, weekly, and monthly summary updates automatically.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
                   <div className="min-w-[240px] flex-1 md:max-w-[320px]">
                     <Label className="mb-1 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                       Search
@@ -1352,7 +1352,7 @@ export function Roznamcha() {
           <Card>
             <CardHeader>
               <div className="flex items-end justify-between gap-4">
-                <div className="flex flex-1 flex-wrap items-end gap-3">
+                <div className="flex flex-1 flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
                   <div className="min-w-[210px]">
                     <Label
                       htmlFor="roznamcha-date"

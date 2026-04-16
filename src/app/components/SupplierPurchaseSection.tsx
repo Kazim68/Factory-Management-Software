@@ -730,31 +730,42 @@ export function SupplierCombinedPurchase({
           </TabsContent>
 
           <TabsContent value="records" className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="inline-flex h-8 items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
-                    <Filter className="h-4 w-4" />
-                    Type Filters ({recordTypeFilters.length}/
-                    {PURCHASE_TYPES.length})
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    <DropdownMenuLabel>Record Types</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {PURCHASE_TYPES.map((type) => (
-                      <DropdownMenuCheckboxItem
-                        key={type}
-                        checked={recordTypeFilters.includes(type)}
-                        onCheckedChange={() => toggleRecordTypeFilter(type)}
-                      >
-                        {toTitle(type)}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
+                <div className="min-w-[220px]">
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    Type
+                  </Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="inline-flex h-10 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <Filter className="h-4 w-4" />
+                        Type Filters
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {recordTypeFilters.length}/{PURCHASE_TYPES.length}
+                      </span>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuLabel>Record Types</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {PURCHASE_TYPES.map((type) => (
+                        <DropdownMenuCheckboxItem
+                          key={type}
+                          checked={recordTypeFilters.includes(type)}
+                          onCheckedChange={() => toggleRecordTypeFilter(type)}
+                        >
+                          {toTitle(type)}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
 
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-muted-foreground">Time</Label>
+                <div className="min-w-[200px]">
+                  <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
+                    Time
+                  </Label>
                   <Select
                     value={recordsTimePreset}
                     onValueChange={(value) =>
@@ -777,8 +788,8 @@ export function SupplierCombinedPurchase({
 
                 {recordsTimePreset === "CUSTOM" && (
                   <>
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs text-muted-foreground">
+                    <div>
+                      <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                         From
                       </Label>
                       <Input
@@ -791,8 +802,8 @@ export function SupplierCombinedPurchase({
                       />
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs text-muted-foreground">
+                    <div>
+                      <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                         To
                       </Label>
                       <Input
@@ -813,6 +824,7 @@ export function SupplierCombinedPurchase({
                   size="sm"
                   onClick={clearRecordsFilters}
                 >
+                  <Filter className="mr-2 h-4 w-4" />
                   Reset Filters
                 </Button>
               </div>

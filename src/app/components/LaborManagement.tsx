@@ -911,7 +911,7 @@ export function LaborManagement() {
               {viewingLabor?.name || "Unknown labor"}
             </p>
           </div>
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
             <div>
               <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                 Start Date
@@ -1107,7 +1107,7 @@ export function LaborManagement() {
                     </TabsTrigger> */}
                   </TabsList>
                 </div>
-                <div className="mt-3 flex flex-wrap items-end gap-3">
+                <div className="mt-3 flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
                   <div className="min-w-[240px] flex-1 md:max-w-[360px]">
                     <Label
                       htmlFor="labor-search-filter"
