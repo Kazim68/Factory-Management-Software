@@ -38,6 +38,32 @@ import {
 
 type DateFilter = "daily" | "weekly" | "monthly" | "yearly" | "custom";
 
+type DashboardData = {
+  bills: Awaited<ReturnType<typeof billApi.listBills>>;
+  expenses: Awaited<ReturnType<typeof expenseApi.listExpenses>>;
+  parties: Awaited<ReturnType<typeof partyApi.listParties>>;
+  chemicals: Awaited<ReturnType<typeof purchaseApi.listChemicals>>;
+  rexine: Awaited<ReturnType<typeof purchaseApi.listRexine>>;
+  materials: Awaited<ReturnType<typeof purchaseApi.listMaterials>>;
+  labors: Awaited<ReturnType<typeof laborApi.listProfiles>>;
+};
+
+const EMPTY_STATS = {
+  totalParties: 0,
+  totalBills: 0,
+  totalRevenue: 0,
+  totalExpenses: 0,
+  totalReceivables: 0,
+  totalPayables: 0,
+  laborPendingPayable: 0,
+  laborPaid: 0,
+  laborCost: 0,
+  materialPaid: 0,
+  materialPendingPayable: 0,
+  materialCost: 0,
+  profitLossTrend: [] as Array<{ label: string; profitLoss: number }>,
+};
+
 const parseDateValue = (value: string | Date) => {
   if (value instanceof Date) {
     return new Date(value);
@@ -74,15 +100,9 @@ const toMonthKey = (value: Date) =>
 const toYearKey = (value: Date) => getYearKey(value);
 
 export function Dashboard() {
-  const [rawData, setRawData] = useState<{
-    bills: Awaited<ReturnType<typeof billApi.listBills>>;
-    expenses: Awaited<ReturnType<typeof expenseApi.listExpenses>>;
-    parties: Awaited<ReturnType<typeof partyApi.listParties>>;
-    chemicals: Awaited<ReturnType<typeof purchaseApi.listChemicals>>;
-    rexine: Awaited<ReturnType<typeof purchaseApi.listRexine>>;
-    materials: Awaited<ReturnType<typeof purchaseApi.listMaterials>>;
-    labors: Awaited<ReturnType<typeof laborApi.listProfiles>>;
-  } | null>(null);
+  const [rawData, setRawData] = useState<DashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("monthly");
   const [customStart, setCustomStart] = useState(() =>
@@ -91,8 +111,12 @@ export function Dashboard() {
   const [customEnd, setCustomEnd] = useState(() => getCurrentDate());
 
   useEffect(() => {
+    let active = true;
+
     const loadStats = async () => {
       try {
+        setIsLoading(true);
+        setLoadError(null);
         const [bills, expenses, parties, chemicals, rexine, materials, labors] =
           await Promise.all([
             billApi.listBills(),
@@ -104,6 +128,8 @@ export function Dashboard() {
             laborApi.listProfiles({ status: "ALL" }),
           ]);
 
+        if (!active) return;
+
         setRawData({
           bills,
           expenses,
@@ -114,43 +140,83 @@ export function Dashboard() {
           labors,
         });
       } catch (error) {
+        if (!active) return;
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "Dashboard data could not be loaded.",
+        );
         console.error(error);
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
       }
     };
 
     loadStats();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
+  const referenceDate = useMemo(() => {
+    if (!rawData) {
+      return new Date();
+    }
+
+    const latestTimestamp = [
+      ...rawData.bills.map((item) => item.date),
+      ...rawData.expenses.map((item) => item.date),
+      ...rawData.chemicals.map((item) => item.date),
+      ...rawData.rexine.map((item) => item.date),
+      ...rawData.materials.map((item) => item.date),
+    ].reduce<number | null>((latest, value) => {
+      const timestamp = parseDateValue(value).getTime();
+      if (Number.isNaN(timestamp)) {
+        return latest;
+      }
+      return latest == null || timestamp > latest ? timestamp : latest;
+    }, null);
+
+    return latestTimestamp == null ? new Date() : new Date(latestTimestamp);
+  }, [rawData]);
+
   const selectedRange = useMemo(() => {
-    const now = new Date();
-    const todayKey = toLocalDateKey(now);
-    const todayEnd = toEndOfDay(todayKey);
+    const anchorDate = referenceDate;
+    const anchorDateKey = toLocalDateKey(anchorDate);
+    const anchorEnd = toEndOfDay(anchorDateKey);
 
     if (dateFilter === "daily") {
-      return { start: toStartOfDay(todayKey), end: todayEnd };
+      return { start: toStartOfDay(anchorDateKey), end: anchorEnd };
     }
 
     if (dateFilter === "weekly") {
       return {
-        start: toStartOfDay(toLocalDateKey(subtractDays(now, 6))),
-        end: todayEnd,
+        start: toStartOfDay(toLocalDateKey(subtractDays(anchorDate, 6))),
+        end: anchorEnd,
       };
     }
 
     if (dateFilter === "monthly") {
       const monthsToShow = 12;
       const firstMonth = new Date(
-        now.getFullYear(),
-        now.getMonth() - (monthsToShow - 1),
+        anchorDate.getFullYear(),
+        anchorDate.getMonth() - (monthsToShow - 1),
         1,
       );
-      return { start: toStartOfDay(firstMonth), end: todayEnd };
+      return { start: toStartOfDay(firstMonth), end: anchorEnd };
     }
 
     if (dateFilter === "yearly") {
       const yearsToShow = 5;
-      const firstYear = new Date(now.getFullYear() - (yearsToShow - 1), 0, 1);
-      return { start: toStartOfDay(firstYear), end: todayEnd };
+      const firstYear = new Date(
+        anchorDate.getFullYear() - (yearsToShow - 1),
+        0,
+        1,
+      );
+      return { start: toStartOfDay(firstYear), end: anchorEnd };
     }
 
     const safeStart = customStart || toLocalDateKey(new Date());
@@ -160,25 +226,11 @@ export function Dashboard() {
       safeEnd >= safeStart ? safeEnd : safeStart,
     );
     return { start, end: customRangeEnd };
-  }, [dateFilter, customStart, customEnd]);
+  }, [dateFilter, customStart, customEnd, referenceDate]);
 
-  const stats = useMemo(() => {
+  const computeStats = () => {
     if (!rawData) {
-      return {
-        totalParties: 0,
-        totalBills: 0,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        totalReceivables: 0,
-        totalPayables: 0,
-        laborPendingPayable: 0,
-        laborPaid: 0,
-        laborCost: 0,
-        materialPaid: 0,
-        materialPendingPayable: 0,
-        materialCost: 0,
-        profitLossTrend: [] as Array<{ label: string; profitLoss: number }>,
-      };
+      return EMPTY_STATS;
     }
 
     const inRange = (value: string | Date) => {
@@ -191,19 +243,18 @@ export function Dashboard() {
     const chemicals = rawData.chemicals.filter((item) => inRange(item.date));
     const rexine = rawData.rexine.filter((item) => inRange(item.date));
     const materials = rawData.materials.filter((item) => inRange(item.date));
+
     const getExpenseCategory = (entry: (typeof expenses)[number]) => {
       const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
-      if (sourceSystem === "PARTY_PAYMENT_PAID") {
-        return "SUPPLIER_PAYMENT";
-      }
+      if (sourceSystem === "PARTY_PAYMENT_PAID") return "SUPPLIER_PAYMENT";
       if (
         sourceSystem === "PARTY_PAYMENT_RECEIVED" ||
         sourceSystem === "BILL_PAYMENT_RECEIVED"
-      ) {
+      )
         return "CUSTOMER_PAYMENT";
-      }
       return entry.module;
     };
+
     const isMallSaleEntry = (entry: (typeof expenses)[number]) => {
       const sourceSystem = String(entry.sourceSystem ?? "").toUpperCase();
       return sourceSystem === "B_MALL_SALE" || sourceSystem === "C_MALL_SALE";
@@ -216,7 +267,8 @@ export function Dashboard() {
     }, 0);
 
     const totalRevenue =
-      bills.reduce((sum, bill) => sum + Number(bill.total), 0) + mallSaleRevenue;
+      bills.reduce((sum, bill) => sum + Number(bill.total), 0) +
+      mallSaleRevenue;
 
     const miscExpenses = expenses.reduce((sum, entry) => {
       const amount = Number(entry.amount);
@@ -251,25 +303,13 @@ export function Dashboard() {
       rexine.reduce((sum, item) => sum + Number(item.totalAmount), 0) +
       materials.reduce((sum, item) => sum + Number(item.totalAmount), 0);
 
-    const materialPaid =
-      chemicals
-        .filter(
-          (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
-        )
-        .reduce((sum, item) => sum + Number(item.totalAmount), 0) +
-      rexine
-        .filter(
-          (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
-        )
-        .reduce((sum, item) => sum + Number(item.totalAmount), 0) +
-      materials
-        .filter(
-          (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
-        )
-        .reduce((sum, item) => sum + Number(item.totalAmount), 0);
+    const materialPaid = [...chemicals, ...rexine, ...materials]
+      .filter(
+        (item) => String(item.paymentType ?? "CASH").toUpperCase() === "CASH",
+      )
+      .reduce((sum, item) => sum + Number(item.totalAmount), 0);
 
     const materialPendingPayable = Math.max(materialCost - materialPaid, 0);
-
     const laborPendingPayable = Math.max(laborCost - laborPaid, 0);
 
     type TrendBucket = { label: string; revenue: number; expenses: number };
@@ -312,21 +352,19 @@ export function Dashboard() {
     };
 
     const buildYearlyBuckets = () => {
-      const startYear = selectedRange.start.getFullYear();
-      const endYear = selectedRange.end.getFullYear();
-      for (let year = startYear; year <= endYear; year += 1) {
+      for (
+        let year = selectedRange.start.getFullYear();
+        year <= selectedRange.end.getFullYear();
+        year += 1
+      ) {
         const key = toYearKey(new Date(year, 0, 1));
         trendBuckets.set(key, { label: key, revenue: 0, expenses: 0 });
       }
     };
 
-    if (dateFilter === "monthly") {
-      buildMonthlyBuckets();
-    } else if (dateFilter === "yearly") {
-      buildYearlyBuckets();
-    } else {
-      buildDailyBuckets();
-    }
+    if (dateFilter === "monthly") buildMonthlyBuckets();
+    else if (dateFilter === "yearly") buildYearlyBuckets();
+    else buildDailyBuckets();
 
     const addToBucket = (
       value: Date,
@@ -339,71 +377,45 @@ export function Dashboard() {
           : dateFilter === "yearly"
             ? toYearKey(value)
             : toLocalDateKey(value);
+
       const bucket = trendBuckets.get(key);
-      if (!bucket) {
-        return;
-      }
-      bucket[target] += amount;
+      if (bucket) bucket[target] += amount;
     };
 
     bills.forEach((bill) => {
-      addToBucket(
-        parseDateValue(bill.date),
-        Number(bill.total ?? 0),
-        "revenue",
-      );
+      addToBucket(parseDateValue(bill.date), Number(bill.total ?? 0), "revenue");
     });
 
     expenses.filter(isMallSaleEntry).forEach((entry) => {
       const amount = Number(entry.amount ?? 0);
-      if (amount >= 0) {
-        return;
+      if (amount < 0) {
+        addToBucket(parseDateValue(entry.date), Math.abs(amount), "revenue");
       }
-      addToBucket(parseDateValue(entry.date), Math.abs(amount), "revenue");
     });
 
     expenses
       .filter((entry) => getExpenseCategory(entry) === "MISC")
       .forEach((entry) => {
         const amount = Number(entry.amount ?? 0);
-        if (amount <= 0) {
-          return;
+        if (amount > 0) {
+          addToBucket(parseDateValue(entry.date), amount, "expenses");
         }
-        addToBucket(parseDateValue(entry.date), amount, "expenses");
       });
 
     expenses
       .filter((entry) => entry.module === "LABOR")
       .forEach((entry) => {
         const amount = Math.max(Number(entry.amount ?? 0), 0);
-        if (amount === 0) {
-          return;
+        if (amount > 0) {
+          addToBucket(parseDateValue(entry.date), amount, "expenses");
         }
-        addToBucket(parseDateValue(entry.date), amount, "expenses");
       });
 
-    chemicals.forEach((item) => {
+    [...chemicals, ...rexine, ...materials].forEach((item) => {
       const amount = Number(item.totalAmount ?? 0);
-      if (amount === 0) {
-        return;
+      if (amount > 0) {
+        addToBucket(parseDateValue(item.date), amount, "expenses");
       }
-      addToBucket(parseDateValue(item.date), amount, "expenses");
-    });
-
-    rexine.forEach((item) => {
-      const amount = Number(item.totalAmount ?? 0);
-      if (amount === 0) {
-        return;
-      }
-      addToBucket(parseDateValue(item.date), amount, "expenses");
-    });
-
-    materials.forEach((item) => {
-      const amount = Number(item.totalAmount ?? 0);
-      if (amount === 0) {
-        return;
-      }
-      addToBucket(parseDateValue(item.date), amount, "expenses");
     });
 
     let runningProfitLoss = 0;
@@ -430,13 +442,37 @@ export function Dashboard() {
       materialCost,
       profitLossTrend,
     };
-  }, [rawData, selectedRange.start, selectedRange.end, dateFilter]);
+  };
+
+  const stats = computeStats();
 
   const netProfit =
     stats.totalRevenue -
     stats.totalExpenses -
     stats.laborCost -
     stats.materialCost;
+
+  if (isLoading && !rawData) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">
+            Loading dashboard data...
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadError && !rawData) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-sm text-red-600">{loadError}</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">
