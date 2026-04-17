@@ -219,7 +219,7 @@ export function Configuration() {
     if (!confirm(`Delete unit "${unit.name}"?`)) return;
     try {
       await configApi.deleteUnit(unit.id);
-      toast.success("Unit deleted");
+      toast.success("Unit moved to Deleted Items.");
       await loadConfig();
     } catch (error) {
       console.error(error);
@@ -231,7 +231,7 @@ export function Configuration() {
     if (!confirm(`Delete article "${article.name}"?`)) return;
     try {
       await configApi.deleteArticle(article.id);
-      toast.success("Article deleted");
+      toast.success("Article moved to Deleted Items.");
       await loadConfig();
     } catch (error) {
       console.error(error);
@@ -243,7 +243,7 @@ export function Configuration() {
     if (!confirm(`Delete payment type "${payment.name}"?`)) return;
     try {
       await configApi.deletePaymentType(payment.id);
-      toast.success("Payment type deleted");
+      toast.success("Payment type moved to Deleted Items.");
       await loadConfig();
     } catch (error) {
       console.error(error);

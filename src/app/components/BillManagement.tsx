@@ -545,7 +545,7 @@ export function BillManagement() {
     if (!confirm("Delete this bill?")) return;
     try {
       await billApi.deleteBill(bill.id);
-      toast.success("Bill deleted");
+      toast.success("Bill moved to Deleted Items.");
       await loadData();
     } catch (error) {
       console.error(error);

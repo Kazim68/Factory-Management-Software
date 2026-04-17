@@ -1,9 +1,17 @@
 import prisma from "../prisma.js";
 import { normalizeLaborDepartment } from "../constants/laborDepartments.js";
 import { listLaborDepartments } from "../services/laborDepartmentService.js";
+import {
+  resolveDeletedWhere,
+  restoreById,
+  softDeleteById,
+} from "../utils/softDelete.js";
 
 export const listUnits = async (req, res) => {
-  const units = await prisma.unit.findMany({ orderBy: { name: "asc" } });
+  const units = await prisma.unit.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
+    orderBy: { name: "asc" },
+  });
   res.json(units);
 };
 
@@ -29,12 +37,20 @@ export const updateUnit = async (req, res) => {
 };
 
 export const deleteUnit = async (req, res) => {
-  await prisma.unit.delete({ where: { id: req.params.unitId } });
+  await softDeleteById(prisma.unit, req.params.unitId);
   res.status(204).end();
 };
 
+export const restoreUnit = async (req, res) => {
+  const unit = await restoreById(prisma.unit, req.params.unitId);
+  res.json(unit);
+};
+
 export const listArticles = async (req, res) => {
-  const articles = await prisma.article.findMany({ orderBy: { name: "asc" } });
+  const articles = await prisma.article.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
+    orderBy: { name: "asc" },
+  });
   res.json(articles);
 };
 
@@ -60,8 +76,13 @@ export const updateArticle = async (req, res) => {
 };
 
 export const deleteArticle = async (req, res) => {
-  await prisma.article.delete({ where: { id: req.params.articleId } });
+  await softDeleteById(prisma.article, req.params.articleId);
   res.status(204).end();
+};
+
+export const restoreArticle = async (req, res) => {
+  const article = await restoreById(prisma.article, req.params.articleId);
+  res.json(article);
 };
 
 export const listLaborCategories = async (req, res) => {
@@ -128,6 +149,7 @@ export const deleteLaborCategory = async (req, res) => {
 
 export const listPaymentTypes = async (req, res) => {
   const types = await prisma.paymentCalculationType.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
     include: { unit: true },
     orderBy: { name: "asc" },
   });
@@ -157,8 +179,14 @@ export const updatePaymentType = async (req, res) => {
 };
 
 export const deletePaymentType = async (req, res) => {
-  await prisma.paymentCalculationType.delete({
-    where: { id: req.params.paymentTypeId },
-  });
+  await softDeleteById(prisma.paymentCalculationType, req.params.paymentTypeId);
   res.status(204).end();
+};
+
+export const restorePaymentType = async (req, res) => {
+  const type = await restoreById(
+    prisma.paymentCalculationType,
+    req.params.paymentTypeId,
+  );
+  res.json(type);
 };

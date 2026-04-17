@@ -17,6 +17,9 @@ import {
   listManualStockEntries,
   listProductionOrders,
   listStockByArticle,
+  restoreMallStockMovement,
+  restoreManualStockEntry,
+  restoreProductionOrder,
   updateMallStockMovement,
   updateManualStockEntry,
   updateProductionOrder,
@@ -32,6 +35,7 @@ router.post("/orders", asyncHandler(createProductionOrder));
 router.post("/orders/bulk", asyncHandler(createBulkProductionOrders));
 router.patch("/orders/:orderId", asyncHandler(updateProductionOrder));
 router.delete("/orders/:orderId", asyncHandler(deleteProductionOrder));
+router.post("/orders/:orderId/restore", asyncHandler(restoreProductionOrder));
 router.patch(
   "/orders/:orderId/assign-labor",
   asyncHandler(assignProductionOrderLabor),
@@ -54,9 +58,14 @@ router.delete(
   "/stock/mall-movements/:movementId",
   asyncHandler(deleteMallStockMovement),
 );
+router.post(
+  "/stock/mall-movements/:movementId/restore",
+  asyncHandler(restoreMallStockMovement),
+);
 router.get("/stock/manual", asyncHandler(listManualStockEntries));
 router.post("/stock/manual", asyncHandler(createManualStockEntry));
 router.patch("/stock/manual/:entryId", asyncHandler(updateManualStockEntry));
 router.delete("/stock/manual/:entryId", asyncHandler(deleteManualStockEntry));
+router.post("/stock/manual/:entryId/restore", asyncHandler(restoreManualStockEntry));
 
 export default router;

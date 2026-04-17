@@ -25,6 +25,7 @@ import {
   normalizePrintLanguage,
   translatePrintText,
 } from "../utils/printLanguage.js";
+import { resolveDeletedWhere } from "../utils/softDelete.js";
 
 const STAGE_BY_DEPARTMENT = {
   PRESSMAN: "STAGE_PRESSMAN",
@@ -133,7 +134,7 @@ const createOrExpandQueueOrder = async (
   };
 
   const existing = await tx.productionOrder.findFirst({
-    where,
+    where: { ...where, deletedAt: null },
     orderBy: { createdAt: "asc" },
   });
 
@@ -168,9 +169,9 @@ const assertDepartmentLaborMatch = async (department, laborId) => {
   if (!laborId) return;
   const labor = await prisma.laborProfile.findUnique({
     where: { id: laborId },
-    select: { id: true, department: true, status: true },
+    select: { id: true, department: true, status: true, deletedAt: true },
   });
-  if (!labor || labor.status !== "ACTIVE") {
+  if (!labor || labor.deletedAt || labor.status !== "ACTIVE") {
     throw new Error("Selected labor is not active.");
   }
   if (labor.department !== department) {
@@ -185,10 +186,10 @@ export const listProductionOrders = async (req, res) => {
 
   const [rows, labelMap] = await Promise.all([
     prisma.productionOrder.findMany({
-      where: {
+      where: resolveDeletedWhere(req.query.deleted, {
         ...(departmentQuery ? { department: departmentQuery } : {}),
         isClosed: false,
-      },
+      }),
       include: {
         article: true,
         labor: true,
@@ -212,6 +213,7 @@ export const getPrintableProductionOrders = async (req, res) => {
     prisma.productionOrder.findMany({
       where: {
         isClosed: false,
+        deletedAt: null,
       },
       include: {
         article: true,
@@ -382,6 +384,7 @@ export const getPrintableDailyPressmanOrders = async (req, res) => {
       where: {
         department: "PRESSMAN",
         isClosed: false,
+        deletedAt: null,
         orderDate: {
           gte: startOfDay,
           lte: endOfDayValue,
@@ -632,7 +635,7 @@ export const updateProductionOrder = async (req, res) => {
   const existing = await prisma.productionOrder.findUnique({
     where: { id: req.params.orderId },
   });
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     res.status(404).json({ error: "Order not found." });
     return;
   }
@@ -705,7 +708,7 @@ export const deleteProductionOrder = async (req, res) => {
   const existing = await prisma.productionOrder.findUnique({
     where: { id: req.params.orderId },
   });
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     res.status(404).json({ error: "Order not found." });
     return;
   }
@@ -720,18 +723,34 @@ export const deleteProductionOrder = async (req, res) => {
     return;
   }
 
-  await prisma.productionOrder.delete({
+  await prisma.productionOrder.update({
     where: { id: req.params.orderId },
+    data: { deletedAt: new Date() },
   });
 
   res.status(204).end();
+};
+
+export const restoreProductionOrder = async (req, res) => {
+  const order = await prisma.productionOrder.update({
+    where: { id: req.params.orderId },
+    data: { deletedAt: null },
+    include: {
+      article: true,
+      labor: true,
+      packingLabor: true,
+    },
+  });
+
+  const labelMap = await getLaborDepartmentLabelMap();
+  res.json(toApiOrder(order, labelMap));
 };
 
 export const assignProductionOrderLabor = async (req, res) => {
   const existing = await prisma.productionOrder.findUnique({
     where: { id: req.params.orderId },
   });
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     res.status(404).json({ error: "Order not found." });
     return;
   }
@@ -907,7 +926,7 @@ export const updateProductionOrderCompletion = async (req, res) => {
       const row = await tx.productionOrder.findUnique({
         where: { id: req.params.orderId },
       });
-      if (!row) {
+      if (!row || row.deletedAt) {
         throw new Error("Order not found.");
       }
       const isMergedFinal = MERGED_FINAL_DEPARTMENTS.includes(row.department);
@@ -1128,6 +1147,7 @@ export const getStockSummary = async (req, res) => {
     await Promise.all([
       getPackedStockSnapshot(prisma),
     prisma.productionOrder.findMany({
+      where: { deletedAt: null },
       select: {
         department: true,
         quantityDozen: true,
@@ -1139,6 +1159,7 @@ export const getStockSummary = async (req, res) => {
       },
     }),
     prisma.stockEntry.findMany({
+      where: { deletedAt: null },
       select: {
         mode: true,
         quantityDozen: true,
@@ -1215,6 +1236,7 @@ export const listStockByArticle = async (req, res) => {
 
   const [orders, stockEntries] = await Promise.all([
     prisma.productionOrder.findMany({
+      where: { deletedAt: null },
       select: {
         department: true,
         articleId: true,
@@ -1228,6 +1250,7 @@ export const listStockByArticle = async (req, res) => {
       },
     }),
     prisma.stockEntry.findMany({
+      where: { deletedAt: null },
       select: {
         articleId: true,
         mode: true,
@@ -1309,6 +1332,7 @@ export const listStockByArticle = async (req, res) => {
 
 export const listManualStockEntries = async (req, res) => {
   const rows = await prisma.stockEntry.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
     include: {
       article: {
         select: { id: true, name: true, code: true },
@@ -1399,10 +1423,28 @@ export const updateManualStockEntry = async (req, res) => {
 };
 
 export const deleteManualStockEntry = async (req, res) => {
-  await prisma.stockEntry.delete({
+  await prisma.stockEntry.update({
     where: { id: req.params.entryId },
+    data: { deletedAt: new Date() },
   });
   res.status(204).end();
+};
+
+export const restoreManualStockEntry = async (req, res) => {
+  const entry = await prisma.stockEntry.update({
+    where: { id: req.params.entryId },
+    data: { deletedAt: null },
+    include: {
+      article: {
+        select: { id: true, name: true, code: true },
+      },
+    },
+  });
+
+  res.json({
+    ...entry,
+    quantityDozen: toNumber(entry.quantityDozen),
+  });
 };
 
 const toApiMallStockMovement = (row) => ({
@@ -1479,6 +1521,7 @@ const getMallAvailableQuantity = async (tx, mallType) => {
 export const listMallStockMovements = async (req, res) => {
   const rows = await prisma.$transaction(async (tx) => {
     const fetchedRows = await tx.mallStockMovement.findMany({
+      where: resolveDeletedWhere(req.query.deleted),
       orderBy: [{ date: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
     });
 
@@ -1572,7 +1615,7 @@ export const updateMallStockMovement = async (req, res) => {
     where: { id: req.params.movementId },
   });
 
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     res.status(404).json({ error: "Mall stock movement not found." });
     return;
   }
@@ -1682,8 +1725,9 @@ export const updateMallStockMovement = async (req, res) => {
         roznamchaEntryId = roznamchaEntry.id;
       }
     } else if (existing.roznamchaEntryId) {
-      await tx.expenseEntry.delete({
+      await tx.expenseEntry.update({
         where: { id: existing.roznamchaEntryId },
+        data: { deletedAt: new Date() },
       });
       roznamchaEntryId = null;
     }
@@ -1713,18 +1757,21 @@ export const deleteMallStockMovement = async (req, res) => {
       where: { id: req.params.movementId },
     });
 
-    if (!existing) {
+    if (!existing || existing.deletedAt) {
       throw new Error("Mall stock movement not found.");
     }
 
+    const deletedAt = new Date();
     if (existing.roznamchaEntryId) {
-      await tx.expenseEntry.delete({
+      await tx.expenseEntry.update({
         where: { id: existing.roznamchaEntryId },
+        data: { deletedAt },
       });
     }
 
-    await tx.mallStockMovement.delete({
+    await tx.mallStockMovement.update({
       where: { id: req.params.movementId },
+      data: { deletedAt },
     });
   }).catch((error) => {
     res
@@ -1736,11 +1783,32 @@ export const deleteMallStockMovement = async (req, res) => {
   res.status(204).end();
 };
 
+export const restoreMallStockMovement = async (req, res) => {
+  const row = await prisma.$transaction(async (tx) => {
+    const existing = await tx.mallStockMovement.update({
+      where: { id: req.params.movementId },
+      data: { deletedAt: null },
+    });
+
+    if (existing.roznamchaEntryId) {
+      await tx.expenseEntry.update({
+        where: { id: existing.roznamchaEntryId },
+        data: { deletedAt: null },
+      });
+    }
+
+    return existing;
+  });
+
+  res.json(toApiMallStockMovement(row));
+};
+
 export const listDepartmentLabors = async (req, res) => {
   const profiles = await prisma.laborProfile.findMany({
     where: {
       status: "ACTIVE",
       department: { in: LABOR_DEPARTMENT_IDS },
+      deletedAt: null,
     },
     orderBy: { name: "asc" },
     select: { id: true, name: true, department: true },

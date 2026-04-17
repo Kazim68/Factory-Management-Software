@@ -2,6 +2,7 @@ export interface ApiUnit {
   id: string;
   name: string;
   symbol?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -10,6 +11,7 @@ export interface ApiArticle {
   id: string;
   name: string;
   code?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,6 +36,7 @@ export interface ApiPaymentType {
   name: string;
   unitId?: string | null;
   unit?: ApiUnit | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +51,7 @@ export interface ApiLaborProfile {
   paymentTypeId: string;
   defaultRate?: number | string | null;
   status: ApiLaborStatus;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   category?: ApiLaborCategory | null;
@@ -64,7 +68,11 @@ export interface ApiLaborWorkEntry {
   quantity: number | string;
   rate: number | string;
   total: number | string;
+  deletedAt?: string | null;
   createdAt: string;
+  labor?: ApiLaborProfile | null;
+  article?: ApiArticle | null;
+  unit?: ApiUnit | null;
 }
 
 export interface ApiLaborAdvance {
@@ -73,6 +81,7 @@ export interface ApiLaborAdvance {
   date: string;
   amount: number | string;
   reason?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   labor?: ApiLaborProfile | null;
 }
@@ -98,6 +107,7 @@ export interface ApiBillLine {
   price: number | string;
   discount: number | string;
   total: number | string;
+  deletedAt?: string | null;
   article?: ApiArticle | null;
 }
 
@@ -114,6 +124,7 @@ export interface ApiBill {
   paymentStatus: ApiBillPaymentStatus;
   isVerified: boolean;
   verifiedAt?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   lines: ApiBillLine[];
@@ -162,6 +173,7 @@ export interface ApiChemicalPurchase {
   ratePerKg: number | string;
   totalAmount: number | string;
   paymentType: ApiPaymentMethod;
+  deletedAt?: string | null;
   createdAt: string;
   party?: ApiParty | null;
   expenses?: ApiExpenseEntry[];
@@ -175,6 +187,7 @@ export interface ApiRexinePurchase {
   ratePerMeter: number | string;
   totalAmount: number | string;
   paymentType: ApiPaymentMethod;
+  deletedAt?: string | null;
   createdAt: string;
   party?: ApiParty | null;
   expenses?: ApiExpenseEntry[];
@@ -190,6 +203,7 @@ export interface ApiMaterialPurchase {
   pricePerUnit: number | string;
   totalAmount: number | string;
   paymentType: ApiPaymentMethod;
+  deletedAt?: string | null;
   createdAt: string;
   party?: ApiParty | null;
   article?: ApiArticle | null;
@@ -221,6 +235,7 @@ export interface ApiExpenseEntry {
   laborAdvanceId?: string | null;
   source?: ApiExpenseSource;
   sourceSystem?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   party?: ApiParty | null;
   labor?: ApiLaborProfile | null;
@@ -234,6 +249,7 @@ export interface ApiParty {
   name: string;
   type: ApiPartyType;
   openingBalance: number | string;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -320,6 +336,7 @@ export interface ApiProductionOrder {
   forwardedDozen: number;
   source: ApiProductionOrderSource;
   isClosed: boolean;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
@@ -340,6 +357,7 @@ export interface ApiStockEntry {
   mode: ApiStockMode;
   quantityDozen: number;
   note?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   article?: ApiArticle | null;
@@ -375,6 +393,7 @@ export interface ApiMallStockMovement {
   totalAmount?: number | null;
   reference?: string | null;
   note?: string | null;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

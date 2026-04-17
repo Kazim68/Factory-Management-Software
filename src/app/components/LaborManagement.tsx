@@ -638,7 +638,7 @@ export function LaborManagement() {
       await laborApi.deleteAdvance(advanceId, {
         itemLabel: getLaborName(advance?.laborId),
       });
-      toast.success("Advance deleted");
+      toast.success("Advance moved to Deleted Items.");
       await loadData();
     } catch (error) {
       console.error(error);

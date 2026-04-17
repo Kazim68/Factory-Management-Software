@@ -19,6 +19,7 @@ import { UserManagement } from "./components/UserManagement";
 import { AuditLogs } from "./components/AuditLogs";
 import { ProductionControl } from "./components/ProductionControl";
 import { StockControl } from "./components/StockControl";
+import { DeletedItems } from "./components/DeletedItems";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -54,6 +55,7 @@ import {
   LogOut,
   Factory,
   Landmark,
+  Trash2,
 } from "lucide-react";
 
 type Page =
@@ -68,7 +70,8 @@ type Page =
   | "roznamcha"
   | "configuration"
   | "users"
-  | "audit_logs";
+  | "audit_logs"
+  | "deleted_items";
 
 interface NavItem {
   name: string;
@@ -116,6 +119,12 @@ const navigation: NavItem[] = [
     page: "party_suppliers",
     icon: Users,
     roles: ["admin"],
+  },
+  {
+    name: "Deleted Items",
+    page: "deleted_items",
+    icon: Trash2,
+    roles: ["admin", "super_admin", "sub_admin"],
   },
   {
     name: "Configuration",
@@ -321,6 +330,9 @@ function AppShell() {
         break;
       case "configuration":
         pageContent = <Configuration />;
+        break;
+      case "deleted_items":
+        pageContent = <DeletedItems />;
         break;
       case "users":
         pageContent = <UserManagement currentUserId={currentUser.id} />;

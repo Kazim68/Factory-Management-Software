@@ -836,7 +836,7 @@ export function Roznamcha() {
           date: entry.date,
         },
       });
-      toast.success("Expense deleted");
+      toast.success("Entry moved to Deleted Items.");
       await loadData(filterDate);
     } catch (error) {
       console.error(error);

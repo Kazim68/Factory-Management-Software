@@ -22,6 +22,11 @@ import {
   normalizePrintLanguage,
   translatePrintText,
 } from "../utils/printLanguage.js";
+import {
+  resolveDeletedWhere,
+  restoreById,
+  softDeleteById,
+} from "../utils/softDelete.js";
 
 const withCategory = (profile, labelMap) => ({
   ...profile,
@@ -53,7 +58,7 @@ const formatNumberText = (value, language) =>
 
 export const listLaborProfiles = async (req, res) => {
   const { status = "ACTIVE" } = req.query;
-  const where =
+  const statusWhere =
     status === "ALL"
       ? undefined
       : {
@@ -62,7 +67,7 @@ export const listLaborProfiles = async (req, res) => {
 
   const [profiles, labelMap] = await Promise.all([
     prisma.laborProfile.findMany({
-      where,
+      where: resolveDeletedWhere(req.query.deleted, statusWhere),
       include: { paymentType: true },
       orderBy: { name: "asc" },
     }),
@@ -117,7 +122,15 @@ export const fireLaborProfile = async (req, res) => {
   res.status(204).end();
 };
 
-export const deleteLaborProfile = fireLaborProfile;
+export const deleteLaborProfile = async (req, res) => {
+  await softDeleteById(prisma.laborProfile, req.params.laborId);
+  res.status(204).end();
+};
+
+export const restoreLaborProfile = async (req, res) => {
+  const profile = await restoreById(prisma.laborProfile, req.params.laborId);
+  res.json(profile);
+};
 
 export const upsertLaborRate = async (req, res) => {
   const rate = await prisma.laborRate.upsert({
@@ -175,8 +188,30 @@ export const updateLaborWorkEntry = async (req, res) => {
 };
 
 export const deleteLaborWorkEntry = async (req, res) => {
-  await prisma.laborWorkEntry.delete({ where: { id: req.params.workId } });
+  await softDeleteById(prisma.laborWorkEntry, req.params.workId);
   res.status(204).end();
+};
+
+export const restoreLaborWorkEntry = async (req, res) => {
+  const entry = await restoreById(prisma.laborWorkEntry, req.params.workId);
+  res.json(entry);
+};
+
+export const listLaborWorkEntries = async (req, res) => {
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
+  const rows = await prisma.laborWorkEntry.findMany({
+    where: resolveDeletedWhere(req.query.deleted, {
+      startDate: withDateRange(start, end),
+    }),
+    include: {
+      labor: true,
+      article: true,
+      unit: true,
+    },
+    orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+  });
+  res.json(rows);
 };
 
 export const getPrintableLaborWorkEntries = async (req, res) => {
@@ -201,6 +236,7 @@ export const getPrintableLaborWorkEntries = async (req, res) => {
     prisma.laborWorkEntry.findMany({
       where: {
         startDate: withDateRange(start, end),
+        deletedAt: null,
       },
       include: {
         labor: true,
@@ -360,7 +396,7 @@ export const updateLaborAdvance = async (req, res) => {
   });
 
   const expense = await prisma.expenseEntry.findFirst({
-    where: { laborAdvanceId: advance.id },
+    where: { laborAdvanceId: advance.id, deletedAt: null },
   });
 
   if (expense) {
@@ -386,13 +422,50 @@ export const updateLaborAdvance = async (req, res) => {
 
 export const deleteLaborAdvance = async (req, res) => {
   await prisma.$transaction(async (tx) => {
-    await tx.expenseEntry.deleteMany({
-      where: { laborAdvanceId: req.params.advanceId },
+    const deletedAt = new Date();
+    await tx.expenseEntry.updateMany({
+      where: { laborAdvanceId: req.params.advanceId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.laborAdvance.delete({ where: { id: req.params.advanceId } });
+    await tx.laborAdvance.update({
+      where: { id: req.params.advanceId },
+      data: { deletedAt },
+    });
   });
 
   res.status(204).end();
+};
+
+export const restoreLaborAdvance = async (req, res) => {
+  const advance = await prisma.$transaction(async (tx) => {
+    const restored = await tx.laborAdvance.update({
+      where: { id: req.params.advanceId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { laborAdvanceId: req.params.advanceId },
+      data: { deletedAt: null },
+    });
+    return restored;
+  });
+
+  res.json(advance);
+};
+
+export const listLaborAdvances = async (req, res) => {
+  const start = toDate(req.query.start, "start");
+  const end = toDate(req.query.end, "end");
+  const rows = await prisma.laborAdvance.findMany({
+    where: resolveDeletedWhere(req.query.deleted, {
+      date: withDateRange(start, end),
+      laborId: req.query.laborId || undefined,
+    }),
+    include: {
+      labor: true,
+    },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+  });
+  res.json(rows);
 };
 
 export const getLaborLedger = async (req, res) => {
@@ -403,6 +476,7 @@ export const getLaborLedger = async (req, res) => {
       where: {
         laborId: req.params.laborId,
         startDate: withDateRange(start, end),
+        deletedAt: null,
       },
       orderBy: { startDate: "asc" },
     }),
@@ -410,6 +484,7 @@ export const getLaborLedger = async (req, res) => {
       where: {
         laborId: req.params.laborId,
         date: withDateRange(start, end),
+        deletedAt: null,
       },
       orderBy: { date: "asc" },
     }),
@@ -437,7 +512,7 @@ export const getWeeklyLaborSummary = async (req, res) => {
   const start = toDate(req.query.start, "start");
   const end = toDate(req.query.end, "end");
   const entries = await prisma.laborWorkEntry.findMany({
-    where: { startDate: withDateRange(start, end) },
+    where: { startDate: withDateRange(start, end), deletedAt: null },
     orderBy: { startDate: "asc" },
   });
 
@@ -452,7 +527,7 @@ export const getMonthlyLaborSummary = async (req, res) => {
   const start = toDate(req.query.start, "start");
   const end = toDate(req.query.end, "end");
   const entries = await prisma.laborWorkEntry.findMany({
-    where: { startDate: withDateRange(start, end) },
+    where: { startDate: withDateRange(start, end), deletedAt: null },
     orderBy: { startDate: "asc" },
   });
 

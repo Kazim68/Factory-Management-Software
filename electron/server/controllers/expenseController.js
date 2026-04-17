@@ -7,6 +7,7 @@ import {
   toDate,
   withDateRange,
 } from "../utils/date.js";
+import { resolveDeletedWhere } from "../utils/softDelete.js";
 
 const toDbPaymentType = (paymentType) => {
   const normalized = String(paymentType ?? "CASH").toUpperCase();
@@ -18,14 +19,173 @@ const toDbPaymentType = (paymentType) => {
 const isKhata = (paymentType) =>
   ["CREDIT", "KHATA"].includes(String(paymentType ?? "CASH").toUpperCase());
 
+const softDeleteExpenseRelations = async (tx, expenseId, deletedAt = new Date()) => {
+  const expense = await tx.expenseEntry.findUnique({
+    where: { id: expenseId },
+  });
+  if (!expense) {
+    const error = new Error("Expense not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (expense.source === "SYSTEM") {
+    const error = new Error("System entries cannot be deleted from Roznamcha.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (expense.chemicalPurchaseId) {
+    await tx.partyLedgerEntry.updateMany({
+      where: { chemicalPurchaseId: expense.chemicalPurchaseId, deletedAt: null },
+      data: { deletedAt },
+    });
+    await tx.chemicalPurchase.update({
+      where: { id: expense.chemicalPurchaseId },
+      data: { deletedAt },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { chemicalPurchaseId: expense.chemicalPurchaseId, deletedAt: null },
+      data: { deletedAt },
+    });
+    return expense;
+  }
+
+  if (expense.rexinePurchaseId) {
+    await tx.partyLedgerEntry.updateMany({
+      where: { rexinePurchaseId: expense.rexinePurchaseId, deletedAt: null },
+      data: { deletedAt },
+    });
+    await tx.rexinePurchase.update({
+      where: { id: expense.rexinePurchaseId },
+      data: { deletedAt },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { rexinePurchaseId: expense.rexinePurchaseId, deletedAt: null },
+      data: { deletedAt },
+    });
+    return expense;
+  }
+
+  if (expense.materialPurchaseId) {
+    await tx.partyLedgerEntry.updateMany({
+      where: { materialPurchaseId: expense.materialPurchaseId, deletedAt: null },
+      data: { deletedAt },
+    });
+    await tx.materialPurchase.update({
+      where: { id: expense.materialPurchaseId },
+      data: { deletedAt },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { materialPurchaseId: expense.materialPurchaseId, deletedAt: null },
+      data: { deletedAt },
+    });
+    return expense;
+  }
+
+  if (expense.laborAdvanceId) {
+    await tx.laborAdvance.update({
+      where: { id: expense.laborAdvanceId },
+      data: { deletedAt },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { laborAdvanceId: expense.laborAdvanceId, deletedAt: null },
+      data: { deletedAt },
+    });
+    return expense;
+  }
+
+  await tx.expenseEntry.update({
+    where: { id: expenseId },
+    data: { deletedAt },
+  });
+  return expense;
+};
+
+const restoreExpenseRelations = async (tx, expenseId) => {
+  const expense = await tx.expenseEntry.findUnique({
+    where: { id: expenseId },
+  });
+  if (!expense) {
+    const error = new Error("Expense not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (expense.chemicalPurchaseId) {
+    await tx.chemicalPurchase.update({
+      where: { id: expense.chemicalPurchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { chemicalPurchaseId: expense.chemicalPurchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { chemicalPurchaseId: expense.chemicalPurchaseId },
+      data: { deletedAt: null },
+    });
+    return;
+  }
+
+  if (expense.rexinePurchaseId) {
+    await tx.rexinePurchase.update({
+      where: { id: expense.rexinePurchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { rexinePurchaseId: expense.rexinePurchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { rexinePurchaseId: expense.rexinePurchaseId },
+      data: { deletedAt: null },
+    });
+    return;
+  }
+
+  if (expense.materialPurchaseId) {
+    await tx.materialPurchase.update({
+      where: { id: expense.materialPurchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { materialPurchaseId: expense.materialPurchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { materialPurchaseId: expense.materialPurchaseId },
+      data: { deletedAt: null },
+    });
+    return;
+  }
+
+  if (expense.laborAdvanceId) {
+    await tx.laborAdvance.update({
+      where: { id: expense.laborAdvanceId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { laborAdvanceId: expense.laborAdvanceId },
+      data: { deletedAt: null },
+    });
+    return;
+  }
+
+  await tx.expenseEntry.update({
+    where: { id: expenseId },
+    data: { deletedAt: null },
+  });
+};
+
 export const listExpenses = async (req, res) => {
   const start = toDate(req.query.start, "start");
   const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
-    where: {
+    where: resolveDeletedWhere(req.query.deleted, {
       date: withDateRange(start, end),
       module: req.query.module,
-    },
+    }),
     include: {
       party: true,
       labor: true,
@@ -246,7 +406,7 @@ export const updateExpense = async (req, res) => {
   const existing = await prisma.expenseEntry.findUnique({
     where: { id: req.params.expenseId },
   });
-  if (!existing) {
+  if (!existing || existing.deletedAt) {
     res.status(404).json({ error: "Expense not found." });
     return;
   }
@@ -280,59 +440,35 @@ export const updateExpense = async (req, res) => {
 };
 
 export const deleteExpense = async (req, res) => {
-  const expense = await prisma.expenseEntry.findUnique({
-    where: { id: req.params.expenseId },
-  });
-  if (!expense) {
-    res.status(404).json({ error: "Expense not found." });
-    return;
-  }
-  if (expense.source === "SYSTEM") {
-    res
-      .status(403)
-      .json({ error: "System entries cannot be deleted from Roznamcha." });
-    return;
-  }
-
-  await prisma.$transaction(async (tx) => {
-    if (expense?.chemicalPurchaseId) {
-      await tx.partyLedgerEntry.deleteMany({
-        where: { chemicalPurchaseId: expense.chemicalPurchaseId },
-      });
-      await tx.chemicalPurchase.delete({
-        where: { id: expense.chemicalPurchaseId },
-      });
-    }
-    if (expense?.rexinePurchaseId) {
-      await tx.partyLedgerEntry.deleteMany({
-        where: { rexinePurchaseId: expense.rexinePurchaseId },
-      });
-      await tx.rexinePurchase.delete({
-        where: { id: expense.rexinePurchaseId },
-      });
-    }
-    if (expense?.materialPurchaseId) {
-      await tx.partyLedgerEntry.deleteMany({
-        where: { materialPurchaseId: expense.materialPurchaseId },
-      });
-      await tx.materialPurchase.delete({
-        where: { id: expense.materialPurchaseId },
-      });
-    }
-    if (expense?.laborAdvanceId) {
-      await tx.laborAdvance.delete({ where: { id: expense.laborAdvanceId } });
-    }
-    await tx.expenseEntry.delete({ where: { id: req.params.expenseId } });
-  });
+  await prisma.$transaction((tx) =>
+    softDeleteExpenseRelations(tx, req.params.expenseId),
+  );
 
   res.status(204).end();
+};
+
+export const restoreExpense = async (req, res) => {
+  await prisma.$transaction((tx) =>
+    restoreExpenseRelations(tx, req.params.expenseId),
+  );
+
+  const expense = await prisma.expenseEntry.findUnique({
+    where: { id: req.params.expenseId },
+    include: {
+      party: true,
+      labor: true,
+      laborAdvance: { include: { labor: true } },
+    },
+  });
+
+  res.json(expense);
 };
 
 export const getDailySummary = async (req, res) => {
   const start = toDate(req.query.start, "start");
   const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
-    where: { date: withDateRange(start, end) },
+    where: { date: withDateRange(start, end), deletedAt: null },
     orderBy: { date: "asc" },
   });
 
@@ -346,7 +482,7 @@ export const getWeeklySummary = async (req, res) => {
   const start = toDate(req.query.start, "start");
   const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
-    where: { date: withDateRange(start, end) },
+    where: { date: withDateRange(start, end), deletedAt: null },
     orderBy: { date: "asc" },
   });
 
@@ -361,7 +497,7 @@ export const getMonthlySummary = async (req, res) => {
   const start = toDate(req.query.start, "start");
   const end = toDate(req.query.end, "end");
   const expenses = await prisma.expenseEntry.findMany({
-    where: { date: withDateRange(start, end) },
+    where: { date: withDateRange(start, end), deletedAt: null },
     orderBy: { date: "asc" },
   });
 

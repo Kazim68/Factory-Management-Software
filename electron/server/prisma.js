@@ -27,6 +27,25 @@ const basePrisma = new PrismaClient({
 });
 
 const BILL_COUNTER_ID = "default";
+const SOFT_DELETE_TABLES = [
+  "Unit",
+  "Article",
+  "PaymentCalculationType",
+  "Party",
+  "PartyLedgerEntry",
+  "ExpenseEntry",
+  "LaborProfile",
+  "LaborWorkEntry",
+  "LaborAdvance",
+  "Bill",
+  "BillLine",
+  "StockEntry",
+  "MallStockMovement",
+  "ChemicalPurchase",
+  "RexinePurchase",
+  "MaterialPurchase",
+  "ProductionOrder",
+];
 
 const getMaxStoredBillNumber = async (prisma) => {
   const [row] = await prisma.$queryRawUnsafe(`
@@ -91,8 +110,25 @@ const ensureBillSchema = async (prisma) => {
   );
 };
 
+const ensureSoftDeleteSchema = async (prisma) => {
+  for (const tableName of SOFT_DELETE_TABLES) {
+    const columns = await prisma.$queryRawUnsafe(
+      `PRAGMA table_info("${tableName}")`,
+    );
+
+    if (columns.some((column) => column.name === "deletedAt")) {
+      continue;
+    }
+
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "${tableName}" ADD COLUMN "deletedAt" DATETIME`,
+    );
+  }
+};
+
 export const initPrisma = async () => {
   await ensureBillSchema(basePrisma);
+  await ensureSoftDeleteSchema(basePrisma);
   await ensureSyncTables(basePrisma);
 };
 

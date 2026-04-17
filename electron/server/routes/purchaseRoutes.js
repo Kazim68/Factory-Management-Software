@@ -12,6 +12,9 @@ import {
   listMaterialPurchases,
   listRexinePurchases,
   getPrintableSupplierPurchases,
+  restoreChemicalPurchase,
+  restoreMaterialPurchase,
+  restoreRexinePurchase,
   updateChemicalPurchase,
   updateMaterialPurchase,
   updateRexinePurchase,
@@ -32,9 +35,12 @@ router.get("/rexine", asyncHandler(listRexinePurchases));
 router.get("/materials", asyncHandler(listMaterialPurchases));
 router.patch("/chemicals/:purchaseId", asyncHandler(updateChemicalPurchase));
 router.delete("/chemicals/:purchaseId", asyncHandler(deleteChemicalPurchase));
+router.post("/chemicals/:purchaseId/restore", asyncHandler(restoreChemicalPurchase));
 router.patch("/rexine/:purchaseId", asyncHandler(updateRexinePurchase));
 router.delete("/rexine/:purchaseId", asyncHandler(deleteRexinePurchase));
+router.post("/rexine/:purchaseId/restore", asyncHandler(restoreRexinePurchase));
 router.patch("/materials/:purchaseId", asyncHandler(updateMaterialPurchase));
 router.delete("/materials/:purchaseId", asyncHandler(deleteMaterialPurchase));
+router.post("/materials/:purchaseId/restore", asyncHandler(restoreMaterialPurchase));
 
 export default router;

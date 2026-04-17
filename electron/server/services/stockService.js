@@ -32,6 +32,7 @@ export const getPackedStockSnapshot = async (
 ) => {
   const [orders, stockEntries, billLines, mallMovements] = await Promise.all([
     tx.productionOrder.findMany({
+      where: { deletedAt: null },
       select: {
         department: true,
         articleId: true,
@@ -49,7 +50,7 @@ export const getPackedStockSnapshot = async (
       },
     }),
     tx.stockEntry.findMany({
-      where: { mode: "PACKED" },
+      where: { mode: "PACKED", deletedAt: null },
       select: {
         articleId: true,
         quantityDozen: true,
@@ -64,8 +65,10 @@ export const getPackedStockSnapshot = async (
     }),
     tx.billLine.findMany({
       where: {
+        deletedAt: null,
         bill: {
           status: "CONFIRMED",
+          deletedAt: null,
           ...(excludeBillId ? { id: { not: excludeBillId } } : {}),
         },
       },
@@ -76,6 +79,7 @@ export const getPackedStockSnapshot = async (
       },
     }),
     tx.mallStockMovement.findMany({
+      where: { deletedAt: null },
       select: {
         mallType: true,
         direction: true,

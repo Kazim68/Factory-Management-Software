@@ -19,6 +19,7 @@ import {
   translatePrintList,
   translatePrintText,
 } from "../utils/printLanguage.js";
+import { resolveDeletedWhere } from "../utils/softDelete.js";
 
 const toDbPaymentType = (paymentType) => {
   const normalized = String(paymentType ?? "CASH").toUpperCase();
@@ -148,21 +149,21 @@ export const getPrintableSupplierPurchases = async (req, res) => {
   const [chemicalData, rexineData, materialData] = await Promise.all([
     selectedTypes.includes("CHEMICAL")
       ? prisma.chemicalPurchase.findMany({
-          where,
+          where: { ...where, deletedAt: null },
           include: { party: true },
           orderBy: { date: "desc" },
         })
       : Promise.resolve([]),
     selectedTypes.includes("REXINE")
       ? prisma.rexinePurchase.findMany({
-          where,
+          where: { ...where, deletedAt: null },
           include: { party: true },
           orderBy: { date: "desc" },
         })
       : Promise.resolve([]),
     selectedTypes.includes("MATERIAL")
       ? prisma.materialPurchase.findMany({
-          where,
+          where: { ...where, deletedAt: null },
           include: { party: true, article: true, unit: true },
           orderBy: { date: "desc" },
         })
@@ -369,7 +370,7 @@ export const createCombinedSupplierPurchase = async (req, res) => {
   const result = await prisma
     .$transaction(async (tx) => {
       const party = await tx.party.findUnique({ where: { id: partyId } });
-      if (!party || party.type !== "SUPPLIER") {
+      if (!party || party.deletedAt || party.type !== "SUPPLIER") {
         throw new Error("Selected party must be a supplier.");
       }
 
@@ -530,6 +531,7 @@ export const createChemicalPurchase = async (req, res) => {
 
 export const listChemicalPurchases = async (req, res) => {
   const purchases = await prisma.chemicalPurchase.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
     include: { party: true, expenses: true },
     orderBy: { date: "desc" },
   });
@@ -590,7 +592,10 @@ export const updateChemicalPurchase = async (req, res) => {
         });
       }
     } else if (existingLedger) {
-      await tx.partyLedgerEntry.delete({ where: { id: existingLedger.id } });
+      await tx.partyLedgerEntry.update({
+        where: { id: existingLedger.id },
+        data: { deletedAt: new Date() },
+      });
     }
 
     return tx.chemicalPurchase.findUnique({
@@ -604,15 +609,44 @@ export const updateChemicalPurchase = async (req, res) => {
 
 export const deleteChemicalPurchase = async (req, res) => {
   await prisma.$transaction(async (tx) => {
-    await tx.partyLedgerEntry.deleteMany({
-      where: { chemicalPurchaseId: req.params.purchaseId },
+    const deletedAt = new Date();
+    await tx.partyLedgerEntry.updateMany({
+      where: { chemicalPurchaseId: req.params.purchaseId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.expenseEntry.deleteMany({
-      where: { chemicalPurchaseId: req.params.purchaseId },
+    await tx.expenseEntry.updateMany({
+      where: { chemicalPurchaseId: req.params.purchaseId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.chemicalPurchase.delete({ where: { id: req.params.purchaseId } });
+    await tx.chemicalPurchase.update({
+      where: { id: req.params.purchaseId },
+      data: { deletedAt },
+    });
   });
   res.status(204).end();
+};
+
+export const restoreChemicalPurchase = async (req, res) => {
+  const purchase = await prisma.$transaction(async (tx) => {
+    await tx.chemicalPurchase.update({
+      where: { id: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { chemicalPurchaseId: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { chemicalPurchaseId: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    return tx.chemicalPurchase.findUnique({
+      where: { id: req.params.purchaseId },
+      include: { party: true, expenses: true },
+    });
+  });
+
+  res.json(purchase);
 };
 
 export const createRexinePurchase = async (req, res) => {
@@ -672,6 +706,7 @@ export const createRexinePurchase = async (req, res) => {
 
 export const listRexinePurchases = async (req, res) => {
   const purchases = await prisma.rexinePurchase.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
     include: { party: true, expenses: true },
     orderBy: { date: "desc" },
   });
@@ -732,7 +767,10 @@ export const updateRexinePurchase = async (req, res) => {
         });
       }
     } else if (existingLedger) {
-      await tx.partyLedgerEntry.delete({ where: { id: existingLedger.id } });
+      await tx.partyLedgerEntry.update({
+        where: { id: existingLedger.id },
+        data: { deletedAt: new Date() },
+      });
     }
 
     return tx.rexinePurchase.findUnique({
@@ -746,15 +784,44 @@ export const updateRexinePurchase = async (req, res) => {
 
 export const deleteRexinePurchase = async (req, res) => {
   await prisma.$transaction(async (tx) => {
-    await tx.partyLedgerEntry.deleteMany({
-      where: { rexinePurchaseId: req.params.purchaseId },
+    const deletedAt = new Date();
+    await tx.partyLedgerEntry.updateMany({
+      where: { rexinePurchaseId: req.params.purchaseId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.expenseEntry.deleteMany({
-      where: { rexinePurchaseId: req.params.purchaseId },
+    await tx.expenseEntry.updateMany({
+      where: { rexinePurchaseId: req.params.purchaseId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.rexinePurchase.delete({ where: { id: req.params.purchaseId } });
+    await tx.rexinePurchase.update({
+      where: { id: req.params.purchaseId },
+      data: { deletedAt },
+    });
   });
   res.status(204).end();
+};
+
+export const restoreRexinePurchase = async (req, res) => {
+  const purchase = await prisma.$transaction(async (tx) => {
+    await tx.rexinePurchase.update({
+      where: { id: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { rexinePurchaseId: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { rexinePurchaseId: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    return tx.rexinePurchase.findUnique({
+      where: { id: req.params.purchaseId },
+      include: { party: true, expenses: true },
+    });
+  });
+
+  res.json(purchase);
 };
 
 export const createMaterialPurchase = async (req, res) => {
@@ -818,6 +885,7 @@ export const createMaterialPurchase = async (req, res) => {
 
 export const listMaterialPurchases = async (req, res) => {
   const purchases = await prisma.materialPurchase.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
     include: { party: true, article: true, unit: true, expenses: true },
     orderBy: { date: "desc" },
   });
@@ -880,7 +948,10 @@ export const updateMaterialPurchase = async (req, res) => {
         });
       }
     } else if (existingLedger) {
-      await tx.partyLedgerEntry.delete({ where: { id: existingLedger.id } });
+      await tx.partyLedgerEntry.update({
+        where: { id: existingLedger.id },
+        data: { deletedAt: new Date() },
+      });
     }
 
     return tx.materialPurchase.findUnique({
@@ -894,13 +965,42 @@ export const updateMaterialPurchase = async (req, res) => {
 
 export const deleteMaterialPurchase = async (req, res) => {
   await prisma.$transaction(async (tx) => {
-    await tx.partyLedgerEntry.deleteMany({
-      where: { materialPurchaseId: req.params.purchaseId },
+    const deletedAt = new Date();
+    await tx.partyLedgerEntry.updateMany({
+      where: { materialPurchaseId: req.params.purchaseId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.expenseEntry.deleteMany({
-      where: { materialPurchaseId: req.params.purchaseId },
+    await tx.expenseEntry.updateMany({
+      where: { materialPurchaseId: req.params.purchaseId, deletedAt: null },
+      data: { deletedAt },
     });
-    await tx.materialPurchase.delete({ where: { id: req.params.purchaseId } });
+    await tx.materialPurchase.update({
+      where: { id: req.params.purchaseId },
+      data: { deletedAt },
+    });
   });
   res.status(204).end();
+};
+
+export const restoreMaterialPurchase = async (req, res) => {
+  const purchase = await prisma.$transaction(async (tx) => {
+    await tx.materialPurchase.update({
+      where: { id: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { materialPurchaseId: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { materialPurchaseId: req.params.purchaseId },
+      data: { deletedAt: null },
+    });
+    return tx.materialPurchase.findUnique({
+      where: { id: req.params.purchaseId },
+      include: { party: true, article: true, unit: true, expenses: true },
+    });
+  });
+
+  res.json(purchase);
 };

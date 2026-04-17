@@ -98,6 +98,7 @@ model Unit {
   id        String   @id @default(uuid())
   name      String   @unique
   symbol    String?
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -111,6 +112,7 @@ model Article {
   id        String   @id @default(uuid())
   name      String   @unique
   code      String?
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -134,6 +136,7 @@ model PaymentCalculationType {
   id        String   @id @default(uuid())
   name      String   @unique
   unitId    String?
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -146,6 +149,7 @@ model Party {
   name           String            @unique
   type           PartyType
   openingBalance Decimal           @default(0)
+  deletedAt      DateTime?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -171,6 +175,7 @@ model PartyLedgerEntry {
   chemicalPurchaseId String?
   rexinePurchaseId   String?
   materialPurchaseId String?
+  deletedAt      DateTime?
   createdAt      DateTime @default(now())
 
   party Party @relation(fields: [partyId], references: [id])
@@ -197,6 +202,7 @@ model ExpenseEntry {
   laborAdvanceId     String?
   source             ExpenseSource @default(MANUAL)
   sourceSystem       String?
+  deletedAt          DateTime?
   createdAt          DateTime      @default(now())
 
   party             Party?           @relation(fields: [partyId], references: [id])
@@ -216,6 +222,7 @@ model LaborProfile {
   paymentTypeId    String
   defaultRate      Decimal?
   status           LaborStatus              @default(ACTIVE)
+  deletedAt        DateTime?
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
@@ -256,6 +263,7 @@ model LaborWorkEntry {
   quantity  Decimal
   rate      Decimal
   total     Decimal
+  deletedAt DateTime?
   createdAt DateTime @default(now())
 
   labor   LaborProfile @relation(fields: [laborId], references: [id])
@@ -271,6 +279,7 @@ model LaborAdvance {
   date           DateTime
   amount         Decimal
   reason         String?
+  deletedAt      DateTime?
   createdAt      DateTime @default(now())
 
   labor   LaborProfile  @relation(fields: [laborId], references: [id])
@@ -288,6 +297,7 @@ model Bill {
   status     BillStatus @default(DRAFT)
   total      Decimal
   verifiedAt DateTime?
+  deletedAt  DateTime?
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
@@ -308,6 +318,7 @@ model BillLine {
   price     Decimal
   discount  Decimal  @default(0)
   total     Decimal
+  deletedAt DateTime?
 
   bill    Bill    @relation(fields: [billId], references: [id])
   article Article @relation(fields: [articleId], references: [id])
@@ -327,6 +338,7 @@ model StockEntry {
   mode          StockEntryMode @default(IN_STOCK)
   quantityDozen Decimal
   note          String?
+  deletedAt     DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -346,6 +358,7 @@ model MallStockMovement {
   reference     String?
   note          String?
   roznamchaEntryId String?             @unique
+  deletedAt     DateTime?
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
 
@@ -360,6 +373,7 @@ model ChemicalPurchase {
   ratePerKg    Decimal
   totalAmount  Decimal
   paymentType  PaymentMethod @default(CASH)
+  deletedAt    DateTime?
   createdAt    DateTime      @default(now())
 
   party     Party?         @relation(fields: [partyId], references: [id])
@@ -378,6 +392,7 @@ model RexinePurchase {
   ratePerMeter  Decimal
   totalAmount   Decimal
   paymentType   PaymentMethod @default(CASH)
+  deletedAt     DateTime?
   createdAt     DateTime      @default(now())
 
   party     Party?         @relation(fields: [partyId], references: [id])
@@ -398,6 +413,7 @@ model MaterialPurchase {
   pricePerUnit Decimal
   totalAmount  Decimal
   paymentType  PaymentMethod @default(CASH)
+  deletedAt    DateTime?
   createdAt    DateTime      @default(now())
 
   party    Party?         @relation(fields: [partyId], references: [id])
@@ -478,6 +494,7 @@ model ProductionOrder {
   source        ProductionOrderSource @default(MANUAL)
   isClosed      Boolean               @default(false)
   closedAt      DateTime?
+  deletedAt     DateTime?
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
 

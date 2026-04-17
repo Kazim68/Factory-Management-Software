@@ -676,7 +676,7 @@ function DepartmentSection({
     try {
       setSaving(true);
       await productionApi.deleteOrder(row.id);
-      toast.success("Order deleted.");
+      toast.success("Order moved to Deleted Items.");
       await onRefresh();
     } catch (error) {
       console.error(error);

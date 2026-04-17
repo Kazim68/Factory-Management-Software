@@ -7,6 +7,7 @@ import {
   getBillLedger,
   listBills,
   receiveBillPayment,
+  restoreBill,
   updateBill,
   verifyBill,
 } from "../controllers/billController.js";
@@ -21,5 +22,6 @@ router.post("/:billId/payments", asyncHandler(receiveBillPayment));
 router.post("/:billId/verify", asyncHandler(verifyBill));
 router.patch("/:billId", asyncHandler(updateBill));
 router.delete("/:billId", asyncHandler(deleteBill));
+router.post("/:billId/restore", asyncHandler(restoreBill));
 
 export default router;

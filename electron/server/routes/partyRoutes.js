@@ -7,6 +7,7 @@ import {
   getPartyLedger,
   listSupplierPendingDues,
   listParties,
+  restoreParty,
   updateParty,
 } from "../controllers/partyController.js";
 
@@ -17,6 +18,7 @@ router.post("/", asyncHandler(createParty));
 router.get("/suppliers/pending", asyncHandler(listSupplierPendingDues));
 router.patch("/:partyId", asyncHandler(updateParty));
 router.delete("/:partyId", asyncHandler(deleteParty));
+router.post("/:partyId/restore", asyncHandler(restoreParty));
 router.get("/:partyId/ledger", asyncHandler(getPartyLedger));
 router.post("/:partyId/payments", asyncHandler(createPartyPayment));
 

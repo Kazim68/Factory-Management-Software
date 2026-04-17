@@ -1,17 +1,22 @@
 import prisma from "../prisma.js";
 import { endOfDay, toDate, withDateRange } from "../utils/date.js";
 import { createSystemRoznamchaEntry } from "../utils/roznamcha.js";
+import {
+  resolveDeletedWhere,
+  restoreById,
+  softDeleteById,
+} from "../utils/softDelete.js";
 
 export const listParties = async (req, res) => {
   const typeFilter = String(req.query.type ?? "")
     .trim()
     .toUpperCase();
-  const where =
+  const typeWhere =
     typeFilter === "CUSTOMER" || typeFilter === "SUPPLIER"
       ? { type: typeFilter }
       : undefined;
   const parties = await prisma.party.findMany({
-    where,
+    where: resolveDeletedWhere(req.query.deleted, typeWhere),
     orderBy: { name: "asc" },
   });
   res.json(parties);
@@ -41,6 +46,7 @@ export const listSupplierPendingDues = async (req, res) => {
     prisma.party.findMany({
       where: {
         type: "SUPPLIER",
+        deletedAt: null,
       },
       orderBy: { name: "asc" },
       select: {
@@ -54,6 +60,7 @@ export const listSupplierPendingDues = async (req, res) => {
         date: {
           lte: end,
         },
+        deletedAt: null,
       },
       select: {
         partyId: true,
@@ -136,8 +143,13 @@ export const updateParty = async (req, res) => {
 };
 
 export const deleteParty = async (req, res) => {
-  await prisma.party.delete({ where: { id: req.params.partyId } });
+  await softDeleteById(prisma.party, req.params.partyId);
   res.status(204).end();
+};
+
+export const restoreParty = async (req, res) => {
+  const party = await restoreById(prisma.party, req.params.partyId);
+  res.json(party);
 };
 
 export const getPartyLedger = async (req, res) => {
@@ -149,6 +161,7 @@ export const getPartyLedger = async (req, res) => {
         where: {
           partyId: req.params.partyId,
           date: withDateRange(start, end),
+          deletedAt: null,
         },
         orderBy: { date: "asc" },
       }),
@@ -164,6 +177,7 @@ export const getPartyLedger = async (req, res) => {
           partyId: req.params.partyId,
           date: withDateRange(start, end),
           paymentType: "CASH",
+          deletedAt: null,
         },
         include: { expenses: true },
         orderBy: { date: "asc" },
@@ -173,6 +187,7 @@ export const getPartyLedger = async (req, res) => {
           partyId: req.params.partyId,
           date: withDateRange(start, end),
           paymentType: "CASH",
+          deletedAt: null,
         },
         include: { expenses: true },
         orderBy: { date: "asc" },
@@ -182,6 +197,7 @@ export const getPartyLedger = async (req, res) => {
           partyId: req.params.partyId,
           date: withDateRange(start, end),
           paymentType: "CASH",
+          deletedAt: null,
         },
         include: { expenses: true },
         orderBy: { date: "asc" },
@@ -342,7 +358,7 @@ export const createPartyPayment = async (req, res) => {
       const party = await tx.party.findUnique({
         where: { id: req.params.partyId },
       });
-      if (!party) {
+      if (!party || party.deletedAt) {
         throw new Error("Party not found.");
       }
 
@@ -391,6 +407,7 @@ export const createPartyPayment = async (req, res) => {
           where: {
             partyId: req.params.partyId,
             type: "CREDIT",
+            deletedAt: null,
           },
           include: { payments: true },
           orderBy: { date: "asc" },
@@ -420,7 +437,7 @@ export const createPartyPayment = async (req, res) => {
             where: { id: req.body.billId },
             include: { payments: true },
           });
-          if (!bill || bill.partyId !== req.params.partyId) {
+          if (!bill || bill.deletedAt || bill.partyId !== req.params.partyId) {
             throw new Error("Selected bill does not belong to this party.");
           }
           const total = Number(bill.total ?? 0);

@@ -149,6 +149,7 @@ export const getRoznamchaSummary = async ({ period, start, end }) => {
   const entries = await prisma.expenseEntry.findMany({
     where: {
       date: withDateRange(rangeStart, rangeEnd),
+      deletedAt: null,
     },
     orderBy: { date: "asc" },
   });
@@ -215,12 +216,14 @@ export const getLaborSummary = async ({ period, start, end }) => {
     prisma.laborWorkEntry.findMany({
       where: {
         startDate: withDateRange(rangeStart, rangeEnd),
+        deletedAt: null,
       },
       orderBy: { startDate: "asc" },
     }),
     prisma.laborAdvance.findMany({
       where: {
         date: withDateRange(rangeStart, rangeEnd),
+        deletedAt: null,
       },
       orderBy: { date: "asc" },
     }),
@@ -229,6 +232,7 @@ export const getLaborSummary = async ({ period, start, end }) => {
         module: "LABOR",
         laborAdvanceId: null,
         date: withDateRange(rangeStart, rangeEnd),
+        deletedAt: null,
       },
       orderBy: { date: "asc" },
     }),
@@ -243,7 +247,7 @@ export const getLaborSummary = async ({ period, start, end }) => {
   );
 
   const laborProfiles = await prisma.laborProfile.findMany({
-    where: { id: { in: laborIds } },
+    where: { id: { in: laborIds }, deletedAt: null },
     select: { id: true, name: true },
   });
 
@@ -370,6 +374,7 @@ export const getPartyMonthlyOutstandingSummary = async ({
 
   const [parties, ledgerEntries] = await Promise.all([
     prisma.party.findMany({
+      where: { deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -382,6 +387,7 @@ export const getPartyMonthlyOutstandingSummary = async ({
         date: {
           lte: rangeEnd,
         },
+        deletedAt: null,
       },
       select: {
         id: true,

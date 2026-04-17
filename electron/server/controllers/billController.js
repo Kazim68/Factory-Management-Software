@@ -6,6 +6,7 @@ import {
   getStockVariantKey,
   toNumber,
 } from "../services/stockService.js";
+import { resolveDeletedWhere } from "../utils/softDelete.js";
 
 const BILL_COUNTER_ID = "default";
 const MAX_BILL_NUMBER = 9999;
@@ -229,7 +230,10 @@ const syncBillLedgerEntry = async (tx, bill) => {
   const shouldHaveLedger = bill.type === "CREDIT" && Boolean(bill.partyId);
   if (!shouldHaveLedger) {
     if (existing) {
-      await tx.partyLedgerEntry.delete({ where: { id: existing.id } });
+      await tx.partyLedgerEntry.update({
+        where: { id: existing.id },
+        data: { deletedAt: new Date() },
+      });
     }
     return;
   }
@@ -246,7 +250,7 @@ const syncBillLedgerEntry = async (tx, bill) => {
   if (existing) {
     await tx.partyLedgerEntry.update({
       where: { id: existing.id },
-      data: payload,
+      data: { ...payload, deletedAt: null },
     });
   } else {
     await tx.partyLedgerEntry.create({ data: payload });
@@ -258,15 +262,19 @@ const syncBillRoznamchaEntry = async (tx, bill) => {
 
   const sourceSystem = getBillRoznamchaSourceSystem(bill.id);
   const existing = await tx.expenseEntry.findFirst({
-    where: { sourceSystem },
+    where: { sourceSystem, deletedAt: null },
   });
   if (existing) {
-    await tx.expenseEntry.delete({ where: { id: existing.id } });
+    await tx.expenseEntry.update({
+      where: { id: existing.id },
+      data: { deletedAt: new Date() },
+    });
   }
 };
 
 export const listBills = async (req, res) => {
   const bills = await prisma.bill.findMany({
+    where: resolveDeletedWhere(req.query.deleted),
     include: {
       lines: { include: { article: true } },
       party: true,
@@ -445,7 +453,7 @@ export const receiveBillPayment = async (req, res) => {
         where: { id: req.params.billId },
         include: { payments: true, lines: true },
       });
-      if (!bill) {
+      if (!bill || bill.deletedAt) {
         throw new Error("Bill not found");
       }
       if (!bill.partyId) {
@@ -558,7 +566,7 @@ export const verifyBill = async (req, res) => {
         where: { id: req.params.billId },
         include: { payments: true, lines: true },
       });
-      if (!found) throw new Error("Bill not found");
+      if (!found || found.deletedAt) throw new Error("Bill not found");
 
       const total = resolveBillTotal(found);
       const totalPaid = found.payments.reduce(
@@ -591,6 +599,7 @@ export const verifyBill = async (req, res) => {
 export const deleteBill = async (req, res) => {
   await prisma
     .$transaction(async (tx) => {
+      const deletedAt = new Date();
       const paymentCount = await tx.partyPayment.count({
         where: { billId: req.params.billId },
       });
@@ -598,14 +607,25 @@ export const deleteBill = async (req, res) => {
         throw new Error("Cannot delete bill with existing payments.");
       }
 
-      await tx.partyLedgerEntry.deleteMany({
-        where: { billId: req.params.billId },
+      await tx.partyLedgerEntry.updateMany({
+        where: { billId: req.params.billId, deletedAt: null },
+        data: { deletedAt },
       });
-      await tx.expenseEntry.deleteMany({
-        where: { sourceSystem: getBillRoznamchaSourceSystem(req.params.billId) },
+      await tx.expenseEntry.updateMany({
+        where: {
+          sourceSystem: getBillRoznamchaSourceSystem(req.params.billId),
+          deletedAt: null,
+        },
+        data: { deletedAt },
       });
-      await tx.billLine.deleteMany({ where: { billId: req.params.billId } });
-      await tx.bill.delete({ where: { id: req.params.billId } });
+      await tx.billLine.updateMany({
+        where: { billId: req.params.billId, deletedAt: null },
+        data: { deletedAt },
+      });
+      await tx.bill.update({
+        where: { id: req.params.billId },
+        data: { deletedAt },
+      });
     })
     .catch((error) => {
       res
@@ -615,4 +635,28 @@ export const deleteBill = async (req, res) => {
     });
   if (res.headersSent) return;
   res.status(204).end();
+};
+
+export const restoreBill = async (req, res) => {
+  const bill = await prisma.$transaction(async (tx) => {
+    await tx.bill.update({
+      where: { id: req.params.billId },
+      data: { deletedAt: null },
+    });
+    await tx.billLine.updateMany({
+      where: { billId: req.params.billId },
+      data: { deletedAt: null },
+    });
+    await tx.partyLedgerEntry.updateMany({
+      where: { billId: req.params.billId },
+      data: { deletedAt: null },
+    });
+    await tx.expenseEntry.updateMany({
+      where: { sourceSystem: getBillRoznamchaSourceSystem(req.params.billId) },
+      data: { deletedAt: null },
+    });
+    return getBillSummary(tx, req.params.billId);
+  });
+
+  res.json(bill);
 };

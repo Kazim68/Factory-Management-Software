@@ -382,7 +382,7 @@ export function StockControl({
 
     try {
       await productionApi.deleteManualStockEntry(entry.id);
-      toast.success("Manual stock entry deleted.");
+      toast.success("Manual stock entry moved to Deleted Items.");
       await refreshStockData();
     } catch (error) {
       console.error(error);
@@ -395,7 +395,7 @@ export function StockControl({
 
     try {
       await productionApi.deleteMallStockMovement(entry.id);
-      toast.success("Mall stock movement deleted.");
+      toast.success("Mall stock movement moved to Deleted Items.");
       await refreshStockData();
     } catch (error) {
       console.error(error);

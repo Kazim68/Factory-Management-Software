@@ -53,6 +53,8 @@ type ApiRequest = {
   auditMeta?: ApiAuditMeta;
 };
 
+type DeletedScope = "ACTIVE" | "ONLY" | "INCLUDE";
+
 const request = async <T>(payload: ApiRequest): Promise<T> => {
   if (typeof window === "undefined" || !window.api?.request) {
     throw new Error("API bridge is unavailable.");
@@ -114,6 +116,23 @@ const getAuditContext = (path: string, method: string) => {
   const cleanPath = path.split("?")[0];
   const segments = cleanPath.split("/").filter(Boolean);
   const shouldTreatLastSegmentAsId = method === "PATCH" || method === "DELETE";
+  const isRestorePath =
+    method === "POST" &&
+    segments[segments.length - 1] === "restore" &&
+    segments.length >= 2 &&
+    isIdSegment(segments[segments.length - 2]);
+
+  if (isRestorePath) {
+    const resourceId = segments[segments.length - 2];
+    const entitySegments = segments.slice(0, -2);
+    const entity = entitySegments.length
+      ? entitySegments
+          .map((segment) => toTitleCase(singularize(segment)))
+          .join(" / ")
+      : "Record";
+
+    return { cleanPath, entity, resourceId };
+  }
 
   const resourceId =
     segments.length > 0 &&
@@ -306,6 +325,7 @@ const buildFriendlyDetail = (
   payloadBody: unknown,
   auditMeta?: ApiAuditMeta,
 ): string => {
+  const isRestoreAction = cleanPath.endsWith("/restore");
   const label = getEntityLabel(cleanPath, entity);
   const what =
     auditMeta?.itemLabel ??
@@ -326,6 +346,12 @@ const buildFriendlyDetail = (
   const fieldChanges = buildAuditChanges(payloadBody, auditMeta);
   const changeSummary =
     fieldChanges.length > 0 ? fieldChanges.join("; ") : what;
+
+  if (isRestoreAction) {
+    return `${titledLabel} restored: ${entityName || what}.`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   if (method === "POST") {
     return `${titledLabel} created: ${entityName || what}.`
@@ -367,8 +393,15 @@ const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
     method,
   );
   const actor = auth.getSessionUser();
+  const isRestoreAction = cleanPath.endsWith("/restore");
   const verb =
-    method === "POST" ? "Created" : method === "PATCH" ? "Updated" : "Deleted";
+    isRestoreAction
+      ? "Restored"
+      : method === "POST"
+        ? "Created"
+        : method === "PATCH"
+          ? "Updated"
+          : "Deleted";
 
   auth.logAction({
     actorId: actor?.id,
@@ -389,7 +422,12 @@ const writeAuditLog = (payload: ApiRequest, auditMeta?: ApiAuditMeta): void => {
 };
 
 export const configApi = {
-  listUnits: (): Promise<ApiUnit[]> => get("/config/units"),
+  listUnits: (params?: { deleted?: DeletedScope }): Promise<ApiUnit[]> =>
+    get(
+      withQuery("/config/units", {
+        deleted: params?.deleted,
+      }),
+    ),
   createUnit: (data: { name: string; symbol?: string }): Promise<ApiUnit> =>
     request({ path: "/config/units", method: "POST", body: data }),
   updateUnit: (
@@ -399,8 +437,15 @@ export const configApi = {
     request({ path: `/config/units/${unitId}`, method: "PATCH", body: data }),
   deleteUnit: (unitId: string): Promise<void> =>
     request({ path: `/config/units/${unitId}`, method: "DELETE" }),
+  restoreUnit: (unitId: string): Promise<ApiUnit> =>
+    request({ path: `/config/units/${unitId}/restore`, method: "POST" }),
 
-  listArticles: (): Promise<ApiArticle[]> => get("/config/articles"),
+  listArticles: (params?: { deleted?: DeletedScope }): Promise<ApiArticle[]> =>
+    get(
+      withQuery("/config/articles", {
+        deleted: params?.deleted,
+      }),
+    ),
   createArticle: (data: { name: string; code?: string }): Promise<ApiArticle> =>
     request({ path: "/config/articles", method: "POST", body: data }),
   updateArticle: (
@@ -414,6 +459,8 @@ export const configApi = {
     }),
   deleteArticle: (articleId: string): Promise<void> =>
     request({ path: `/config/articles/${articleId}`, method: "DELETE" }),
+  restoreArticle: (articleId: string): Promise<ApiArticle> =>
+    request({ path: `/config/articles/${articleId}/restore`, method: "POST" }),
 
   listLaborCategories: (): Promise<ApiLaborCategory[]> =>
     get("/config/labor-categories"),
@@ -434,8 +481,14 @@ export const configApi = {
       method: "DELETE",
     }),
 
-  listPaymentTypes: (): Promise<ApiPaymentType[]> =>
-    get("/config/payment-types"),
+  listPaymentTypes: (params?: {
+    deleted?: DeletedScope;
+  }): Promise<ApiPaymentType[]> =>
+    get(
+      withQuery("/config/payment-types", {
+        deleted: params?.deleted,
+      }),
+    ),
   createPaymentType: (data: {
     name: string;
     unitId?: string;
@@ -455,13 +508,22 @@ export const configApi = {
       path: `/config/payment-types/${paymentTypeId}`,
       method: "DELETE",
     }),
+  restorePaymentType: (paymentTypeId: string): Promise<ApiPaymentType> =>
+    request({
+      path: `/config/payment-types/${paymentTypeId}/restore`,
+      method: "POST",
+    }),
 };
 
 export const partyApi = {
-  listParties: (params?: { type?: ApiPartyType }): Promise<ApiParty[]> =>
+  listParties: (params?: {
+    type?: ApiPartyType;
+    deleted?: DeletedScope;
+  }): Promise<ApiParty[]> =>
     get(
       withQuery("/parties", {
         type: params?.type,
+        deleted: params?.deleted,
       }),
     ),
   listSupplierPendingDues: (params?: {
@@ -489,6 +551,8 @@ export const partyApi = {
     request({ path: `/parties/${partyId}`, method: "PATCH", body: data }),
   deleteParty: (partyId: string): Promise<void> =>
     request({ path: `/parties/${partyId}`, method: "DELETE" }),
+  restoreParty: (partyId: string): Promise<ApiParty> =>
+    request({ path: `/parties/${partyId}/restore`, method: "POST" }),
   getLedger: (partyId: string): Promise<ApiPartyLedgerEntry[]> =>
     get(`/parties/${partyId}/ledger`),
   createPayment: (
@@ -522,11 +586,13 @@ export const expenseApi = {
     start?: string;
     end?: string;
     module?: ApiExpenseModule;
+    deleted?: DeletedScope;
   }): Promise<ApiExpenseEntry[]> => {
     const query = new URLSearchParams();
     if (params?.start) query.set("start", params.start);
     if (params?.end) query.set("end", params.end);
     if (params?.module) query.set("module", params.module);
+    if (params?.deleted) query.set("deleted", params.deleted);
     const suffix = query.toString();
     return get(`/expenses${suffix ? `?${suffix}` : ""}`);
   },
@@ -570,14 +636,18 @@ export const expenseApi = {
     }),
   deleteExpense: (expenseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({ path: `/expenses/${expenseId}`, method: "DELETE", auditMeta }),
+  restoreExpense: (expenseId: string): Promise<ApiExpenseEntry> =>
+    request({ path: `/expenses/${expenseId}/restore`, method: "POST" }),
 };
 
 export const laborApi = {
   listProfiles: (params?: {
     status?: "ACTIVE" | "FIRED" | "ALL";
+    deleted?: DeletedScope;
   }): Promise<ApiLaborProfile[]> => {
     const query = new URLSearchParams();
     if (params?.status) query.set("status", params.status);
+    if (params?.deleted) query.set("deleted", params.deleted);
     const suffix = query.toString();
     return get(`/labor/profiles${suffix ? `?${suffix}` : ""}`);
   },
@@ -617,10 +687,12 @@ export const laborApi = {
     }),
   deleteProfile: (laborId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({
-      path: `/labor/profiles/${laborId}/fire`,
-      method: "POST",
+      path: `/labor/profiles/${laborId}`,
+      method: "DELETE",
       auditMeta,
     }),
+  restoreProfile: (laborId: string): Promise<ApiLaborProfile> =>
+    request({ path: `/labor/profiles/${laborId}/restore`, method: "POST" }),
   upsertRate: (data: {
     laborId: string;
     articleId: string;
@@ -657,6 +729,18 @@ export const laborApi = {
         lang: getStoredLanguage(),
       }),
     ),
+  listWorkEntries: (params?: {
+    start?: string;
+    end?: string;
+    deleted?: DeletedScope;
+  }): Promise<ApiLaborWorkEntry[]> =>
+    get(
+      withQuery("/labor/work", {
+        start: params?.start,
+        end: params?.end,
+        deleted: params?.deleted,
+      }),
+    ),
   updateWorkEntry: (
     workId: string,
     data: {
@@ -679,6 +763,8 @@ export const laborApi = {
     }),
   deleteWorkEntry: (workId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({ path: `/labor/work/${workId}`, method: "DELETE", auditMeta }),
+  restoreWorkEntry: (workId: string): Promise<ApiLaborWorkEntry> =>
+    request({ path: `/labor/work/${workId}/restore`, method: "POST" }),
   createAdvance: (
     data: {
       laborId: string;
@@ -713,6 +799,22 @@ export const laborApi = {
       method: "DELETE",
       auditMeta,
     }),
+  restoreAdvance: (advanceId: string): Promise<ApiLaborAdvance> =>
+    request({ path: `/labor/advances/${advanceId}/restore`, method: "POST" }),
+  listAdvances: (params?: {
+    start?: string;
+    end?: string;
+    laborId?: string;
+    deleted?: DeletedScope;
+  }): Promise<ApiLaborAdvance[]> =>
+    get(
+      withQuery("/labor/advances", {
+        start: params?.start,
+        end: params?.end,
+        laborId: params?.laborId,
+        deleted: params?.deleted,
+      }),
+    ),
   getLedger: (
     laborId: string,
     params?: {
@@ -729,7 +831,12 @@ export const laborApi = {
 };
 
 export const billApi = {
-  listBills: (): Promise<ApiBill[]> => get("/bills"),
+  listBills: (params?: { deleted?: DeletedScope }): Promise<ApiBill[]> =>
+    get(
+      withQuery("/bills", {
+        deleted: params?.deleted,
+      }),
+    ),
   createBill: (data: {
     date: string;
     partyId?: string;
@@ -767,6 +874,8 @@ export const billApi = {
     request({ path: `/bills/${billId}`, method: "PATCH", body: data }),
   deleteBill: (billId: string): Promise<void> =>
     request({ path: `/bills/${billId}`, method: "DELETE" }),
+  restoreBill: (billId: string): Promise<ApiBill> =>
+    request({ path: `/bills/${billId}/restore`, method: "POST" }),
   getLedger: (billId: string): Promise<ApiBillLedgerEntry[]> =>
     get(`/bills/${billId}/ledger`),
   receivePayment: (
@@ -855,7 +964,14 @@ export const purchaseApi = {
         lang: getStoredLanguage(),
       }),
     ),
-  listChemicals: (): Promise<ApiChemicalPurchase[]> => get("/chemicals"),
+  listChemicals: (params?: {
+    deleted?: DeletedScope;
+  }): Promise<ApiChemicalPurchase[]> =>
+    get(
+      withQuery("/chemicals", {
+        deleted: params?.deleted,
+      }),
+    ),
   createChemical: (
     data: {
       date: string;
@@ -893,8 +1009,15 @@ export const purchaseApi = {
     auditMeta?: ApiAuditMeta,
   ): Promise<void> =>
     request({ path: `/chemicals/${purchaseId}`, method: "DELETE", auditMeta }),
+  restoreChemical: (purchaseId: string): Promise<ApiChemicalPurchase> =>
+    request({ path: `/chemicals/${purchaseId}/restore`, method: "POST" }),
 
-  listRexine: (): Promise<ApiRexinePurchase[]> => get("/rexine"),
+  listRexine: (params?: { deleted?: DeletedScope }): Promise<ApiRexinePurchase[]> =>
+    get(
+      withQuery("/rexine", {
+        deleted: params?.deleted,
+      }),
+    ),
   createRexine: (
     data: {
       date: string;
@@ -929,8 +1052,17 @@ export const purchaseApi = {
     }),
   deleteRexine: (purchaseId: string, auditMeta?: ApiAuditMeta): Promise<void> =>
     request({ path: `/rexine/${purchaseId}`, method: "DELETE", auditMeta }),
+  restoreRexine: (purchaseId: string): Promise<ApiRexinePurchase> =>
+    request({ path: `/rexine/${purchaseId}/restore`, method: "POST" }),
 
-  listMaterials: (): Promise<ApiMaterialPurchase[]> => get("/materials"),
+  listMaterials: (params?: {
+    deleted?: DeletedScope;
+  }): Promise<ApiMaterialPurchase[]> =>
+    get(
+      withQuery("/materials", {
+        deleted: params?.deleted,
+      }),
+    ),
   createMaterial: (
     data: {
       date: string;
@@ -972,14 +1104,18 @@ export const purchaseApi = {
     auditMeta?: ApiAuditMeta,
   ): Promise<void> =>
     request({ path: `/materials/${purchaseId}`, method: "DELETE", auditMeta }),
+  restoreMaterial: (purchaseId: string): Promise<ApiMaterialPurchase> =>
+    request({ path: `/materials/${purchaseId}/restore`, method: "POST" }),
 };
 
 export const productionApi = {
   listOrders: (
     department?: ApiLaborDepartment,
+    params?: { deleted?: DeletedScope },
   ): Promise<ApiProductionOrder[]> => {
     const query = new URLSearchParams();
     if (department) query.set("department", department);
+    if (params?.deleted) query.set("deleted", params.deleted);
     const suffix = query.toString();
     return get(`/production/orders${suffix ? `?${suffix}` : ""}`);
   },
@@ -1035,6 +1171,11 @@ export const productionApi = {
     request({
       path: `/production/orders/${orderId}`,
       method: "DELETE",
+    }),
+  restoreOrder: (orderId: string): Promise<ApiProductionOrder> =>
+    request({
+      path: `/production/orders/${orderId}/restore`,
+      method: "POST",
     }),
   assignLabor: (
     orderId: string,
@@ -1103,8 +1244,14 @@ export const productionApi = {
     const suffix = query.toString();
     return get(`/production/stock/articles${suffix ? `?${suffix}` : ""}`);
   },
-  listMallStockMovements: (): Promise<ApiMallStockMovement[]> =>
-    get("/production/stock/mall-movements"),
+  listMallStockMovements: (params?: {
+    deleted?: DeletedScope;
+  }): Promise<ApiMallStockMovement[]> =>
+    get(
+      withQuery("/production/stock/mall-movements", {
+        deleted: params?.deleted,
+      }),
+    ),
   createMallStockMovement: (data: {
     mallType: ApiMallStockType;
     direction: ApiStockMovementDirection;
@@ -1141,8 +1288,21 @@ export const productionApi = {
       path: `/production/stock/mall-movements/${movementId}`,
       method: "DELETE",
     }),
-  listManualStockEntries: (): Promise<ApiStockEntry[]> =>
-    get("/production/stock/manual"),
+  restoreMallStockMovement: (
+    movementId: string,
+  ): Promise<ApiMallStockMovement> =>
+    request({
+      path: `/production/stock/mall-movements/${movementId}/restore`,
+      method: "POST",
+    }),
+  listManualStockEntries: (params?: {
+    deleted?: DeletedScope;
+  }): Promise<ApiStockEntry[]> =>
+    get(
+      withQuery("/production/stock/manual", {
+        deleted: params?.deleted,
+      }),
+    ),
   createManualStockEntry: (data: {
     articleId: string;
     mode: ApiStockMode;
@@ -1168,6 +1328,11 @@ export const productionApi = {
     request({
       path: `/production/stock/manual/${entryId}`,
       method: "DELETE",
+    }),
+  restoreManualStockEntry: (entryId: string): Promise<ApiStockEntry> =>
+    request({
+      path: `/production/stock/manual/${entryId}/restore`,
+      method: "POST",
     }),
 };
 
