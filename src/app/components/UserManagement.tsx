@@ -1,40 +1,47 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { Filter, Plus, UserRound } from 'lucide-react';
-import { toast } from 'sonner';
-import { auth } from '../lib/auth';
-import { useClientPagination } from '../hooks/useClientPagination';
-import type { AppUser, UserRole } from '../types';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { Filter, Plus, UserRound } from "lucide-react";
+import { toast } from "sonner";
+import { auth } from "../lib/auth";
+import { useClientPagination } from "../hooks/useClientPagination";
+import type { AppUser, UserRole } from "../types";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from './ui/dialog';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from './ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { TablePagination } from './ui/table-pagination';
-import { Badge } from './ui/badge';
+} from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
+import { TablePagination } from "./ui/table-pagination";
+import { Badge } from "./ui/badge";
 
 interface UserManagementProps {
   currentUserId: string;
 }
 
 const initialForm = {
-  name: '',
-  username: '',
-  password: '',
-  role: 'sub_admin' as UserRole,
+  name: "",
+  username: "",
+  password: "",
+  role: "sub_admin" as UserRole,
 };
 
 export function UserManagement({ currentUserId }: UserManagementProps) {
@@ -42,8 +49,8 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [form, setForm] = useState(initialForm);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole>('ALL');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"ALL" | UserRole>("ALL");
 
   const sortedUsers = useMemo(
     () => [...users].sort((a, b) => a.name.localeCompare(b.name)),
@@ -54,14 +61,14 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
     const query = searchQuery.trim().toLowerCase();
 
     return sortedUsers.filter((user) => {
-      if (roleFilter !== 'ALL' && user.role !== roleFilter) {
+      if (roleFilter !== "ALL" && user.role !== roleFilter) {
         return false;
       }
 
       if (!query) return true;
 
       return [user.name, user.username, auth.formatRoleLabel(user.role)]
-        .join(' ')
+        .join(" ")
         .toLowerCase()
         .includes(query);
     });
@@ -98,12 +105,12 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
     event.preventDefault();
 
     if (!form.name.trim() || !form.username.trim()) {
-      toast.error('Name and username are required');
+      toast.error("Name and username are required");
       return;
     }
 
     if (!editingUser && !form.password.trim()) {
-      toast.error('Password is required for new users');
+      toast.error("Password is required for new users");
       return;
     }
 
@@ -115,7 +122,7 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
           role: form.role,
           ...(form.password.trim() ? { password: form.password.trim() } : {}),
         });
-        toast.success('User updated successfully');
+        toast.success("User updated successfully");
       } else {
         auth.createUser({
           name: form.name.trim(),
@@ -123,14 +130,16 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
           password: form.password.trim(),
           role: form.role,
         });
-        toast.success('User added successfully');
+        toast.success("User added successfully");
       }
 
       loadData();
       resetForm();
       setDialogOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to save user');
+      toast.error(
+        error instanceof Error ? error.message : "Unable to save user",
+      );
     }
   };
 
@@ -139,32 +148,43 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
     setForm({
       name: user.name,
       username: user.username,
-      password: '',
+      password: "",
       role: user.role,
     });
     setDialogOpen(true);
   };
 
-  const handleDelete = (user: AppUser) => {
+  const handleAccessToggle = (user: AppUser) => {
     if (user.id === currentUserId) {
-      toast.error('You cannot delete your own account');
+      toast.error("You cannot revoke your own account access");
       return;
     }
 
-    if (!confirm(`Delete user "${user.name}"?`)) return;
+    const actionLabel = user.isActive ? "revoke access for" : "reactivate";
+    if (
+      !confirm(`Are you sure you want to ${actionLabel} user "${user.name}"?`)
+    )
+      return;
 
     try {
-      auth.deleteUser(user.id);
-      toast.success('User deleted successfully');
+      if (user.isActive) {
+        auth.deactivateUser(user.id);
+        toast.success("User access revoked successfully");
+      } else {
+        auth.reactivateUser(user.id);
+        toast.success("User reactivated successfully");
+      }
       loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to delete user');
+      toast.error(
+        error instanceof Error ? error.message : "Unable to update user access",
+      );
     }
   };
 
   const clearFilters = () => {
-    setSearchQuery('');
-    setRoleFilter('ALL');
+    setSearchQuery("");
+    setRoleFilter("ALL");
   };
 
   return (
@@ -187,7 +207,9 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>{editingUser ? 'Edit User' : 'Add User'}</DialogTitle>
+                <DialogTitle>
+                  {editingUser ? "Edit User" : "Add User"}
+                </DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
@@ -195,7 +217,9 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                   <Input
                     id="name"
                     value={form.name}
-                    onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, name: event.target.value }))
+                    }
                     placeholder="Enter full name"
                     required
                   />
@@ -206,7 +230,10 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                     id="username"
                     value={form.username}
                     onChange={(event) =>
-                      setForm((prev) => ({ ...prev, username: event.target.value }))
+                      setForm((prev) => ({
+                        ...prev,
+                        username: event.target.value,
+                      }))
                     }
                     placeholder="Enter username"
                     required
@@ -214,23 +241,37 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password">
-                    Password {editingUser ? <span className="text-muted-foreground">(optional)</span> : ''}
+                    Password{" "}
+                    {editingUser ? (
+                      <span className="text-muted-foreground">(optional)</span>
+                    ) : (
+                      ""
+                    )}
                   </Label>
                   <Input
                     id="password"
                     type="password"
                     value={form.password}
                     onChange={(event) =>
-                      setForm((prev) => ({ ...prev, password: event.target.value }))
+                      setForm((prev) => ({
+                        ...prev,
+                        password: event.target.value,
+                      }))
                     }
-                    placeholder={editingUser ? 'Leave blank to keep existing' : 'Enter password'}
+                    placeholder={
+                      editingUser
+                        ? "Leave blank to keep existing"
+                        : "Enter password"
+                    }
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>Role</Label>
                   <Select
                     value={form.role}
-                    onValueChange={(value: UserRole) => setForm((prev) => ({ ...prev, role: value }))}
+                    onValueChange={(value: UserRole) =>
+                      setForm((prev) => ({ ...prev, role: value }))
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select role" />
@@ -243,7 +284,7 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                   </Select>
                 </div>
                 <Button type="submit" className="w-full">
-                  {editingUser ? 'Update User' : 'Create User'}
+                  {editingUser ? "Update User" : "Create User"}
                 </Button>
               </form>
             </DialogContent>
@@ -267,7 +308,9 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
               </Label>
               <Select
                 value={roleFilter}
-                onValueChange={(value) => setRoleFilter(value as typeof roleFilter)}
+                onValueChange={(value) =>
+                  setRoleFilter(value as typeof roleFilter)
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -280,7 +323,12 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                 </SelectContent>
               </Select>
             </div>
-            <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+            >
               <Filter className="mr-2 h-4 w-4" />
               Reset Filters
             </Button>
@@ -291,16 +339,20 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                 <TableHead>User</TableHead>
                 <TableHead>Username</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={5}
+                    className="text-center text-muted-foreground"
+                  >
                     {users.length === 0
-                      ? 'No users found.'
-                      : 'No users match the current filters.'}
+                      ? "No users found."
+                      : "No users match the current filters."}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -313,39 +365,53 @@ export function UserManagement({ currentUserId }: UserManagementProps) {
                     <TableCell>{user.username}</TableCell>
                     <TableCell>
                       <Badge
-                        variant={user.role === 'sub_admin' ? 'secondary' : 'default'}
+                        variant={
+                          user.role === "sub_admin" ? "secondary" : "default"
+                        }
                       >
                         {auth.formatRoleLabel(user.role)}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <Badge variant={user.isActive ? "default" : "secondary"}>
+                        {user.isActive ? "Active" : "Deactivated"}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="space-x-2 text-right">
-                      <Button variant="outline" size="sm" onClick={() => startEdit(user)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => startEdit(user)}
+                      >
                         Edit
                       </Button>
-                      <Button variant="destructive" size="sm" onClick={() => handleDelete(user)}>
-                        Delete
+                      <Button
+                        variant={user.isActive ? "destructive" : "secondary"}
+                        size="sm"
+                        onClick={() => handleAccessToggle(user)}
+                      >
+                        {user.isActive ? "Revoke" : "Reactivate"}
                       </Button>
                     </TableCell>
                   </TableRow>
                 ))
-            )}
-          </TableBody>
-        </Table>
-        <TablePagination
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={totalItems}
-          startItem={startItem}
-          endItem={endItem}
-          pageSize={pageSize}
-          setPageSize={setPageSize}
-          goToPreviousPage={goToPreviousPage}
-          goToNextPage={goToNextPage}
-          setCurrentPage={setCurrentPage}
-        />
-      </CardContent>
+              )}
+            </TableBody>
+          </Table>
+          <TablePagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            startItem={startItem}
+            endItem={endItem}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            goToPreviousPage={goToPreviousPage}
+            goToNextPage={goToNextPage}
+            setCurrentPage={setCurrentPage}
+          />
+        </CardContent>
       </Card>
-
     </div>
   );
 }

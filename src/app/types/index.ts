@@ -185,6 +185,7 @@ export interface AppUser {
   username: string;
   password: string;
   role: UserRole;
+  isActive: boolean;
   createdAt: string;
 }
 

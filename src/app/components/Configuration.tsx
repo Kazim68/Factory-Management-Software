@@ -227,18 +227,6 @@ export function Configuration() {
     }
   };
 
-  const handleArticleDelete = async (article: ApiArticle) => {
-    if (!confirm(`Delete article "${article.name}"?`)) return;
-    try {
-      await configApi.deleteArticle(article.id);
-      toast.success("Article moved to Deleted Items.");
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to delete article.");
-    }
-  };
-
   const handlePaymentDelete = async (payment: ApiPaymentType) => {
     if (!confirm(`Delete payment type "${payment.name}"?`)) return;
     try {
@@ -670,13 +658,6 @@ export function Configuration() {
                                   onClick={() => startArticleEdit(article)}
                                 >
                                   Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleArticleDelete(article)}
-                                >
-                                  Delete
                                 </Button>
                               </div>
                             </TableCell>
