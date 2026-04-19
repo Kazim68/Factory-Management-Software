@@ -29,7 +29,8 @@ export type ApiLaborDepartment =
   | "PRINTING"
   | "DC"
   | "MACHINEMAN"
-  | "PACKING";
+  | "PACKING"
+  | "MONTHLY_LABOUR";
 
 export interface ApiPaymentType {
   id: string;

@@ -63,6 +63,9 @@ import type {
 import { TablePagination } from "./ui/table-pagination";
 import { toast } from "sonner";
 
+const MONTHLY_LABOUR_DEPARTMENT_ID = "MONTHLY_LABOUR";
+const MONTHLY_PAYMENT_TYPE_NAME = "monthly";
+
 type UiWorkEntry = ApiLaborWorkEntry & {
   laborName: string;
   articleName: string;
@@ -252,6 +255,30 @@ export function LaborManagement() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const monthlyPaymentTypeId = useMemo(
+    () =>
+      paymentTypes.find(
+        (paymentType) =>
+          paymentType.name.trim().toLowerCase() === MONTHLY_PAYMENT_TYPE_NAME,
+      )?.id ?? "",
+    [paymentTypes],
+  );
+
+  useEffect(() => {
+    if (
+      laborForm.categoryId !== MONTHLY_LABOUR_DEPARTMENT_ID ||
+      !monthlyPaymentTypeId ||
+      laborForm.paymentTypeId === monthlyPaymentTypeId
+    ) {
+      return;
+    }
+
+    setLaborForm((current) => ({
+      ...current,
+      paymentTypeId: monthlyPaymentTypeId,
+    }));
+  }, [laborForm.categoryId, laborForm.paymentTypeId, monthlyPaymentTypeId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1228,10 +1255,15 @@ export function LaborManagement() {
                               <SearchableSelect
                                 value={laborForm.categoryId}
                                 onValueChange={(value) =>
-                                  setLaborForm({
-                                    ...laborForm,
+                                  setLaborForm((current) => ({
+                                    ...current,
                                     categoryId: value,
-                                  })
+                                    paymentTypeId:
+                                      value === MONTHLY_LABOUR_DEPARTMENT_ID &&
+                                      monthlyPaymentTypeId
+                                        ? monthlyPaymentTypeId
+                                        : current.paymentTypeId,
+                                  }))
                                 }
                                 options={laborCategoryOptions}
                                 placeholder="Select department"

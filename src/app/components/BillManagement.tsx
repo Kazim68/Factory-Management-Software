@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -97,6 +97,12 @@ const roundMoney = (value: number) => Number(value.toFixed(2));
 
 const formatQuantityValue = (value: number) => String(Number(value.toFixed(2)));
 
+const toNumericValue = (value: number | string | null | undefined) => {
+  const numericValue =
+    typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
 const calculateLineDiscount = (
   quantity: number,
   price: number,
@@ -113,8 +119,25 @@ const calculateLineTotal = (
       calculateLineDiscount(quantity, price, discount),
   );
 
-const calculateGrossLineTotal = (quantity: number, price: number) =>
-  roundMoney(quantity * PAIRS_PER_DOZEN * price);
+const getBillItemTotal = (item: BillTotalsInput) => {
+  const quantity = toNumericValue(item.quantity);
+  const price = toNumericValue(item.price);
+  const discount = toNumericValue(item.discount);
+
+  if (
+    !Number.isFinite(quantity) ||
+    quantity <= 0 ||
+    !Number.isFinite(price) ||
+    price <= 0 ||
+    !Number.isFinite(discount) ||
+    discount < 0 ||
+    discount > price
+  ) {
+    return 0;
+  }
+
+  return calculateLineTotal(quantity, price, discount);
+};
 
 const escapeHtml = (value: string) =>
   value
@@ -126,17 +149,12 @@ const escapeHtml = (value: string) =>
 
 const calculateBillTotals = (lines: BillTotalsInput[]) => {
   const totalQuantityDozen = Number(
-    lines
-      .reduce((sum, line) => sum + Number(line.quantity || 0), 0)
-      .toFixed(2),
+    lines.reduce((sum, line) => sum + toNumericValue(line.quantity), 0).toFixed(2),
   );
   const grossTotal = roundMoney(
     lines.reduce(
       (sum, line) =>
-        sum +
-        Number(line.quantity || 0) *
-          PAIRS_PER_DOZEN *
-          Number(line.price || 0),
+        sum + toNumericValue(line.quantity) * PAIRS_PER_DOZEN * toNumericValue(line.price),
       0,
     ),
   );
@@ -145,9 +163,9 @@ const calculateBillTotals = (lines: BillTotalsInput[]) => {
       (sum, line) =>
         sum +
         calculateLineDiscount(
-          Number(line.quantity || 0),
-          Number(line.price || 0),
-          Number(line.discount || 0),
+          toNumericValue(line.quantity),
+          toNumericValue(line.price),
+          toNumericValue(line.discount),
         ),
       0,
     ),
@@ -162,12 +180,112 @@ const calculateBillTotals = (lines: BillTotalsInput[]) => {
   };
 };
 
-const isCompleteBillItem = (item: BillItemForm) =>
-  Boolean(item.stockVariantKey && item.articleId) &&
-  Number(item.quantity) > 0 &&
-  Number(item.price) > 0 &&
-  Number(item.discount) >= 0 &&
-  Number(item.discount) <= Number(item.price);
+const isBillItemReadyForTotals = (item: BillTotalsInput) =>
+  toNumericValue(item.quantity) > 0 &&
+  toNumericValue(item.price) > 0 &&
+  toNumericValue(item.discount) >= 0 &&
+  toNumericValue(item.discount) <= toNumericValue(item.price);
+
+const recalculateBillItem = (item: BillItemForm): BillItemForm => {
+  const quantity = toNumericValue(item.quantity);
+  const price = toNumericValue(item.price);
+  const discount = toNumericValue(item.discount);
+
+  return {
+    ...item,
+    quantity,
+    price,
+    discount,
+    total: getBillItemTotal({ quantity, price, discount }),
+  };
+};
+
+const recalculateBillItems = (items: BillItemForm[]) =>
+  items.map(recalculateBillItem);
+
+const getCurrentBillTotals = (items: BillItemForm[]) =>
+  calculateBillTotals(
+    items
+      .filter(isBillItemReadyForTotals)
+      .map((item) => ({
+        quantity: item.quantity,
+        price: item.price,
+        discount: item.discount,
+      })),
+  );
+
+const getStockVariantOptionsByKey = (options: StockVariantOption[]) =>
+  new Map(options.map((variant) => [variant.key, variant]));
+
+const getSortedBills = (bills: ApiBill[]) =>
+  [...bills].sort((a, b) => {
+    const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    return String(b.billNumber).localeCompare(String(a.billNumber));
+  });
+
+const getFilteredBills = ({
+  bills,
+  query,
+  statusFilter,
+  timePreset,
+  dateFrom,
+  dateTo,
+}: {
+  bills: ApiBill[];
+  query: string;
+  statusFilter: "ALL" | "UNPAID" | "PARTIAL_PAID" | "PAID";
+  timePreset: FilterTimePreset;
+  dateFrom: string;
+  dateTo: string;
+}) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  let fromTs: number | null = null;
+  let toTs: number | null = null;
+
+  if (timePreset === "CUSTOM") {
+    fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    toTs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+  } else {
+    const range = getPresetDateRange(timePreset, new Date());
+    fromTs = range?.from.getTime() ?? null;
+    toTs = range?.to.getTime() ?? null;
+  }
+
+  return bills.filter((bill) => {
+    if (statusFilter !== "ALL" && bill.paymentStatus !== statusFilter) {
+      return false;
+    }
+
+    const billTs = new Date(bill.date).getTime();
+    if (fromTs !== null && billTs < fromTs) return false;
+    if (toTs !== null && billTs > toTs) return false;
+
+    if (!normalizedQuery) return true;
+
+    const searchable = [
+      bill.billNumber,
+      bill.party?.name || "",
+      bill.paymentStatus,
+      String(bill.total ?? ""),
+      String(bill.remaining ?? ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return searchable.includes(normalizedQuery);
+  });
+};
+
+const getPartyOptions = (parties: ApiParty[]) =>
+  parties.map((party) => ({ value: party.id, label: party.name }));
+
+const getStockVariantSelectOptions = (options: StockVariantOption[]) =>
+  options.map((variant) => ({
+    value: variant.key,
+    label: `${variant.articleName} (${variant.size})`,
+    description: `${variant.quantityDozen} dozen available`,
+  }));
 
 const getBillTotalsFromBill = (bill: ApiBill) => {
   if (!Array.isArray(bill.lines) || bill.lines.length === 0) {
@@ -247,10 +365,8 @@ export function BillManagement() {
   });
 
   const [items, setItems] = useState<BillItemForm[]>(ensureMinimumRows([]));
-  const stockVariantOptionsByKey = useMemo(
-    () => new Map(stockVariantOptions.map((variant) => [variant.key, variant])),
-    [stockVariantOptions],
-  );
+  const stockVariantOptionsByKey =
+    getStockVariantOptionsByKey(stockVariantOptions);
 
   const applyPackedStockRows = (stockRows: ApiStockArticleRow[]) => {
     const rows = (stockRows ?? []) as ApiStockArticleRow[];
@@ -364,15 +480,7 @@ export function BillManagement() {
       }
     }
 
-    if (field === "quantity" || field === "price" || field === "discount") {
-      newItems[index].total = calculateLineTotal(
-        newItems[index].quantity,
-        newItems[index].price,
-        newItems[index].discount,
-      );
-    }
-
-    setItems(newItems);
+    setItems(recalculateBillItems(newItems));
   };
 
   const resetForm = () => {
@@ -518,8 +626,9 @@ export function BillManagement() {
       partyId: bill.partyId || "",
     });
     setItems(
-      ensureMinimumRows(
-        bill.lines.map((line) => ({
+      recalculateBillItems(
+        ensureMinimumRows(
+          bill.lines.map((line) => ({
           stockVariantKey: getStockVariantKey(
             line.articleId,
             normalizeSize(line.size),
@@ -534,7 +643,8 @@ export function BillManagement() {
           price: Number(line.price),
           discount: Number(line.discount ?? 0),
           total: Number(line.total),
-        })),
+          })),
+        ),
       ),
     );
     await loadPackedStockOptions(bill.id);
@@ -575,77 +685,21 @@ export function BillManagement() {
     }
   };
 
-  const completedItems = useMemo(
-    () => items.filter(isCompleteBillItem),
-    [items],
-  );
-  const { totalQuantityDozen, grossTotal, discountTotal, grandTotal } = useMemo(
-    () => calculateBillTotals(completedItems),
-    [completedItems],
-  );
+  const { totalQuantityDozen, grossTotal, discountTotal, grandTotal } =
+    getCurrentBillTotals(items);
 
   const getAvailableQuantity = (stockVariantKey: string) =>
     Number(availableStockByVariant[stockVariantKey] ?? 0);
 
-  const sortedBills = useMemo(
-    () =>
-      [...bills].sort((a, b) => {
-        const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
-        if (dateDiff !== 0) return dateDiff;
-        return String(b.billNumber).localeCompare(String(a.billNumber));
-      }),
-    [bills],
-  );
-
-  const filteredBills = useMemo(() => {
-    const query = billSearchQuery.trim().toLowerCase();
-    let fromTs: number | null = null;
-    let toTs: number | null = null;
-
-    if (billTimePreset === "CUSTOM") {
-      fromTs = billDateFrom
-        ? new Date(`${billDateFrom}T00:00:00`).getTime()
-        : null;
-      toTs = billDateTo
-        ? new Date(`${billDateTo}T23:59:59.999`).getTime()
-        : null;
-    } else {
-      const range = getPresetDateRange(billTimePreset, new Date());
-      fromTs = range?.from.getTime() ?? null;
-      toTs = range?.to.getTime() ?? null;
-    }
-
-    return sortedBills.filter((bill) => {
-      if (billStatusFilter !== "ALL" && bill.paymentStatus !== billStatusFilter) {
-        return false;
-      }
-
-      const billTs = new Date(bill.date).getTime();
-      if (fromTs !== null && billTs < fromTs) return false;
-      if (toTs !== null && billTs > toTs) return false;
-
-      if (!query) return true;
-
-      const searchable = [
-        bill.billNumber,
-        bill.party?.name || "",
-        bill.paymentStatus,
-        String(bill.total ?? ""),
-        String(bill.remaining ?? ""),
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return searchable.includes(query);
-    });
-  }, [
-    billDateFrom,
-    billDateTo,
-    billSearchQuery,
-    billStatusFilter,
-    billTimePreset,
-    sortedBills,
-  ]);
+  const sortedBills = getSortedBills(bills);
+  const filteredBills = getFilteredBills({
+    bills: sortedBills,
+    query: billSearchQuery,
+    statusFilter: billStatusFilter,
+    timePreset: billTimePreset,
+    dateFrom: billDateFrom,
+    dateTo: billDateTo,
+  });
 
   const {
     currentPage: billsPage,
@@ -661,20 +715,10 @@ export function BillManagement() {
     goToNextPage: goToNextBillsPage,
   } = useClientPagination(filteredBills);
 
-  const partyOptions = useMemo(
-    () => parties.map((party) => ({ value: party.id, label: party.name })),
-    [parties],
-  );
+  const partyOptions = getPartyOptions(parties);
 
-  const stockVariantSelectOptions = useMemo(
-    () =>
-      stockVariantOptions.map((variant) => ({
-        value: variant.key,
-        label: `${variant.articleName} (${variant.size})`,
-        description: `${variant.quantityDozen} dozen available`,
-      })),
-    [stockVariantOptions],
-  );
+  const stockVariantSelectOptions =
+    getStockVariantSelectOptions(stockVariantOptions);
 
   const clearBillFilters = () => {
     setBillSearchQuery("");
@@ -836,7 +880,9 @@ export function BillManagement() {
                                 }
                               />
                             </TableCell>
-                            <TableCell>{formatCurrency(item.total)}</TableCell>
+                            <TableCell>
+                              {formatCurrency(getBillItemTotal(item))}
+                            </TableCell>
                             <TableCell>
                               {items.length > 3 && (
                                 <Button

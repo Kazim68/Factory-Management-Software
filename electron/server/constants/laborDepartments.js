@@ -5,9 +5,14 @@ export const LABOR_DEPARTMENTS = [
   { id: "DC", name: "DC" },
   { id: "MACHINEMAN", name: "Machineman" },
   { id: "PACKING", name: "Packing" },
+  { id: "MONTHLY_LABOUR", name: "Monthly Labour" },
 ];
 
 export const LABOR_DEPARTMENT_IDS = LABOR_DEPARTMENTS.map((item) => item.id);
+
+export const PRODUCTION_LABOR_DEPARTMENT_IDS = LABOR_DEPARTMENTS.filter(
+  (item) => item.id !== "MONTHLY_LABOUR",
+).map((item) => item.id);
 
 export const isLaborDepartment = (value) =>
   LABOR_DEPARTMENT_IDS.includes(String(value ?? "").toUpperCase());

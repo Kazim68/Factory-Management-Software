@@ -61,6 +61,7 @@ enum LaborDepartment {
   DC
   MACHINEMAN
   PACKING
+  MONTHLY_LABOUR
 }
 
 enum StockEntryMode {

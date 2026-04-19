@@ -1,5 +1,6 @@
 {
   "name": "CrossX",
+  "author": "DarkShadows",
   "version": "1.0.0",
   "description": "Electron ERP App",
   "main": "electron/main.js",
@@ -83,7 +84,7 @@
   },
   "build": {
     "appId": "com.example.electrontodo",
-    "productName": "Electron Todo",
+    "productName": "CrossX",
     "directories": {
       "output": "release"
     },

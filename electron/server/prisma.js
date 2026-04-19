@@ -1,10 +1,11 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import { app } from "electron";
-import { PrismaClient } from "@prisma/client";
+import pkg from "@prisma/client";
 import { withChangeLogging } from "./sync/changeLogger.js";
 import { ensureSyncTables, getDeviceId } from "./sync/syncService.js";
 
+const { PrismaClient } = pkg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

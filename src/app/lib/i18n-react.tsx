@@ -26,21 +26,87 @@ const textNodeOriginals = new WeakMap<Text, string>();
 const elementOriginals = new WeakMap<Element, Map<string, string>>();
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
 
-const getOriginalAttribute = (element: Element, attribute: string) => {
+const getTranslatedText = (value: string, language: AppLanguage) =>
+  translateText(value, language);
+
+const syncTextOriginal = (node: Text, language: AppLanguage) => {
+  const current = node.nodeValue ?? "";
+  const storedOriginal = textNodeOriginals.get(node);
+
+  if (storedOriginal == null) {
+    textNodeOriginals.set(node, current);
+    return current;
+  }
+
+  const translatedStored = getTranslatedText(storedOriginal, language);
+  const translatedUrdu = getTranslatedText(storedOriginal, "ur");
+
+  if (language === "en") {
+    if (current === translatedUrdu) {
+      return storedOriginal;
+    }
+
+    if (current !== storedOriginal) {
+      textNodeOriginals.set(node, current);
+      return current;
+    }
+
+    return storedOriginal;
+  }
+
+  if (current !== storedOriginal && current !== translatedStored) {
+    textNodeOriginals.set(node, current);
+    return current;
+  }
+
+  return storedOriginal;
+};
+
+const syncElementOriginal = (
+  element: Element,
+  attribute: string,
+  language: AppLanguage,
+) => {
   let originalMap = elementOriginals.get(element);
   if (!originalMap) {
     originalMap = new Map<string, string>();
     elementOriginals.set(element, originalMap);
   }
 
-  if (!originalMap.has(attribute)) {
-    const current = element.getAttribute(attribute);
-    if (current != null) {
-      originalMap.set(attribute, current);
-    }
+  const current = element.getAttribute(attribute);
+  if (current == null) {
+    originalMap.delete(attribute);
+    return null;
   }
 
-  return originalMap.get(attribute) ?? element.getAttribute(attribute);
+  const storedOriginal = originalMap.get(attribute);
+  if (storedOriginal == null) {
+    originalMap.set(attribute, current);
+    return current;
+  }
+
+  const translatedStored = getTranslatedText(storedOriginal, language);
+  const translatedUrdu = getTranslatedText(storedOriginal, "ur");
+
+  if (language === "en") {
+    if (current === translatedUrdu) {
+      return storedOriginal;
+    }
+
+    if (current !== storedOriginal) {
+      originalMap.set(attribute, current);
+      return current;
+    }
+
+    return storedOriginal;
+  }
+
+  if (current !== storedOriginal && current !== translatedStored) {
+    originalMap.set(attribute, current);
+    return current;
+  }
+
+  return storedOriginal;
 };
 
 const shouldSkipNode = (node: Node) => {
@@ -53,11 +119,7 @@ const shouldSkipNode = (node: Node) => {
 const translateTextNode = (node: Text, language: AppLanguage) => {
   if (shouldSkipNode(node)) return;
 
-  if (!textNodeOriginals.has(node)) {
-    textNodeOriginals.set(node, node.nodeValue ?? "");
-  }
-
-  const original = textNodeOriginals.get(node) ?? "";
+  const original = syncTextOriginal(node, language);
   const next = translateText(original, language);
   if (node.nodeValue !== next) {
     node.nodeValue = next;
@@ -68,7 +130,7 @@ const translateElementAttributes = (element: Element, language: AppLanguage) => 
   if (SKIP_TAGS.has(element.tagName)) return;
 
   for (const attribute of ["placeholder", "title", "aria-label"]) {
-    const original = getOriginalAttribute(element, attribute);
+    const original = syncElementOriginal(element, attribute, language);
     if (original == null) continue;
     const next = translateText(original, language);
     if (element.getAttribute(attribute) !== next) {

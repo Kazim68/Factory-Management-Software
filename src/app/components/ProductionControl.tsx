@@ -128,6 +128,7 @@ const DEFAULT_DEPARTMENT_TITLE: Record<ApiLaborDepartment, string> = {
   DC: "DC",
   MACHINEMAN: "Machineman + Packing",
   PACKING: "Packing",
+  MONTHLY_LABOUR: "Monthly Labour",
 };
 
 const statusLabel = (status: ApiProductionOrder["status"]) => {
@@ -178,6 +179,7 @@ export function ProductionControl() {
     DC: [],
     MACHINEMAN: [],
     PACKING: [],
+    MONTHLY_LABOUR: [],
   });
   const [activeTab, setActiveTab] = useState<ApiLaborDepartment>("PRESSMAN");
   const [isLoading, setIsLoading] = useState(false);
@@ -206,6 +208,7 @@ export function ProductionControl() {
         DC: [],
         MACHINEMAN: [],
         PACKING: [],
+        MONTHLY_LABOUR: [],
       };
       laborData.forEach((labor) => {
         grouped[labor.department].push({ id: labor.id, name: labor.name });
