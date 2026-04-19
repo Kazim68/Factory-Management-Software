@@ -1,17 +1,85 @@
+import fs from "fs";
 import path from "path";
+import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { app } from "electron";
-import pkg from "@prisma/client";
+import { PrismaClient } from "../../database/generated/local-client/index.js";
 import { withChangeLogging } from "./sync/changeLogger.js";
 import { ensureSyncTables, getDeviceId } from "./sync/syncService.js";
 
-const { PrismaClient } = pkg;
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3");
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const CORE_TABLES = ["Bill", "BillLine", "Party"];
+
+const getPackagedDatabasePath = () =>
+  path.join(app.getPath("userData"), "factory.db");
+
+const getTemplateDatabasePath = () => {
+  if (app?.isPackaged) {
+    return path.join(
+      process.resourcesPath,
+      "app.asar.unpacked",
+      "database",
+      "generated",
+      "local-template",
+      "factory-template.db",
+    );
+  }
+
+  return path.resolve(
+    __dirname,
+    "../../database/generated/local-template/factory-template.db",
+  );
+};
+
+const hasCoreSchema = (dbPath) => {
+  if (!fs.existsSync(dbPath)) return false;
+
+  const stats = fs.statSync(dbPath);
+  if (!stats.size) return false;
+
+  let db;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const statement = db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+    );
+
+    return CORE_TABLES.every((tableName) => Boolean(statement.get(tableName)));
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+};
+
+const ensurePackagedDatabase = () => {
+  if (!app?.isPackaged) return;
+
+  const dbPath = getPackagedDatabasePath();
+  if (hasCoreSchema(dbPath)) return;
+
+  const templatePath = getTemplateDatabasePath();
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Missing packaged database template at ${templatePath}`);
+  }
+
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `${dbPath}.${timestamp}.bak`;
+    fs.copyFileSync(dbPath, backupPath);
+  }
+
+  fs.copyFileSync(templatePath, dbPath);
+};
 
 const resolveDatabaseUrl = () => {
   if (app?.isPackaged) {
-    const dbPath = path.join(app.getPath("userData"), "factory.db");
+    const dbPath = getPackagedDatabasePath();
     return `file:${dbPath}`;
   }
 
@@ -128,6 +196,7 @@ const ensureSoftDeleteSchema = async (prisma) => {
 };
 
 export const initPrisma = async () => {
+  ensurePackagedDatabase();
   await ensureBillSchema(basePrisma);
   await ensureSoftDeleteSchema(basePrisma);
   await ensureSyncTables(basePrisma);

@@ -14,22 +14,21 @@ export const createApp = () => {
 
 export function startServer() {
   const app = createApp();
-   return new Promise((resolve, reject) => {
+
+  return new Promise((resolve, reject) => {
     try {
-      const server = app.listen(4001, "127.0.0.1" , () => {
-        console.log("✅ Express running on 3001");
+      const server = app.listen(4001, "127.0.0.1", () => {
+        console.log("Express running on 4001");
         resolve(server);
       });
 
       server.on("error", (err) => {
-        console.error("❌ Express server error:", err);
+        console.error("Express server error:", err);
         reject(err);
       });
-
     } catch (err) {
-      console.error("❌ Express crashed:", err);
+      console.error("Express crashed:", err);
       reject(err);
     }
   });
 }
-

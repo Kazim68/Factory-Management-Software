@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 import { startServer } from "./server/app.js";
@@ -12,6 +12,19 @@ const __dirname = path.dirname(__filename);
 
 let syncWorker;
 
+const formatError = (error) => error?.stack ?? String(error);
+
+const reportStartupError = (title, error) => {
+  const details = formatError(error);
+  console.error(`${title}:`, details);
+
+  try {
+    dialog.showErrorBox(title, details);
+  } catch {
+    // If Electron cannot show a dialog yet, keep the console error.
+  }
+};
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1000,
@@ -20,6 +33,18 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
+
+  win.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL) => {
+      reportStartupError(
+        "CrossX failed to load the UI",
+        new Error(
+          `Renderer load failed (${errorCode}): ${errorDescription}\nURL: ${validatedURL}`,
+        ),
+      );
+    },
+  );
 
   if (!app.isPackaged) {
     const loadDev = async () => {
@@ -41,6 +66,9 @@ app.whenReady().then(async () => {
   registerIpc(ipcMain);
   syncWorker = startSyncWorker();
   createWindow();
+}).catch((error) => {
+  reportStartupError("CrossX failed to start", error);
+  app.quit();
 });
 
 app.on("window-all-closed", () => {
