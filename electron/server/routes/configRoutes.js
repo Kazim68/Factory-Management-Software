@@ -3,22 +3,17 @@ import asyncHandler from "../middleware/asyncHandler.js";
 import {
   createArticle,
   createLaborCategory,
-  createPaymentType,
   createUnit,
   deleteArticle,
   deleteLaborCategory,
-  deletePaymentType,
   deleteUnit,
   listArticles,
   listLaborCategories,
-  listPaymentTypes,
   listUnits,
   restoreArticle,
-  restorePaymentType,
   restoreUnit,
   updateArticle,
   updateLaborCategory,
-  updatePaymentType,
   updateUnit,
 } from "../controllers/configController.js";
 
@@ -45,15 +40,6 @@ router.patch(
 router.delete(
   "/labor-categories/:categoryId",
   asyncHandler(deleteLaborCategory),
-);
-
-router.get("/payment-types", asyncHandler(listPaymentTypes));
-router.post("/payment-types", asyncHandler(createPaymentType));
-router.patch("/payment-types/:paymentTypeId", asyncHandler(updatePaymentType));
-router.delete("/payment-types/:paymentTypeId", asyncHandler(deletePaymentType));
-router.post(
-  "/payment-types/:paymentTypeId/restore",
-  asyncHandler(restorePaymentType),
 );
 
 export default router;

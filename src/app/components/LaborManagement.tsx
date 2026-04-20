@@ -58,13 +58,9 @@ import type {
   ApiLaborProfile,
   ApiLaborWorkEntry,
   ApiLaborAdvance,
-  ApiPaymentType,
 } from "../types/api";
 import { TablePagination } from "./ui/table-pagination";
 import { toast } from "sonner";
-
-const MONTHLY_LABOUR_DEPARTMENT_ID = "MONTHLY_LABOUR";
-const MONTHLY_PAYMENT_TYPE_NAME = "monthly";
 
 type UiWorkEntry = ApiLaborWorkEntry & {
   laborName: string;
@@ -104,7 +100,6 @@ export function LaborManagement() {
   const [profiles, setProfiles] = useState<ApiLaborProfile[]>([]);
   const [allProfiles, setAllProfiles] = useState<ApiLaborProfile[]>([]);
   const [categories, setCategories] = useState<ApiLaborCategory[]>([]);
-  const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
   const [workEntries, setWorkEntries] = useState<UiWorkEntry[]>([]);
   const [advanceEntries, setAdvanceEntries] = useState<UiAdvance[]>([]);
@@ -145,7 +140,8 @@ export function LaborManagement() {
   const [laborForm, setLaborForm] = useState({
     name: "",
     categoryId: "",
-    paymentTypeId: "",
+    phone: "",
+    city: "",
     defaultRate: "",
   });
 
@@ -169,10 +165,6 @@ export function LaborManagement() {
     categories.find((category) => category.id === categoryId)?.name ||
     "Unknown";
 
-  const getPaymentTypeName = (paymentTypeId?: string | null) =>
-    paymentTypes.find((paymentType) => paymentType.id === paymentTypeId)
-      ?.name || "Unknown";
-
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -181,7 +173,6 @@ export function LaborManagement() {
         activeProfileData,
         profileData,
         categoryData,
-        paymentData,
         articleData,
         laborExpenseData,
         laborExpenseTodayData,
@@ -189,7 +180,6 @@ export function LaborManagement() {
         laborApi.listProfiles({ status: "ACTIVE" }),
         laborApi.listProfiles({ status: "ALL" }),
         configApi.listLaborCategories(),
-        configApi.listPaymentTypes(),
         configApi.listArticles(),
         expenseApi.listExpenses({ module: "LABOR" }),
         expenseApi.listExpenses({ module: "LABOR", start: today, end: today }),
@@ -198,7 +188,6 @@ export function LaborManagement() {
       setProfiles(activeProfileData);
       setAllProfiles(profileData);
       setCategories(categoryData);
-      setPaymentTypes(paymentData);
       setArticles(articleData);
       setLaborPayments(laborExpenseData);
       setLaborPaymentsToday(laborExpenseTodayData);
@@ -255,30 +244,6 @@ export function LaborManagement() {
   useEffect(() => {
     loadData();
   }, []);
-
-  const monthlyPaymentTypeId = useMemo(
-    () =>
-      paymentTypes.find(
-        (paymentType) =>
-          paymentType.name.trim().toLowerCase() === MONTHLY_PAYMENT_TYPE_NAME,
-      )?.id ?? "",
-    [paymentTypes],
-  );
-
-  useEffect(() => {
-    if (
-      laborForm.categoryId !== MONTHLY_LABOUR_DEPARTMENT_ID ||
-      !monthlyPaymentTypeId ||
-      laborForm.paymentTypeId === monthlyPaymentTypeId
-    ) {
-      return;
-    }
-
-    setLaborForm((current) => ({
-      ...current,
-      paymentTypeId: monthlyPaymentTypeId,
-    }));
-  }, [laborForm.categoryId, laborForm.paymentTypeId, monthlyPaymentTypeId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -389,12 +354,24 @@ export function LaborManagement() {
 
   const handleLaborSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!laborForm.categoryId) {
+if (!laborForm.categoryId) {
       toast.error("Please select a category");
       return;
     }
-    if (!laborForm.paymentTypeId) {
-      toast.error("Please select a payment type");
+    if (!laborForm.phone.trim()) {
+      toast.error("Please enter phone number");
+      return;
+    }
+    if (laborForm.phone.trim().length !== 11) {
+      toast.error("Phone number must be 11 digits");
+      return;
+    }
+    if (!laborForm.city.trim()) {
+      toast.error("Please enter city");
+      return;
+    }
+    if (/\d/.test(laborForm.city.trim())) {
+      toast.error("City cannot contain numbers");
       return;
     }
 
@@ -408,7 +385,8 @@ export function LaborManagement() {
           {
             name: laborForm.name.trim(),
             categoryId: laborForm.categoryId,
-            paymentTypeId: laborForm.paymentTypeId,
+            phone: laborForm.phone.trim() || undefined,
+            city: laborForm.city.trim() || undefined,
             defaultRate: laborForm.defaultRate
               ? parseFloat(laborForm.defaultRate)
               : undefined,
@@ -417,16 +395,15 @@ export function LaborManagement() {
             itemLabel: laborForm.name.trim(),
             fieldLabels: {
               categoryId: getCategoryName(laborForm.categoryId),
-              paymentTypeId: getPaymentTypeName(laborForm.paymentTypeId),
             },
             previousFieldLabels: {
               categoryId: getCategoryName(current?.categoryId),
-              paymentTypeId: getPaymentTypeName(current?.paymentTypeId),
             },
             previousValues: {
               name: current?.name,
               categoryId: current?.categoryId,
-              paymentTypeId: current?.paymentTypeId,
+              phone: current?.phone,
+              city: current?.city,
               defaultRate: current?.defaultRate,
             },
           },
@@ -437,7 +414,8 @@ export function LaborManagement() {
           {
             name: laborForm.name.trim(),
             categoryId: laborForm.categoryId,
-            paymentTypeId: laborForm.paymentTypeId,
+            phone: laborForm.phone.trim() || undefined,
+            city: laborForm.city.trim() || undefined,
             defaultRate: laborForm.defaultRate
               ? parseFloat(laborForm.defaultRate)
               : undefined,
@@ -453,7 +431,8 @@ export function LaborManagement() {
       setLaborForm({
         name: "",
         categoryId: "",
-        paymentTypeId: "",
+        phone: "",
+        city: "",
         defaultRate: "",
       });
       setEditingLaborId(null);
@@ -540,7 +519,8 @@ export function LaborManagement() {
     setLaborForm({
       name: labor.name,
       categoryId: labor.categoryId,
-      paymentTypeId: labor.paymentTypeId,
+      phone: labor.phone || "",
+      city: labor.city || "",
       defaultRate: labor.defaultRate ? String(labor.defaultRate) : "",
     });
     setLaborDialog(true);
@@ -710,7 +690,10 @@ export function LaborManagement() {
       labor.department === departmentFilter;
     const matchesSearch =
       !normalizedLaborQuery ||
-      labor.name.toLowerCase().includes(normalizedLaborQuery);
+      [labor.name, labor.phone || "", labor.city || ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedLaborQuery);
     return matchesDepartment && matchesSearch;
   };
   const filteredLaborIds = useMemo(
@@ -909,15 +892,6 @@ export function LaborManagement() {
         label: category.name,
       })),
     [categories],
-  );
-
-  const laborPaymentTypeOptions = useMemo(
-    () =>
-      paymentTypes.map((type) => ({
-        value: type.id,
-        label: type.name,
-      })),
-    [paymentTypes],
   );
 
   if (viewingLaborId) {
@@ -1240,7 +1214,7 @@ export function LaborManagement() {
                             <div>
                               <Label>Labor Name</Label>
                               <Input
-                                defaultValue={laborForm.name}
+                                value={laborForm.name}
                                 onChange={(e) =>
                                   setLaborForm({
                                     ...laborForm,
@@ -1258,11 +1232,6 @@ export function LaborManagement() {
                                   setLaborForm((current) => ({
                                     ...current,
                                     categoryId: value,
-                                    paymentTypeId:
-                                      value === MONTHLY_LABOUR_DEPARTMENT_ID &&
-                                      monthlyPaymentTypeId
-                                        ? monthlyPaymentTypeId
-                                        : current.paymentTypeId,
                                   }))
                                 }
                                 options={laborCategoryOptions}
@@ -1272,19 +1241,31 @@ export function LaborManagement() {
                               />
                             </div>
                             <div>
-                              <Label>Payment Type</Label>
-                              <SearchableSelect
-                                value={laborForm.paymentTypeId}
-                                onValueChange={(value) =>
+<Label>Phone Number</Label>
+                              <Input
+                                value={laborForm.phone}
+                                onChange={(e) =>
                                   setLaborForm({
                                     ...laborForm,
-                                    paymentTypeId: value,
+                                    phone: e.target.value,
                                   })
                                 }
-                                options={laborPaymentTypeOptions}
-                                placeholder="Select payment type"
-                                searchPlaceholder="Search payment type..."
-                                emptyMessage="No payment types found."
+                                placeholder="03xx..."
+                                required
+                              />
+                            </div>
+                            <div>
+<Label>City</Label>
+                              <Input
+                                value={laborForm.city}
+                                onChange={(e) =>
+                                  setLaborForm({
+                                    ...laborForm,
+                                    city: e.target.value,
+                                  })
+                                }
+                                placeholder="City"
+                                required
                               />
                             </div>
                             <div>
@@ -1457,10 +1438,11 @@ export function LaborManagement() {
                 >
                   <Table>
                     <TableHeader>
-                      <TableRow>
+<TableRow>
                         <TableHead>Name</TableHead>
+                        <TableHead>Phone</TableHead>
+                        <TableHead>City</TableHead>
                         <TableHead>Category</TableHead>
-                        <TableHead>Payment Type</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Total Earned</TableHead>
                         <TableHead>Total Paid</TableHead>
@@ -1473,7 +1455,7 @@ export function LaborManagement() {
                       {isLoading ? (
                         <TableRow>
                           <TableCell
-                            colSpan={9}
+                            colSpan={10}
                             className="text-center text-muted-foreground"
                           >
                             Loading labor profiles...
@@ -1482,7 +1464,7 @@ export function LaborManagement() {
                       ) : filteredProfiles.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={9}
+                            colSpan={10}
                             className="text-center text-muted-foreground"
                           >
                             No labors yet
@@ -1497,11 +1479,10 @@ export function LaborManagement() {
                           return (
                             <TableRow key={labor.id}>
                               <TableCell>{labor.name}</TableCell>
-                              <TableCell>
+                              <TableCell>{labor.phone || "-"}</TableCell>
+                              <TableCell>{labor.city || "-"}</TableCell>
+<TableCell>
                                 {labor.category?.name || "-"}
-                              </TableCell>
-                              <TableCell>
-                                {labor.paymentType?.name || "-"}
                               </TableCell>
                               <TableCell>{labor.status}</TableCell>
                               <TableCell>

@@ -68,7 +68,6 @@ export const listLaborProfiles = async (req, res) => {
   const [profiles, labelMap] = await Promise.all([
     prisma.laborProfile.findMany({
       where: resolveDeletedWhere(req.query.deleted, statusWhere),
-      include: { paymentType: true },
       orderBy: { name: "asc" },
     }),
     getLaborDepartmentLabelMap(),
@@ -85,11 +84,11 @@ export const createLaborProfile = async (req, res) => {
     data: {
       name: req.body.name,
       department,
-      paymentTypeId: req.body.paymentTypeId,
+      phone: req.body.phone,
+      city: req.body.city,
       defaultRate: req.body.defaultRate,
       status: req.body.status,
     },
-    include: { paymentType: true },
   });
   res.status(201).json(withCategory(profile, labelMap));
 };
@@ -105,11 +104,11 @@ export const updateLaborProfile = async (req, res) => {
         departmentValue === undefined
           ? undefined
           : normalizeLaborDepartment(departmentValue),
-      paymentTypeId: req.body.paymentTypeId,
+      phone: req.body.phone,
+      city: req.body.city,
       defaultRate: req.body.defaultRate,
       status: req.body.status,
     },
-    include: { paymentType: true },
   });
   res.json(withCategory(profile, labelMap));
 };

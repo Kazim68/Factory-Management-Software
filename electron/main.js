@@ -44,6 +44,7 @@ function createWindow() {
         ),
       );
     },
+    
   );
 
   if (!app.isPackaged) {

@@ -51,7 +51,6 @@ import type {
   ApiStockEntry,
   ApiUnit,
   ApiArticle,
-  ApiPaymentType,
   ApiChemicalPurchase,
   ApiRexinePurchase,
   ApiMaterialPurchase,
@@ -71,7 +70,7 @@ type RoznamchaFilter = "ALL" | "IN_ONLY" | "OUT_ONLY" | "LABOR_ONLY" | "PARTY_ON
 type PurchaseKind = "ALL" | "CHEMICAL" | "REXINE" | "MATERIAL";
 type LaborDeletedType = "ALL" | "PROFILE" | "WORK" | "ADVANCE";
 type StockDeletedType = "MALL" | "MANUAL";
-type ConfigurationDeletedType = "UNIT" | "ARTICLE" | "PAYMENT_TYPE";
+type ConfigurationDeletedType = "UNIT" | "ARTICLE";
 type ProductionLaborFilter = "all" | "assigned" | "unassigned";
 
 type DeletedPurchaseRecord =
@@ -218,7 +217,6 @@ export function DeletedItems() {
   const [manualEntries, setManualEntries] = useState<ApiStockEntry[]>([]);
   const [units, setUnits] = useState<ApiUnit[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
-  const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [chemicals, setChemicals] = useState<ApiChemicalPurchase[]>([]);
   const [rexine, setRexine] = useState<ApiRexinePurchase[]>([]);
   const [materials, setMaterials] = useState<ApiMaterialPurchase[]>([]);
@@ -314,7 +312,6 @@ export function DeletedItems() {
         deletedManualEntries,
         deletedUnits,
         deletedArticles,
-        deletedPaymentTypes,
         deletedChemicals,
         deletedRexine,
         deletedMaterials,
@@ -330,7 +327,6 @@ export function DeletedItems() {
         productionApi.listManualStockEntries({ deleted: "ONLY" }),
         configApi.listUnits({ deleted: "ONLY" }),
         configApi.listArticles({ deleted: "ONLY" }),
-        configApi.listPaymentTypes({ deleted: "ONLY" }),
         purchaseApi.listChemicals({ deleted: "ONLY" }),
         purchaseApi.listRexine({ deleted: "ONLY" }),
         purchaseApi.listMaterials({ deleted: "ONLY" }),
@@ -347,7 +343,6 @@ export function DeletedItems() {
       setManualEntries(deletedManualEntries);
       setUnits(deletedUnits);
       setArticles(deletedArticles);
-      setPaymentTypes(deletedPaymentTypes);
       setChemicals(deletedChemicals);
       setRexine(deletedRexine);
       setMaterials(deletedMaterials);
@@ -551,7 +546,13 @@ export function DeletedItems() {
         }
 
         if (!query) return true;
-        return [profile.name, departmentLabel || "", profile.status]
+        return [
+          profile.name,
+          profile.phone || "",
+          profile.city || "",
+          departmentLabel || "",
+          profile.status,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(query);
@@ -561,7 +562,13 @@ export function DeletedItems() {
         id: profile.id,
         deletedAt: profile.deletedAt || profile.updatedAt,
         label: profile.name,
-        meta: profile.category?.name || profile.department || profile.categoryId,
+        meta: [
+          profile.category?.name || profile.department || profile.categoryId,
+          profile.phone || "",
+          profile.city || "",
+        ]
+          .filter(Boolean)
+          .join(" • "),
         amount: profile.defaultRate == null ? "-" : formatCurrency(Number(profile.defaultRate)),
         raw: profile,
       }));
@@ -826,14 +833,8 @@ export function DeletedItems() {
           .toLowerCase()
           .includes(configurationSearchQuery.trim().toLowerCase()),
       ),
-      PAYMENT_TYPE: paymentTypes.filter((paymentType) =>
-        [paymentType.name, paymentType.unit?.name || ""]
-          .join(" ")
-          .toLowerCase()
-          .includes(configurationSearchQuery.trim().toLowerCase()),
-      ),
     }),
-    [articles, configurationSearchQuery, paymentTypes, units],
+    [articles, configurationSearchQuery, units],
   );
 
   const {
@@ -1709,15 +1710,14 @@ export function DeletedItems() {
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[200px]">
                   <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">Configuration Type</Label>
-                  <Select value={configurationType} onValueChange={(value) => setConfigurationType(value as ConfigurationDeletedType)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="UNIT">Units</SelectItem>
-                      <SelectItem value="ARTICLE">Articles</SelectItem>
-                      <SelectItem value="PAYMENT_TYPE">Payment Types</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                    <Select value={configurationType} onValueChange={(value) => setConfigurationType(value as ConfigurationDeletedType)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="UNIT">Units</SelectItem>
+                        <SelectItem value="ARTICLE">Articles</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
               </div>
 
               <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed bg-muted/30 p-3">
@@ -1773,21 +1773,7 @@ export function DeletedItems() {
                         </TableCell>
                       </TableRow>
                     ))
-                  ) : (
-                    (configPagination.paginatedItems as ApiPaymentType[]).map((paymentType) => (
-                      <TableRow key={paymentType.id}>
-                        <TableCell>{paymentType.name}</TableCell>
-                        <TableCell>{paymentType.unit?.name || "-"}</TableCell>
-                        <TableCell>{formatDateTime(paymentType.deletedAt || paymentType.updatedAt)}</TableCell>
-                        <TableCell>
-                          <Button size="sm" variant="outline" onClick={() => restoreAndReload(() => configApi.restorePaymentType(paymentType.id), "Payment type restored.")}>
-                            <RotateCcw className="mr-2 h-4 w-4" />
-                            Undo
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                  ) : null}
                 </TableBody>
               </Table>
               <TablePagination
@@ -1809,4 +1795,3 @@ export function DeletedItems() {
     </div>
   );
 }
-

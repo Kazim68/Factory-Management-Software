@@ -104,7 +104,6 @@ model Unit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  paymentTypes PaymentCalculationType[]
   laborRates   LaborRate[]
   laborWork    LaborWorkEntry[]
   materials    MaterialPurchase[]
@@ -132,18 +131,6 @@ model LaborDepartmentName {
   name       String
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
-}
-
-model PaymentCalculationType {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  unitId    String?
-  deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  unit   Unit?           @relation(fields: [unitId], references: [id])
-  labors LaborProfile[]
 }
 
 model Party {
@@ -221,14 +208,14 @@ model LaborProfile {
   id               String                   @id @default(uuid())
   name             String
   department       LaborDepartment          @default(PRESSMAN)
-  paymentTypeId    String
+  phone            String?
+  city             String?
   defaultRate      Decimal?
   status           LaborStatus              @default(ACTIVE)
   deletedAt        DateTime?
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
-  paymentType  PaymentCalculationType  @relation(fields: [paymentTypeId], references: [id])
   rates        LaborRate[]
   workEntries  LaborWorkEntry[]
   advances     LaborAdvance[]

@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { SearchableSelect } from "./ui/searchable-select";
 import {
   Table,
   TableBody,
@@ -27,7 +26,6 @@ import { useClientPagination } from "../hooks/useClientPagination";
 import type {
   ApiArticle,
   ApiLaborCategory,
-  ApiPaymentType,
   ApiUnit,
 } from "../types/api";
 import { TablePagination } from "./ui/table-pagination";
@@ -37,7 +35,6 @@ type LoadState = "idle" | "loading" | "error";
 export function Configuration() {
   const [units, setUnits] = useState<ApiUnit[]>([]);
   const [articles, setArticles] = useState<ApiArticle[]>([]);
-  const [paymentTypes, setPaymentTypes] = useState<ApiPaymentType[]>([]);
   const [laborCategories, setLaborCategories] = useState<ApiLaborCategory[]>(
     [],
   );
@@ -45,23 +42,15 @@ export function Configuration() {
 
   const [unitDialog, setUnitDialog] = useState(false);
   const [articleDialog, setArticleDialog] = useState(false);
-  const [paymentDialog, setPaymentDialog] = useState(false);
   const [laborDialog, setLaborDialog] = useState(false);
 
   const [editingUnit, setEditingUnit] = useState<ApiUnit | null>(null);
   const [editingArticle, setEditingArticle] = useState<ApiArticle | null>(null);
-  const [editingPayment, setEditingPayment] = useState<ApiPaymentType | null>(
-    null,
-  );
   const [editingLaborCategory, setEditingLaborCategory] =
     useState<ApiLaborCategory | null>(null);
 
   const [unitForm, setUnitForm] = useState({ name: "", symbol: "" });
   const [articleForm, setArticleForm] = useState({ name: "", code: "" });
-  const [paymentForm, setPaymentForm] = useState({
-    name: "",
-    unitId: "none",
-  });
   const [laborForm, setLaborForm] = useState({ name: "" });
   const [activeTab, setActiveTab] = useState("units");
   const [configSearchQuery, setConfigSearchQuery] = useState("");
@@ -69,17 +58,15 @@ export function Configuration() {
   const loadConfig = async () => {
     setStatus("loading");
     try {
-      const [unitsData, articlesData, paymentData, laborCategoryData] =
+      const [unitsData, articlesData, laborCategoryData] =
         await Promise.all([
           configApi.listUnits(),
           configApi.listArticles(),
-          configApi.listPaymentTypes(),
           configApi.listLaborCategories(),
         ]);
 
       setUnits(unitsData);
       setArticles(articlesData);
-      setPaymentTypes(paymentData);
       setLaborCategories(laborCategoryData);
       setStatus("idle");
     } catch (error) {
@@ -145,33 +132,6 @@ export function Configuration() {
     }
   };
 
-  const handlePaymentSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    try {
-      if (editingPayment) {
-        await configApi.updatePaymentType(editingPayment.id, {
-          name: paymentForm.name.trim(),
-          unitId: paymentForm.unitId === "none" ? null : paymentForm.unitId,
-        });
-        toast.success("Payment type updated");
-      } else {
-        await configApi.createPaymentType({
-          name: paymentForm.name.trim(),
-          unitId:
-            paymentForm.unitId === "none" ? undefined : paymentForm.unitId,
-        });
-        toast.success("Payment type added");
-      }
-      setPaymentForm({ name: "", unitId: "none" });
-      setEditingPayment(null);
-      setPaymentDialog(false);
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to save payment type.");
-    }
-  };
-
   const handleLaborSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editingLaborCategory) return;
@@ -203,12 +163,6 @@ export function Configuration() {
     setArticleDialog(true);
   };
 
-  const startPaymentEdit = (payment: ApiPaymentType) => {
-    setEditingPayment(payment);
-    setPaymentForm({ name: payment.name, unitId: payment.unitId || "none" });
-    setPaymentDialog(true);
-  };
-
   const startLaborEdit = (category: ApiLaborCategory) => {
     setEditingLaborCategory(category);
     setLaborForm({ name: category.name });
@@ -227,18 +181,6 @@ export function Configuration() {
     }
   };
 
-  const handlePaymentDelete = async (payment: ApiPaymentType) => {
-    if (!confirm(`Delete payment type "${payment.name}"?`)) return;
-    try {
-      await configApi.deletePaymentType(payment.id);
-      toast.success("Payment type moved to Deleted Items.");
-      await loadConfig();
-    } catch (error) {
-      console.error(error);
-      toast.error("Unable to delete payment type.");
-    }
-  };
-
   const renderEmpty = (colSpan: number, message: string) => (
     <TableRow>
       <TableCell
@@ -251,18 +193,6 @@ export function Configuration() {
   );
 
   const isLoading = status === "loading";
-
-  const unitSelectOptions = useMemo(
-    () => [
-      { value: "none", label: "No unit" },
-      ...units.map((unit) => ({
-        value: unit.id,
-        label: unit.name,
-        description: unit.symbol || undefined,
-      })),
-    ],
-    [units],
-  );
 
   const normalizedConfigQuery = configSearchQuery.trim().toLowerCase();
 
@@ -286,17 +216,6 @@ export function Configuration() {
           .includes(normalizedConfigQuery),
       ),
     [articles, normalizedConfigQuery],
-  );
-
-  const filteredPaymentTypes = useMemo(
-    () =>
-      paymentTypes.filter((paymentType) =>
-        [paymentType.name, paymentType.unit?.name || ""]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedConfigQuery),
-      ),
-    [normalizedConfigQuery, paymentTypes],
   );
 
   const filteredLaborCategories = useMemo(
@@ -339,20 +258,6 @@ export function Configuration() {
   } = useClientPagination(filteredArticles);
 
   const {
-    currentPage: paymentTypesPage,
-    setCurrentPage: setPaymentTypesPage,
-    pageSize: paymentTypesPageSize,
-    setPageSize: setPaymentTypesPageSize,
-    totalPages: paymentTypesTotalPages,
-    totalItems: paymentTypesTotalItems,
-    startItem: paymentTypesStartItem,
-    endItem: paymentTypesEndItem,
-    paginatedItems: paginatedPaymentTypes,
-    goToPreviousPage: goToPreviousPaymentTypesPage,
-    goToNextPage: goToNextPaymentTypesPage,
-  } = useClientPagination(filteredPaymentTypes);
-
-  const {
     currentPage: laborCategoriesPage,
     setCurrentPage: setLaborCategoriesPage,
     pageSize: laborCategoriesPageSize,
@@ -373,11 +278,9 @@ export function Configuration() {
   const configSearchPlaceholder =
     activeTab === "articles"
       ? "Search articles by name or code..."
-      : activeTab === "payment"
-        ? "Search payment types or linked units..."
-        : activeTab === "labor-categories"
-          ? "Search departments by id or name..."
-          : "Search units by name or symbol...";
+      : activeTab === "labor-categories"
+        ? "Search departments by id or name..."
+        : "Search units by name or symbol...";
 
   return (
     <div className="space-y-6">
@@ -392,10 +295,9 @@ export function Configuration() {
             onValueChange={setActiveTab}
           >
             <div className="flex items-center justify-between gap-3">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="units">Units</TabsTrigger>
                 <TabsTrigger value="articles">Articles</TabsTrigger>
-                <TabsTrigger value="payment">Payment Types</TabsTrigger>
                 <TabsTrigger value="labor-categories">
                   Labor Categories
                 </TabsTrigger>
@@ -676,140 +578,6 @@ export function Configuration() {
                 goToPreviousPage={goToPreviousArticlesPage}
                 goToNextPage={goToNextArticlesPage}
                 setCurrentPage={setArticlesPage}
-              />
-            </TabsContent>
-
-            <TabsContent
-              value="payment"
-              className="space-y-4"
-              data-report-tab="payment"
-            >
-              <div className="flex justify-end">
-                <Dialog
-                  open={paymentDialog}
-                  onOpenChange={(open) => {
-                    setPaymentDialog(open);
-                    if (!open) {
-                      setEditingPayment(null);
-                      setPaymentForm({ name: "", unitId: "none" });
-                    }
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button
-                      onClick={() => {
-                        setEditingPayment(null);
-                        setPaymentForm({ name: "", unitId: "none" });
-                      }}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Payment Type
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>
-                        {editingPayment
-                          ? "Edit Payment Type"
-                          : "Add Payment Type"}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={handlePaymentSubmit} className="space-y-4">
-                      <div>
-                        <Label>Payment Type Name</Label>
-                        <Input
-                          value={paymentForm.name}
-                          onChange={(event) =>
-                            setPaymentForm({
-                              ...paymentForm,
-                              name: event.target.value,
-                            })
-                          }
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label>Unit (optional)</Label>
-                        <SearchableSelect
-                          value={paymentForm.unitId}
-                          onValueChange={(value) =>
-                            setPaymentForm({ ...paymentForm, unitId: value })
-                          }
-                          options={unitSelectOptions}
-                          placeholder="No unit"
-                          searchPlaceholder="Search unit..."
-                          emptyMessage="No units found."
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setPaymentDialog(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button type="submit">Save</Button>
-                      </div>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Unit</TableHead>
-                    <TableHead className="w-[140px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading
-                    ? renderEmpty(3, "Loading payment types...")
-                    : filteredPaymentTypes.length === 0
-                      ? renderEmpty(
-                          3,
-                          paymentTypes.length === 0
-                            ? "No payment types yet"
-                            : "No payment types match the current filters.",
-                        )
-                      : paginatedPaymentTypes.map((type) => (
-                          <TableRow key={type.id}>
-                            <TableCell>{type.name}</TableCell>
-                            <TableCell>{type.unit?.name || "-"}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => startPaymentEdit(type)}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handlePaymentDelete(type)}
-                                >
-                                  Delete
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                </TableBody>
-              </Table>
-              <TablePagination
-                currentPage={paymentTypesPage}
-                totalPages={paymentTypesTotalPages}
-                totalItems={paymentTypesTotalItems}
-                startItem={paymentTypesStartItem}
-                endItem={paymentTypesEndItem}
-                pageSize={paymentTypesPageSize}
-                setPageSize={setPaymentTypesPageSize}
-                goToPreviousPage={goToPreviousPaymentTypesPage}
-                goToNextPage={goToNextPaymentTypesPage}
-                setCurrentPage={setPaymentTypesPage}
               />
             </TabsContent>
 

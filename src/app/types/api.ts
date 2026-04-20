@@ -32,16 +32,6 @@ export type ApiLaborDepartment =
   | "PACKING"
   | "MONTHLY_LABOUR";
 
-export interface ApiPaymentType {
-  id: string;
-  name: string;
-  unitId?: string | null;
-  unit?: ApiUnit | null;
-  deletedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export type ApiLaborStatus = "ACTIVE" | "FIRED";
 
 export interface ApiLaborProfile {
@@ -49,14 +39,14 @@ export interface ApiLaborProfile {
   name: string;
   categoryId: string;
   department?: ApiLaborDepartment;
-  paymentTypeId: string;
+  phone?: string | null;
+  city?: string | null;
   defaultRate?: number | string | null;
   status: ApiLaborStatus;
   deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   category?: ApiLaborCategory | null;
-  paymentType?: ApiPaymentType | null;
 }
 
 export interface ApiLaborWorkEntry {

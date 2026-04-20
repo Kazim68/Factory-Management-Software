@@ -76,18 +76,6 @@ CREATE TABLE "LaborDepartmentName" (
     CONSTRAINT "LaborDepartmentName_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "PaymentCalculationType" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "unitId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "PaymentCalculationType_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "Party" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -142,7 +130,8 @@ CREATE TABLE "LaborProfile" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "department" "LaborDepartment" NOT NULL DEFAULT 'PRESSMAN',
-    "paymentTypeId" TEXT NOT NULL,
+    "phone" TEXT,
+    "city" TEXT,
     "defaultRate" DECIMAL(65,30),
     "status" "LaborStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -402,9 +391,6 @@ CREATE UNIQUE INDEX "Article_name_key" ON "Article"("name");
 CREATE UNIQUE INDEX "LaborDepartmentName_department_key" ON "LaborDepartmentName"("department");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "PaymentCalculationType_name_key" ON "PaymentCalculationType"("name");
-
--- CreateIndex
 CREATE UNIQUE INDEX "Party_name_key" ON "Party"("name");
 
 -- CreateIndex
@@ -477,9 +463,6 @@ CREATE INDEX "ProductionOrder_packingLaborId_idx" ON "ProductionOrder"("packingL
 CREATE INDEX "change_log_synced_created_at_idx" ON "change_log"("synced", "created_at");
 
 -- AddForeignKey
-ALTER TABLE "PaymentCalculationType" ADD CONSTRAINT "PaymentCalculationType_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "PartyLedgerEntry" ADD CONSTRAINT "PartyLedgerEntry_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -511,9 +494,6 @@ ALTER TABLE "ExpenseEntry" ADD CONSTRAINT "ExpenseEntry_materialPurchaseId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "ExpenseEntry" ADD CONSTRAINT "ExpenseEntry_laborAdvanceId_fkey" FOREIGN KEY ("laborAdvanceId") REFERENCES "LaborAdvance"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "LaborProfile" ADD CONSTRAINT "LaborProfile_paymentTypeId_fkey" FOREIGN KEY ("paymentTypeId") REFERENCES "PaymentCalculationType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LaborRate" ADD CONSTRAINT "LaborRate_laborId_fkey" FOREIGN KEY ("laborId") REFERENCES "LaborProfile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -7,7 +7,6 @@ import type {
   ApiLaborProfile,
   ApiLaborWorkEntry,
   ApiLaborAdvance,
-  ApiPaymentType,
   ApiParty,
   ApiPartyLedgerEntry,
   ApiSupplierPendingDuesResponse,
@@ -88,7 +87,6 @@ const ENTITY_LABELS: Record<string, string> = {
   "config/units": "unit",
   "config/articles": "article",
   "config/labor-categories": "labor category",
-  "config/payment-types": "payment type",
   parties: "party",
   expenses: "expense",
   bills: "bill",
@@ -481,38 +479,6 @@ export const configApi = {
       method: "DELETE",
     }),
 
-  listPaymentTypes: (params?: {
-    deleted?: DeletedScope;
-  }): Promise<ApiPaymentType[]> =>
-    get(
-      withQuery("/config/payment-types", {
-        deleted: params?.deleted,
-      }),
-    ),
-  createPaymentType: (data: {
-    name: string;
-    unitId?: string;
-  }): Promise<ApiPaymentType> =>
-    request({ path: "/config/payment-types", method: "POST", body: data }),
-  updatePaymentType: (
-    paymentTypeId: string,
-    data: { name: string; unitId?: string | null },
-  ): Promise<ApiPaymentType> =>
-    request({
-      path: `/config/payment-types/${paymentTypeId}`,
-      method: "PATCH",
-      body: data,
-    }),
-  deletePaymentType: (paymentTypeId: string): Promise<void> =>
-    request({
-      path: `/config/payment-types/${paymentTypeId}`,
-      method: "DELETE",
-    }),
-  restorePaymentType: (paymentTypeId: string): Promise<ApiPaymentType> =>
-    request({
-      path: `/config/payment-types/${paymentTypeId}/restore`,
-      method: "POST",
-    }),
 };
 
 export const partyApi = {
@@ -655,7 +621,8 @@ export const laborApi = {
     data: {
       name: string;
       categoryId: string;
-      paymentTypeId: string;
+      phone?: string;
+      city?: string;
       defaultRate?: number;
       status?: "ACTIVE" | "FIRED";
     },
@@ -667,7 +634,8 @@ export const laborApi = {
     data: {
       name?: string;
       categoryId?: string;
-      paymentTypeId?: string;
+      phone?: string;
+      city?: string;
       defaultRate?: number;
       status?: "ACTIVE" | "FIRED";
     },

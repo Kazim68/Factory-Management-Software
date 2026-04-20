@@ -99,7 +99,6 @@ const BILL_COUNTER_ID = "default";
 const SOFT_DELETE_TABLES = [
   "Unit",
   "Article",
-  "PaymentCalculationType",
   "Party",
   "PartyLedgerEntry",
   "ExpenseEntry",
