@@ -973,7 +973,7 @@ export function BillManagement() {
                 placeholder="Search bill number or party..."
               />
             </div>
-            <div className="min-w-[200px]">
+            {/* <div className="min-w-[200px]">
               <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                 Status
               </Label>
@@ -993,7 +993,7 @@ export function BillManagement() {
                   <SelectItem value="PAID">Paid</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </div> */}
             <div className="min-w-[200px]">
               <Label className="mb-1.5 inline-block text-xs uppercase tracking-wide text-muted-foreground">
                 Time
