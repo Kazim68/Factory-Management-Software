@@ -5,6 +5,7 @@ import {
   getLastSyncTimestamp,
   setLastSyncTimestamp,
 } from "./server/sync/syncService.js";
+import { licenseService } from "./license/index.js";
 
 const BASE_INTERVAL_MS = 30_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
@@ -625,6 +626,16 @@ const pullRemoteChanges = async () => {
 };
 
 const runSyncCycle = async ({ pullFirst = false } = {}) => {
+  // Pause sync entirely when the license is missing/blocked/expired (Approch.docx
+  // P241–P242). The license service refreshes this status every 15 minutes.
+  const licenseStatus = licenseService.getCachedStatus();
+  if (!licenseStatus?.valid) {
+    log("cycle:paused", {
+      reason: licenseStatus?.reason ?? "License inactive",
+    });
+    return;
+  }
+
   let pullResult;
 
   if (pullFirst) {

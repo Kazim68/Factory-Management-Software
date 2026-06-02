@@ -1342,3 +1342,31 @@ export const reportsApi = {
       }),
     ),
 };
+
+export type LicenseLifecycleStatus = "ACTIVE" | "BLOCKED" | "EXPIRED";
+
+export type LicenseStatus = {
+  valid: boolean;
+  hasKey: boolean;
+  reason?: string;
+  companyStatus?: LicenseLifecycleStatus;
+  licenseStatus?: LicenseLifecycleStatus;
+  expiresAt?: string;
+  maxDevices?: number;
+  deviceId?: string;
+  licenseKey?: string;
+};
+
+export const licenseApi = {
+  getStatus: (): Promise<LicenseStatus> => get("/license/status"),
+  activate: (licenseKey: string): Promise<LicenseStatus> =>
+    request({
+      path: "/license/activate",
+      method: "POST",
+      body: { licenseKey },
+    }),
+  verifyNow: (): Promise<LicenseStatus> =>
+    request({ path: "/license/verify", method: "POST" }),
+  deactivate: (): Promise<LicenseStatus> =>
+    request({ path: "/license/deactivate", method: "POST" }),
+};

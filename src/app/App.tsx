@@ -20,6 +20,7 @@ import { AuditLogs } from "./components/AuditLogs";
 import { ProductionControl } from "./components/ProductionControl";
 import { StockControl } from "./components/StockControl";
 import { DeletedItems } from "./components/DeletedItems";
+import { LicenseGate } from "./components/LicenseGate";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -368,6 +369,55 @@ function AppShell() {
     );
   }
 
+  return (
+    <LicenseGate onBlocked={() => setCurrentUser(null)}>
+      <AppShellContent
+        currentUser={currentUser}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        allowedNavigation={allowedNavigation}
+        currentNavItem={currentNavItem}
+        currentPage={currentPage}
+        setCurrentPage={setCurrentPage}
+        renderPage={renderPage}
+        handleLogout={handleLogout}
+        language={language}
+        setLanguage={setLanguage}
+        t={t}
+      />
+    </LicenseGate>
+  );
+}
+
+type AppShellContentProps = {
+  currentUser: SessionUser;
+  sidebarOpen: boolean;
+  setSidebarOpen: (value: boolean) => void;
+  allowedNavigation: NavItem[];
+  currentNavItem: NavItem | null;
+  currentPage: Page;
+  setCurrentPage: (value: Page) => void;
+  renderPage: () => ReactNode;
+  handleLogout: () => void;
+  language: AppLanguage;
+  setLanguage: (value: AppLanguage) => void;
+  t: (key: string) => string;
+};
+
+function AppShellContent({
+  currentUser,
+  sidebarOpen,
+  setSidebarOpen,
+  allowedNavigation,
+  currentNavItem,
+  currentPage,
+  setCurrentPage,
+  renderPage,
+  handleLogout,
+  language,
+  setLanguage,
+  t,
+}: AppShellContentProps) {
   return (
     <div className="flex h-screen bg-background">
       <aside

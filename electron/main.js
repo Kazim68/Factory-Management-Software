@@ -6,6 +6,7 @@ import { initPrisma } from "./server/prisma.js";
 import { startSyncWorker } from "./syncWorker.js";
 import { disconnectCloudPrisma } from "./server/cloudPrisma.js";
 import registerIpc from "./ipc/index.js";
+import { licenseService } from "./license/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,6 +66,14 @@ app.whenReady().then(async () => {
   await initPrisma();
   await startServer();
   registerIpc(ipcMain);
+  // Resolve the device identity and run one verify so the cached license
+  // status is fresh before the renderer mounts and the sync worker kicks off.
+  try {
+    await licenseService.initialize();
+  } catch (error) {
+    console.warn("[license] initialization failed:", error?.message ?? error);
+  }
+  licenseService.startBackgroundLoop();
   syncWorker = startSyncWorker();
   createWindow();
 }).catch((error) => {
@@ -74,6 +83,7 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (syncWorker) syncWorker.stop();
+  licenseService.stopBackgroundLoop();
   disconnectCloudPrisma().catch((error) =>
     console.error("Cloud Prisma disconnect error:", error)
   );
