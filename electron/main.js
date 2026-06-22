@@ -7,11 +7,13 @@ import { startSyncWorker } from "./syncWorker.js";
 import { disconnectCloudPrisma } from "./server/cloudPrisma.js";
 import registerIpc from "./ipc/index.js";
 import { licenseService } from "./license/index.js";
+import { initUpdater, shutdownUpdater } from "./services/updater.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let syncWorker;
+let mainWindow;
 
 const formatError = (error) => error?.stack ?? String(error);
 
@@ -33,6 +35,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
+  });
+  mainWindow = win;
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
   });
 
   win.webContents.on(
@@ -76,6 +82,12 @@ app.whenReady().then(async () => {
   licenseService.startBackgroundLoop();
   syncWorker = startSyncWorker();
   createWindow();
+  // Bind the updater to the main window so update events reach the React UI.
+  try {
+    initUpdater(mainWindow);
+  } catch (error) {
+    console.warn("[updater] initialization failed:", error?.message ?? error);
+  }
 }).catch((error) => {
   reportStartupError("CrossX failed to start", error);
   app.quit();
@@ -84,6 +96,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   if (syncWorker) syncWorker.stop();
   licenseService.stopBackgroundLoop();
+  shutdownUpdater();
   disconnectCloudPrisma().catch((error) =>
     console.error("Cloud Prisma disconnect error:", error)
   );

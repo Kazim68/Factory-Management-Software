@@ -5,8 +5,8 @@ import { app } from "electron";
 // Resolves the license server URL. Order of precedence:
 //   1. `LICENSE_SERVER_URL` environment variable.
 //   2. `license.config.json` next to the executable / project root (key: `serverUrl`).
-//   3. Hard fallback: http://localhost:4100.
-const DEFAULT_URL = "http://localhost:4100";
+//   3. Hard fallback: the hosted activation server.
+const DEFAULT_URL = "https://activation-server-pi.vercel.app/_/backend";
 
 const readConfigFile = () => {
   const candidates = [];

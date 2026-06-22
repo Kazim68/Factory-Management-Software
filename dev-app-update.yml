@@ -1,0 +1,15 @@
+# dev-app-update.yml
+#
+# electron-updater reads this file when the app is NOT packaged so the
+# updater can resolve a feed URL during development. Replace the owner/repo
+# below with the actual GitHub project before testing the auto-update flow
+# locally with `npm run build:win` followed by running the installed exe.
+#
+# Note: electron-updater silently skips checks in dev mode unless you also
+# set the env var ELECTRON_FORCE_IS_PACKAGED=true. We currently short-circuit
+# in updater.js so this file is only useful for manual experiments.
+
+provider: github
+owner: Kazim68
+repo: Factory-Management-Software
+updaterCacheDirName: crossx-updater

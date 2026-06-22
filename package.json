@@ -9,22 +9,20 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"electron .\"",
     "build": "npm run generate:prisma && npm run generate:cloud-prisma && npm run generate:local-template-db && vite build && electron-builder",
+    "build:win": "npm run generate:prisma && npm run generate:cloud-prisma && npm run generate:local-template-db && vite build && electron-builder --win --publish never",
+    "release": "npm run generate:prisma && npm run generate:cloud-prisma && npm run generate:local-template-db && vite build && electron-builder --win --publish always",
     "postinstall": "electron-builder install-app-deps",
     "generate:prisma": "prisma generate --schema prisma/schema.prisma",
     "generate:cloud-prisma": "prisma generate --schema database/prisma/schema.prisma",
     "generate:local-template-db": "node scripts/generateLocalTemplateDb.mjs"
   },
   "dependencies": {
-    "@prisma/client": "^6.16.1",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "better-sqlite3": "^12.6.2",
-    "express": "^5.2.1",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",
     "@mui/material": "7.3.5",
     "@popperjs/core": "2.11.8",
+    "@prisma/client": "^6.16.1",
     "@radix-ui/react-accordion": "1.2.3",
     "@radix-ui/react-alert-dialog": "1.1.6",
     "@radix-ui/react-aspect-ratio": "1.1.2",
@@ -51,18 +49,24 @@
     "@radix-ui/react-toggle": "1.1.2",
     "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.8",
+    "better-sqlite3": "^12.6.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "date-fns": "3.6.0",
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.3",
     "embla-carousel-react": "8.6.0",
+    "express": "^5.2.1",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",
     "motion": "12.23.24",
     "next-themes": "0.4.6",
+    "react": "18.3.1",
     "react-day-picker": "8.10.1",
     "react-dnd": "16.0.1",
     "react-dnd-html5-backend": "16.0.1",
+    "react-dom": "18.3.1",
     "react-hook-form": "7.55.0",
     "react-popper": "2.3.0",
     "react-resizable-panels": "2.1.7",
@@ -75,18 +79,19 @@
     "vaul": "1.1.2"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "4.7.0",
-    "prisma": "^6.16.1",
     "@tailwindcss/vite": "4.1.12",
-    "tailwindcss": "4.1.12",
-    "vite": "6.3.5",
+    "@vitejs/plugin-react": "4.7.0",
+    "concurrently": "^8.2.2",
     "electron": "^30.0.0",
     "electron-builder": "^26.4.0",
-    "concurrently": "^8.2.2"
+    "prisma": "^6.16.1",
+    "tailwindcss": "4.1.12",
+    "vite": "6.3.5"
   },
   "build": {
-    "appId": "com.example.electrontodo",
+    "appId": "com.darkshadows.crossx",
     "productName": "CrossX",
+    "artifactName": "${productName} Setup ${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -105,8 +110,35 @@
       "database/generated/cloud-client/*.dll.node",
       "database/generated/local-template/**/*"
     ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Kazim68",
+        "repo": "Factory-Management-Software",
+        "releaseType": "release"
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "signtoolOptions": {
+        "publisherName": "DarkShadows"
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CrossX",
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": true
     }
   },
   "pnpm": {

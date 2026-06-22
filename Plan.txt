@@ -1,0 +1,269 @@
+You are a senior Electron architect.
+
+I have an existing Electron + React + Vite desktop application.
+
+Current stack:
+
+* Electron
+* React
+* Vite
+* Express (embedded local API server)
+* Prisma
+* SQLite (local database)
+* PostgreSQL (cloud sync planned later)
+
+Your task is to implement a complete production-grade auto-update system using Electron Builder and Electron Updater.
+
+Requirements:
+
+1. Analyze the existing project structure before making changes.
+2. Make all necessary code changes.
+3. Explain every file modified.
+4. Generate all configuration files.
+5. Ensure the solution works in development and production.
+6. Do not remove existing functionality.
+
+==================================================
+GOAL
+====
+
+Implement:
+
+* Windows installer (.exe)
+* Auto updates
+* Version management
+* Update notifications
+* Restart-and-install flow
+
+Similar user experience to:
+
+* VS Code
+* Discord
+* Slack
+
+==================================================
+INSTALLER REQUIREMENTS
+======================
+
+Configure electron-builder to produce:
+
+* NSIS installer
+* Desktop shortcut
+* Start menu shortcut
+* Uninstaller
+
+Expected output:
+
+dist/
+release/
+MyApp Setup x.x.x.exe
+
+Users must install via setup executable.
+
+==================================================
+AUTO UPDATE REQUIREMENTS
+========================
+
+Use:
+
+electron-updater
+
+Install and configure properly.
+
+Application must:
+
+* Check for updates on startup
+* Check periodically every 6 hours
+* Detect newer versions
+* Download updates automatically
+* Notify user when update is available
+* Notify user when download completes
+* Offer restart/install option
+
+==================================================
+UPDATE PROVIDER
+===============
+
+Use GitHub Releases as update provider.
+
+Create all required configuration.
+
+Assume:
+
+Owner: YOUR_GITHUB_OWNER
+Repo: YOUR_GITHUB_REPO
+
+Put these values in configuration placeholders.
+
+==================================================
+MAIN PROCESS CHANGES
+====================
+
+Implement update service.
+
+Create:
+
+electron/services/updater.js
+
+Responsibilities:
+
+* initialize updater
+* register updater events
+* logging
+* periodic checks
+* restart install
+
+Handle events:
+
+checking-for-update
+update-available
+update-not-available
+download-progress
+update-downloaded
+error
+
+==================================================
+IPC COMMUNICATION
+=================
+
+Create IPC bridge between Electron and React.
+
+Expose:
+
+window.updater.checkForUpdates()
+
+window.updater.onChecking()
+
+window.updater.onAvailable()
+
+window.updater.onNotAvailable()
+
+window.updater.onProgress()
+
+window.updater.onDownloaded()
+
+window.updater.installUpdate()
+
+Use contextBridge.
+
+Do not expose unsafe Electron APIs.
+
+==================================================
+REACT UI
+========
+
+Create reusable update components.
+
+Suggested location:
+
+src/components/updater/
+
+Files:
+
+UpdateBanner.jsx
+UpdateModal.jsx
+UpdateProgress.jsx
+
+Features:
+
+* Update available message
+* Download percentage
+* Release version display
+* Restart now button
+* Remind later button
+
+==================================================
+VERSION MANAGEMENT
+==================
+
+Use package.json version.
+
+Example:
+
+1.0.0
+1.0.1
+1.1.0
+
+Document release workflow.
+
+==================================================
+GITHUB RELEASE WORKFLOW
+=======================
+
+Document exact process:
+
+1. Change package version
+2. Run build
+3. Generate installer
+4. Generate latest.yml
+5. Create GitHub release
+6. Upload artifacts
+7. Verify update
+
+==================================================
+BUILD CONFIGURATION
+===================
+
+Review and update:
+
+package.json
+
+Ensure:
+
+* main entry correct
+* build section correct
+* publish section correct
+* NSIS configuration correct
+* auto update configuration correct
+
+==================================================
+LOGGING
+=======
+
+Install and configure:
+
+electron-log
+
+Store update logs.
+
+Log:
+
+* update checks
+* downloads
+* failures
+* installation events
+
+==================================================
+ERROR HANDLING
+==============
+
+Implement robust handling for:
+
+* no internet
+* GitHub unavailable
+* corrupted update
+* failed download
+* failed install
+
+User should see meaningful messages.
+
+==================================================
+DELIVERABLES
+============
+
+Provide:
+
+1. Folder structure
+2. New files
+3. Updated files
+4. Complete code
+5. Package.json modifications
+6. Electron Builder configuration
+7. Electron Updater configuration
+8. React UI implementation
+9. Release process documentation
+10. Testing instructions
+
+Do not provide pseudo-code.
+
+Generate production-ready code.

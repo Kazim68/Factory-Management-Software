@@ -27,6 +27,7 @@ import { Label } from "./components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Badge } from "./components/ui/badge";
 import { Toaster } from "./components/ui/sonner";
+import { UpdaterRoot } from "./components/updater/UpdaterRoot";
 import {
   Select,
   SelectContent,
@@ -505,6 +506,7 @@ export default function App() {
   return (
     <I18nProvider>
       <AppShell />
+      <UpdaterRoot />
     </I18nProvider>
   );
 }
