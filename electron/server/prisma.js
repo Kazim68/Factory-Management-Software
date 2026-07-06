@@ -178,6 +178,32 @@ const ensureBillSchema = async (prisma) => {
   );
 };
 
+const COLUMN_ADDITIONS = {
+  LaborProfile: [
+    { name: "phone", definition: `"phone" TEXT` },
+    { name: "city", definition: `"city" TEXT` },
+    { name: "defaultRate", definition: `"defaultRate" DECIMAL` },
+  ],
+};
+
+const ensureColumnAdditions = async (prisma) => {
+  for (const [tableName, columns] of Object.entries(COLUMN_ADDITIONS)) {
+    const existing = await prisma.$queryRawUnsafe(
+      `PRAGMA table_info("${tableName}")`,
+    );
+
+    for (const column of columns) {
+      if (existing.some((row) => row.name === column.name)) {
+        continue;
+      }
+
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "${tableName}" ADD COLUMN ${column.definition}`,
+      );
+    }
+  }
+};
+
 const ensureSoftDeleteSchema = async (prisma) => {
   for (const tableName of SOFT_DELETE_TABLES) {
     const columns = await prisma.$queryRawUnsafe(
@@ -197,6 +223,7 @@ const ensureSoftDeleteSchema = async (prisma) => {
 export const initPrisma = async () => {
   ensurePackagedDatabase();
   await ensureBillSchema(basePrisma);
+  await ensureColumnAdditions(basePrisma);
   await ensureSoftDeleteSchema(basePrisma);
   await ensureSyncTables(basePrisma);
 };

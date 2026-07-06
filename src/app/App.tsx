@@ -187,8 +187,8 @@ class PageErrorBoundary extends Component<
 
 function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   const { language, setLanguage, t } = useI18n();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("admin123");
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();

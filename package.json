@@ -1,7 +1,7 @@
 {
   "name": "CrossX",
   "author": "DarkShadows",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Electron ERP App",
   "main": "electron/main.js",
   "type": "module",
@@ -11,6 +11,7 @@
     "build": "npm run generate:prisma && npm run generate:cloud-prisma && npm run generate:local-template-db && vite build && electron-builder",
     "build:win": "npm run generate:prisma && npm run generate:cloud-prisma && npm run generate:local-template-db && vite build && electron-builder --win --publish never",
     "release": "npm run generate:prisma && npm run generate:cloud-prisma && npm run generate:local-template-db && vite build && electron-builder --win --publish always",
+    "release:upload": "node scripts/publishRelease.mjs",
     "postinstall": "electron-builder install-app-deps",
     "generate:prisma": "prisma generate --schema prisma/schema.prisma",
     "generate:cloud-prisma": "prisma generate --schema database/prisma/schema.prisma",
