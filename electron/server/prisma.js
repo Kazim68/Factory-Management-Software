@@ -204,6 +204,59 @@ const ensureColumnAdditions = async (prisma) => {
   }
 };
 
+// Older databases have an obsolete `LaborProfile.paymentTypeId` column with a
+// NOT NULL foreign key that the current schema dropped. It blocks every write
+// (create profile, sync upsert). SQLite cannot DROP a column involved in a
+// foreign key, so rebuild the table to match the current schema. Idempotent:
+// runs only when the legacy column is present.
+const ensureLaborProfileSchema = async (prisma) => {
+  const columns = await prisma.$queryRawUnsafe(
+    `PRAGMA table_info("LaborProfile")`,
+  );
+
+  if (!columns.some((column) => column.name === "paymentTypeId")) {
+    return;
+  }
+
+  await prisma.$executeRawUnsafe(`PRAGMA foreign_keys=OFF`);
+  try {
+    await prisma.$transaction([
+      prisma.$executeRawUnsafe(`
+        CREATE TABLE "LaborProfile_new" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "name" TEXT NOT NULL,
+          "department" TEXT NOT NULL DEFAULT 'PRESSMAN',
+          "phone" TEXT,
+          "city" TEXT,
+          "defaultRate" DECIMAL,
+          "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+          "deletedAt" DATETIME,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL
+        )
+      `),
+      prisma.$executeRawUnsafe(`
+        INSERT INTO "LaborProfile_new"
+          ("id", "name", "department", "phone", "city", "defaultRate",
+           "status", "deletedAt", "createdAt", "updatedAt")
+        SELECT
+          "id", "name", "department", "phone", "city", "defaultRate",
+          "status", "deletedAt", "createdAt", "updatedAt"
+        FROM "LaborProfile"
+      `),
+      prisma.$executeRawUnsafe(`DROP TABLE "LaborProfile"`),
+      prisma.$executeRawUnsafe(
+        `ALTER TABLE "LaborProfile_new" RENAME TO "LaborProfile"`,
+      ),
+      prisma.$executeRawUnsafe(
+        `CREATE INDEX IF NOT EXISTS "LaborProfile_department_idx" ON "LaborProfile"("department")`,
+      ),
+    ]);
+  } finally {
+    await prisma.$executeRawUnsafe(`PRAGMA foreign_keys=ON`);
+  }
+};
+
 const ensureSoftDeleteSchema = async (prisma) => {
   for (const tableName of SOFT_DELETE_TABLES) {
     const columns = await prisma.$queryRawUnsafe(
@@ -224,6 +277,7 @@ export const initPrisma = async () => {
   ensurePackagedDatabase();
   await ensureBillSchema(basePrisma);
   await ensureColumnAdditions(basePrisma);
+  await ensureLaborProfileSchema(basePrisma);
   await ensureSoftDeleteSchema(basePrisma);
   await ensureSyncTables(basePrisma);
 };

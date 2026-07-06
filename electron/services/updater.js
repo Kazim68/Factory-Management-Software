@@ -39,6 +39,10 @@ const configureUpdater = () => {
   autoUpdater.autoInstallOnAppQuit = true;
   // Allow downgrade only if the user explicitly publishes a lower version.
   autoUpdater.allowDowngrade = false;
+  // The Windows installer is not code-signed (no certificate), so skip the
+  // publisher signature check. electron-updater treats a null return as
+  // "signature is valid". Remove this once a real code-signing cert is used.
+  autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
 };
 
 const registerEvents = () => {

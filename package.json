@@ -1,7 +1,7 @@
 {
   "name": "CrossX",
   "author": "DarkShadows",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Electron ERP App",
   "main": "electron/main.js",
   "type": "module",
