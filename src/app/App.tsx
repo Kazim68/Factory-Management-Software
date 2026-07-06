@@ -208,10 +208,10 @@ function SignIn({ onLogin }: { onLogin: (user: SessionUser) => void }) {
           <div className="flex items-start justify-between gap-4">
             <div>
               <CardTitle>{t("Sign In")}</CardTitle>
-              <p className="text-sm text-muted-foreground">
+              {/* <p className="text-sm text-muted-foreground">
                 {t("Use your credentials to continue. Default admin:")}{" "}
                 <b>admin / admin123</b>
-              </p>
+              </p> */}
             </div>
             <div className="w-[130px]">
               <Select
